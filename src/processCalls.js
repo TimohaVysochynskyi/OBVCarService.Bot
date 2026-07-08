@@ -1,6 +1,7 @@
 const { callExists, saveCall, upsertPending, markPendingFailed, getPendingCalls } = require('./store');
 const { listCallsForPeriod, getCallRecordUrl } = require('./binotel');
 const { transcribeAudio } = require('./transcribe');
+const { classifyCall } = require('./classifyCall');
 const { sendAlert } = require('./telegram');
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // stay safely under Binotel's 24h cap on this endpoint
@@ -15,6 +16,28 @@ function splitIntoChunks(start, end) {
     chunkStart = chunkEnd;
   }
   return chunks;
+}
+
+// Transcribes, classifies (success / weakest stage / score), and saves. Shared by both the
+// fresh-call path and the pending-retry path so classification always happens exactly once,
+// right when the transcript first becomes available.
+async function transcribeClassifyAndSave(call, managerName) {
+  const recordUrl = await getCallRecordUrl(call.generalCallId);
+  const transcript = await transcribeAudio(recordUrl);
+  const classification = await classifyCall(transcript);
+
+  await saveCall({
+    generalCallId: call.generalCallId,
+    internalNumber: call.internalNumber,
+    managerName,
+    callType: call.callType,
+    startTime: call.startTime,
+    durationSec: call.durationSec,
+    transcript,
+    isSuccess: classification.isSuccess,
+    weakestStage: classification.weakestStage,
+    communicationScore: classification.communicationScore,
+  });
 }
 
 // One attempt at turning a discovered call into a saved transcript. Never throws - on
@@ -35,21 +58,8 @@ async function processOneCall(call) {
   }
 
   try {
-    console.log(`[processCalls]   fetching recording URL for ${call.generalCallId}...`);
-    const recordUrl = await getCallRecordUrl(call.generalCallId);
-
-    console.log(`[processCalls]   transcribing ${call.generalCallId}...`);
-    const transcript = await transcribeAudio(recordUrl);
-
-    await saveCall({
-      generalCallId: call.generalCallId,
-      internalNumber: call.internalNumber,
-      managerName,
-      callType: call.callType,
-      startTime: call.startTime,
-      durationSec: call.durationSec,
-      transcript,
-    });
+    console.log(`[processCalls]   processing ${call.generalCallId}...`);
+    await transcribeClassifyAndSave(call, managerName);
     console.log(`[processCalls]   done: ${call.generalCallId}`);
   } catch (err) {
     console.error(`[processCalls]   FAILED ${call.generalCallId}: ${err.message}`);
@@ -98,19 +108,8 @@ async function retryPendingCalls() {
     }
 
     try {
-      console.log(`[processCalls]   retrying record fetch for ${call.generalCallId} (attempt ${call.attempts + 1})...`);
-      const recordUrl = await getCallRecordUrl(call.generalCallId);
-      const transcript = await transcribeAudio(recordUrl);
-
-      await saveCall({
-        generalCallId: call.generalCallId,
-        internalNumber: call.internalNumber,
-        managerName: call.managerName,
-        callType: call.callType,
-        startTime: call.startTime,
-        durationSec: call.durationSec,
-        transcript,
-      });
+      console.log(`[processCalls]   retrying ${call.generalCallId} (attempt ${call.attempts + 1})...`);
+      await transcribeClassifyAndSave(call, call.managerName);
       console.log(`[processCalls]   pending call recovered: ${call.generalCallId}`);
     } catch (err) {
       console.error(`[processCalls]   pending retry failed for ${call.generalCallId}: ${err.message}`);

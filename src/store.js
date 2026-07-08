@@ -16,8 +16,15 @@ async function migrate() {
       start_time TIMESTAMPTZ,
       duration_sec INTEGER,
       transcript TEXT,
+      is_success BOOLEAN,
+      weakest_stage TEXT,
+      communication_score INTEGER,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS is_success BOOLEAN;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS weakest_stage TEXT;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS communication_score INTEGER;
 
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
@@ -46,12 +53,40 @@ async function callExists(generalCallId) {
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, call_type, start_time, duration_sec, transcript)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, call_type, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
      ON CONFLICT (general_call_id) DO NOTHING`,
-    [call.generalCallId, call.internalNumber, call.managerName, call.callType, call.startTime, call.durationSec, call.transcript]
+    [
+      call.generalCallId,
+      call.internalNumber,
+      call.managerName,
+      call.callType,
+      call.startTime,
+      call.durationSec,
+      call.transcript,
+      call.isSuccess,
+      call.weakestStage,
+      call.communicationScore,
+    ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
+}
+
+async function getDailyStatsByManager(start, end) {
+  const { rows } = await pool.query(
+    `SELECT
+       manager_name AS "managerName",
+       COUNT(*) AS "callCount",
+       COUNT(*) FILTER (WHERE is_success) AS "successCount",
+       ROUND(AVG(communication_score)::numeric, 1) AS "avgScore",
+       MODE() WITHIN GROUP (ORDER BY weakest_stage) AS "topWeakStage"
+     FROM calls
+     WHERE start_time >= $1 AND start_time < $2 AND transcript IS NOT NULL AND transcript <> ''
+     GROUP BY manager_name
+     ORDER BY manager_name`,
+    [start, end]
+  );
+  return rows;
 }
 
 async function getTranscriptsInRange(start, end) {
@@ -114,12 +149,25 @@ async function setCheckpoint(date) {
   await setState('last_polled_until', date.toISOString());
 }
 
-async function getLastReportDate() {
-  return getState('last_report_date');
+// "Was the 12:00 (or 19:00, etc.) slot already sent today?" - keyed by "YYYY-MM-DD-HH" so
+// multiple slots per day don't block each other.
+async function getLastReportSlot() {
+  return getState('last_report_slot');
 }
 
-async function setLastReportDate(dateStr) {
-  await setState('last_report_date', dateStr);
+async function setLastReportSlot(slotKey) {
+  await setState('last_report_slot', slotKey);
+}
+
+// End boundary of the last successfully sent report's period - the next report starts
+// exactly there, so back-to-back reports never overlap or leave a gap.
+async function getLastReportUntil() {
+  const value = await getState('last_report_until');
+  return value ? new Date(value) : null;
+}
+
+async function setLastReportUntil(date) {
+  await setState('last_report_until', date.toISOString());
 }
 
 module.exports = {
@@ -127,11 +175,14 @@ module.exports = {
   callExists,
   saveCall,
   getTranscriptsInRange,
+  getDailyStatsByManager,
   upsertPending,
   markPendingFailed,
   getPendingCalls,
   getCheckpoint,
   setCheckpoint,
-  getLastReportDate,
-  setLastReportDate,
+  getLastReportSlot,
+  setLastReportSlot,
+  getLastReportUntil,
+  setLastReportUntil,
 };

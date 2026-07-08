@@ -1,8 +1,9 @@
-const { getTranscriptsInRange } = require('./store');
+const { getTranscriptsInRange, getDailyStatsByManager } = require('./store');
 const { generateManagerReport } = require('./analyze');
 const { sendDocument, sendAlert } = require('./telegram');
-const { previousKyivDayRange, formatDateStr } = require('./time');
+const { previousKyivDayRange, formatKyivDateTime, kyivDateParts } = require('./time');
 const { generateReportPdf } = require('./pdfReport');
+const { appendDailyStats } = require('./sheetsSync');
 
 function groupByManager(rows) {
   const groups = new Map();
@@ -14,12 +15,13 @@ function groupByManager(rows) {
   return groups;
 }
 
-// Defaults to the previous full calendar day in Kyiv time - what "report for the last day"
-// means when this is triggered once a day at a fixed local hour. Pass an explicit range
-// (e.g. from manual testing) to report on something else.
+// Defaults to the previous full calendar day in Kyiv time (used by the local `npm run
+// report` manual test). The real scheduled path (pollNewCalls.js) always passes an explicit
+// range covering "since the previous report", which may be a partial day.
 async function generateDailyReport(range) {
-  const { start, end, dateStr } = range || previousKyivDayRange();
-  const periodLabel = formatDateStr(dateStr);
+  const { start, end } = range || previousKyivDayRange();
+  const periodLabel = `${formatKyivDateTime(start)} – ${formatKyivDateTime(end)}`;
+  const fileDateStr = kyivDateParts(end).dateStr;
 
   console.log(`[report] collecting transcripts for ${start.toISOString()} -> ${end.toISOString()}`);
   const rows = await getTranscriptsInRange(start, end);
@@ -54,11 +56,21 @@ async function generateDailyReport(range) {
   try {
     const pdfBuffer = await generateReportPdf(managerReports, { periodLabel });
     const caption = `📊 Звіт аналізу дзвінків за ${periodLabel}\nАвтоматично згенеровано з транскриптів розмов менеджерів (${managerReports.length} менеджер(и), ${rows.length} дзвінків)`;
-    await sendDocument(pdfBuffer, `zvit-${dateStr}.pdf`, caption);
+    await sendDocument(pdfBuffer, `zvit-${fileDateStr}-${kyivDateParts(end).hour}h.pdf`, caption);
     console.log('[report] PDF report sent');
   } catch (err) {
     console.error(`[report] FAILED to build/send PDF: ${err.message}`);
     await sendAlert(`Не вдалося сформувати або надіслати PDF-звіт за ${periodLabel}: ${err.message}`).catch(
+      (e) => console.error(`[report] failed to send alert: ${e.message}`)
+    );
+  }
+
+  try {
+    const statsRows = await getDailyStatsByManager(start, end);
+    await appendDailyStats(fileDateStr, statsRows);
+  } catch (err) {
+    console.error(`[report] FAILED to sync stats to Google Sheets: ${err.message}`);
+    await sendAlert(`Не вдалося записати статистику в Google Sheets за ${periodLabel}: ${err.message}`).catch(
       (e) => console.error(`[report] failed to send alert: ${e.message}`)
     );
   }

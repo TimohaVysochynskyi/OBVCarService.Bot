@@ -52,4 +52,25 @@ function formatDateStr(dateStr) {
   return `${day}.${month}.${year}`;
 }
 
-module.exports = { kyivDateParts, previousKyivDayRange, formatDateStr };
+// e.g. "08.07.2026 12:00"
+function formatKyivDateTime(date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: TIMEZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date);
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]));
+  return `${map.day}.${map.month}.${map.year} ${map.hour}:${map.minute}`;
+}
+
+module.exports = {
+  kyivDateParts,
+  kyivMidnightUtc,
+  previousKyivDayRange,
+  formatDateStr,
+  formatKyivDateTime,
+};
