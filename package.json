@@ -1,5 +1,5 @@
 {
-  "name": "OBVCarsService.Bot",
+  "name": "OBVCarService.Bot",
   "version": "1.0.0",
   "description": "Polls Binotel for new calls, transcribes them, classifies each call and attributes it to a manager, and stores everything in Postgres for a separate reporting bot to consume",
   "main": "src/jobs/index.js",

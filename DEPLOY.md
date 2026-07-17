@@ -31,8 +31,8 @@ node -v   # має бути v20.x
 
 ```bash
 cd ~
-git clone https://github.com/TimohaVysochynskyi/BinotelCallAnalyzer.git
-cd BinotelCallAnalyzer
+git clone https://github.com/TimohaVysochynskyi/OBVCarService.Bot.git
+cd OBVCarService.Bot
 npm install --omit=dev
 ```
 
@@ -100,7 +100,7 @@ pm2 logs obv-poller --lines 30   # [poll], [binotel], [processCalls]
 ## Оновлення коду
 
 ```bash
-cd ~/BinotelCallAnalyzer
+cd ~/OBVCarService.Bot
 git pull
 npm install --omit=dev
 pm2 reload ecosystem.config.cjs
