@@ -1,12 +1,9 @@
-import { InlineKeyboard } from 'grammy';
+import { InlineKeyboard, Keyboard } from 'grammy';
 import { getOperators, getOperatorStats, listOperatorNotes } from '../core/store.js';
 import { operatorListKeyboard, periodKeyboard, operatorLabel } from './keyboards.js';
+import { displayName } from './operators.js';
 import { periodRange, formatKyiv } from './time.js';
-import { sendLong } from './ui.js';
-
-async function safeEdit(ctx, text, keyboard) {
-  await ctx.editMessageText(text, { parse_mode: 'Markdown', reply_markup: keyboard }).catch(() => {});
-}
+import { sendLong, showScreen } from './ui.js';
 
 // Content for the "choose a manager" screen - reused by the inline button (edits the message)
 // and by the /stats command and the quick-keyboard button (send a new message).
@@ -22,13 +19,13 @@ function registerStats(bot) {
   bot.callbackQuery('stat:pick', async (ctx) => {
     const { text, kb } = await statsPicker();
     await ctx.answerCallbackQuery();
-    await safeEdit(ctx, text, kb);
+    await showScreen(ctx, text, kb);
   });
 
   bot.callbackQuery(/^stat:op:(.+)$/, async (ctx) => {
     const name = ctx.match[1];
     await ctx.answerCallbackQuery();
-    await safeEdit(ctx, `${operatorLabel(name)} — оберіть період:`, periodKeyboard((p) => `stat:go:${p}:${name}`, 'stat:pick'));
+    await showScreen(ctx, `${operatorLabel(name)} — оберіть період:`, periodKeyboard((p) => `stat:go:${p}:${name}`, 'stat:pick'));
   });
 
   bot.callbackQuery(/^stat:go:(day|week|month|quarter):(.+)$/, async (ctx) => {
@@ -50,7 +47,7 @@ function registerStats(bot) {
       .row()
       .text('« Періоди', `stat:op:${name}`)
       .text('« Меню', 'menu');
-    await safeEdit(ctx, text, kb);
+    await showScreen(ctx, text, kb);
     await ctx.answerCallbackQuery();
   });
 
@@ -58,7 +55,7 @@ function registerStats(bot) {
     const name = ctx.match[1];
     ctx.session.awaiting = { type: 'note', operator: name };
     await ctx.answerCallbackQuery();
-    await ctx.reply(`📝 Надішліть текст нотатки для *${name}* одним повідомленням.`, { parse_mode: 'Markdown' });
+    await ctx.reply(`📝 Надішліть текст нотатки для ${displayName(name)} одним повідомленням.`);
   });
 
   bot.callbackQuery(/^note:list:(.+)$/, async (ctx) => {
@@ -66,16 +63,79 @@ function registerStats(bot) {
     const notes = await listOperatorNotes(name, 10);
     await ctx.answerCallbackQuery();
     if (!notes.length) {
-      await ctx.reply(`Нотаток для ${name} ще немає.`);
+      await ctx.reply(`Нотаток для ${displayName(name)} ще немає.`);
       return;
     }
     const text =
-      `🗒 Нотатки — *${name}*\n\n` +
+      `🗒 Нотатки — *${displayName(name)}*\n\n` +
       notes
         .map((n) => `• ${formatKyiv(new Date(n.createdAt))}${n.author ? ` (${n.author})` : ''}\n${n.note}`)
         .join('\n\n');
     await sendLong(ctx.api, ctx.chat.id, text, { parseMode: 'Markdown' });
   });
+
+  registerMyReport(bot);
 }
 
-export { registerStats, statsPicker };
+// --- Manager self-report ("Мій звіт") -------------------------------------------------------
+// A manager sees stats about THEMSELVES only, plus their phone number. Their identity comes from
+// bot_users.operator_name (linked by the director when adding them), so it naturally includes any
+// shared-handset calls that were attributed to that same name.
+
+// Shared by the "📊 Мій звіт" button (me:pick) and the /myreport command.
+async function openMyReport(ctx) {
+  ctx.session.awaiting = null;
+  if (!ctx.botUser?.operatorName) {
+    await ctx.reply('Ваш акаунт ще не звʼязано з оператором. Зверніться до директора, щоб він привʼязав вас.');
+    return;
+  }
+  await showScreen(ctx, '📊 Мій звіт — оберіть період:', periodKeyboard((p) => `me:go:${p}`, 'menu'));
+}
+
+function registerMyReport(bot) {
+  bot.callbackQuery('me:pick', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await openMyReport(ctx);
+  });
+
+  bot.callbackQuery(/^me:go:(day|week|month|quarter)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    const name = ctx.botUser?.operatorName;
+    if (!name) {
+      await ctx.reply('Ваш акаунт ще не звʼязано з оператором. Зверніться до директора.');
+      return;
+    }
+    const period = ctx.match[1];
+    const { start, end, label } = periodRange(period);
+    const s = await getOperatorStats(name, start, end);
+    const rate = s.callCount ? Math.round((s.successCount / s.callCount) * 100) : 0;
+    const phone = ctx.botUser?.phone ? `+${ctx.botUser.phone}` : 'не збережено';
+    const text =
+      `📊 *Мій звіт* — ${label}\n` +
+      `_${formatKyiv(start)} – ${formatKyiv(end)}_\n\n` +
+      `Оператор: *${displayName(name)}*\n` +
+      `Телефон: ${phone}\n\n` +
+      `Дзвінків: *${s.callCount}*\n` +
+      `Успішних: *${s.successCount}* (${rate}%)\n` +
+      `Середній бал: *${s.avgScore ?? '—'}*\n` +
+      `Найчастіший слабкий етап: *${s.topWeakStage ?? '—'}*`;
+    const kb = new InlineKeyboard()
+      .text('☎️ Оновити мій номер', 'me:phone')
+      .row()
+      .text('« Період', 'me:pick')
+      .text('« Меню', 'menu');
+    await showScreen(ctx, text, kb);
+  });
+
+  // Let a manager store their own phone (request_users doesn't return a phone, so a manager added
+  // from contacts has none until they share it here).
+  bot.callbackQuery('me:phone', async (ctx) => {
+    await ctx.answerCallbackQuery();
+    ctx.session.awaiting = { type: 'save_phone' };
+    await ctx.reply('Натисніть кнопку нижче, щоб зберегти свій номер телефону.', {
+      reply_markup: new Keyboard().requestContact('📱 Поділитися моїм номером').row().text('✖️ Скасувати').resized().oneTime(),
+    });
+  });
+}
+
+export { registerStats, statsPicker, openMyReport };

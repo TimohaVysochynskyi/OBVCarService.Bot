@@ -11,7 +11,7 @@ import {
   getKbDoc,
   deleteKbDoc,
 } from '../core/store.js';
-import { sendLong } from './ui.js';
+import { sendLong, withProgress, showScreen } from './ui.js';
 
 const EMBED_MODEL = () => process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
 const CHAT_MODEL = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
@@ -158,17 +158,23 @@ async function ingestDocument(ctx) {
     return;
   }
 
-  await ctx.reply(`⏳ Обробляю "${name}"…`);
+  await ctx.reply(`⏳ Обробляю "${name}"… Для великих файлів це може зайняти до хвилини.`);
   try {
-    const buffer = await downloadTelegramFile(ctx, doc.file_id);
-    const text = await extractText(buffer, name);
-    if (!text || !text.trim()) {
+    // Download + text extraction + chunking + embeddings can take ~30s; keep a "typing"
+    // indicator alive for the whole time so the chat doesn't look frozen.
+    const result = await withProgress(ctx.api, ctx.chat.id, 'typing', async () => {
+      const buffer = await downloadTelegramFile(ctx, doc.file_id);
+      const text = await extractText(buffer, name);
+      if (!text || !text.trim()) return null;
+      const author = ctx.from.username ? `@${ctx.from.username}` : String(ctx.from.id);
+      const { chunkCount } = await ingestText(name, text, author, doc.file_id, doc.mime_type);
+      return { chunkCount, textLength: text.length };
+    });
+    if (!result) {
       await ctx.reply(`⚠️ З "${name}" не вдалося витягти текст. Якщо це сканований PDF/зображення — потрібне розпізнавання (OCR), скажіть.`);
       return;
     }
-    const author = ctx.from.username ? `@${ctx.from.username}` : String(ctx.from.id);
-    const { chunkCount } = await ingestText(name, text, author, doc.file_id, doc.mime_type);
-    await ctx.reply(`✅ Додано «${name}» — ${chunkCount} фрагм. (~${text.length} симв.). Тепер можна ставити питання.`);
+    await ctx.reply(`✅ Додано «${name}» — ${result.chunkCount} фрагм. (~${result.textLength} симв.). Тепер можна ставити питання.`);
   } catch (err) {
     console.error(`[kb] ingest "${name}" failed: ${err.message}`);
     await ctx.reply(`❌ Не вдалося обробити "${name}": ${err.message}`);
@@ -206,12 +212,10 @@ async function fileDetailContent(id) {
   return { text: `📄 «${d.filename}»\nФрагментів: ${d.chunkCount}`, kb };
 }
 
-// Edit the current message to plain-text content; fall back to a fresh message if the edit
-// can't be applied (e.g. the message is gone).
+// KB screens render as plain text (filenames contain _ etc. that break Markdown). showScreen
+// keeps the active screen at the bottom / in focus (edit-in-place when newest, else resend).
 async function showPlain(ctx, text, kb) {
-  await ctx.editMessageText(text, { reply_markup: kb }).catch(async () => {
-    await ctx.reply(text, { reply_markup: kb }).catch(() => {});
-  });
+  await showScreen(ctx, text, kb, { parseMode: null });
 }
 
 // Prompt the user to type a question (shared by the button, command and quick keyboard).
@@ -225,7 +229,18 @@ async function promptQuestion(ctx, kbState) {
     return;
   }
   ctx.session.awaiting = { type: 'kb_question' };
-  await ctx.reply('❓ Напишіть ваше питання одним повідомленням.');
+  await ctx.reply('📚 База знань. Напишіть ваше питання одним повідомленням.');
+}
+
+// Open the files list as a NEW message (used by the /files command so the native Menu button
+// matches the inline menu; the kb:menu callback edits the current message instead).
+async function openFiles(ctx, kbState) {
+  if (!kbState.ready) {
+    await ctx.reply('База знань тимчасово недоступна (немає pgvector).');
+    return;
+  }
+  const { text, kb } = await filesListContent();
+  await showPlain(ctx, text, kb);
 }
 
 function registerKnowledgeBase(bot, kbState) {
@@ -311,4 +326,4 @@ function registerKnowledgeBase(bot, kbState) {
   });
 }
 
-export { registerKnowledgeBase, answerQuestion, promptQuestion, ingestText, extractText };
+export { registerKnowledgeBase, answerQuestion, promptQuestion, openFiles, ingestText, extractText };

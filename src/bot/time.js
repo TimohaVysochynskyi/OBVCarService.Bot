@@ -100,4 +100,11 @@ function formatKyiv(date) {
   return `${pad(p.day)}.${pad(p.month)}.${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
 }
 
-export { kyivParts, periodRange, startOfDay, formatKyiv };
+// "01.02.26" (dd.mm.yy) in Kyiv time — compact form for inline-button labels.
+function shortDate(date) {
+  const p = kyivParts(new Date(date));
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(p.day)}.${pad(p.month)}.${String(p.year).slice(-2)}`;
+}
+
+export { kyivParts, periodRange, startOfDay, formatKyiv, shortDate };

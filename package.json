@@ -1,5 +1,5 @@
 {
-  "name": "binotel-call-analyzer",
+  "name": "OBVCarsService.Bot",
   "version": "1.0.0",
   "description": "Polls Binotel for new calls, transcribes them, classifies each call and attributes it to a manager, and stores everything in Postgres for a separate reporting bot to consume",
   "main": "src/jobs/index.js",
@@ -15,9 +15,11 @@
     "reattribute:shared": "node src/scripts/reattributeShared.js"
   },
   "dependencies": {
+    "dejavu-fonts-ttf": "^2.37.3",
     "dotenv": "^17.4.2",
     "grammy": "^1.44.0",
     "mammoth": "^1.12.0",
+    "pdfkit": "^0.19.1",
     "pg": "^8.21.0",
     "unpdf": "^1.6.2"
   },

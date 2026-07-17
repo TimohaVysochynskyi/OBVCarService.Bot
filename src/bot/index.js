@@ -1,12 +1,33 @@
 import 'dotenv/config';
 import { Bot, session } from 'grammy';
-import { migrate, migrateKb, addOperatorNote } from '../core/store.js';
-import { mainMenu, quickKeyboard, QUICK } from './keyboards.js';
-import { registerStats, statsPicker } from './stats.js';
+import {
+  migrate,
+  migrateKb,
+  addOperatorNote,
+  activatePendingByPhone,
+  setBotUserPhone,
+  normalizePhone,
+} from '../core/store.js';
+import { mainMenu } from './keyboards.js';
+import { registerStats, statsPicker, openMyReport } from './stats.js';
 import { registerArchive, archivePicker } from './archive.js';
-import { registerKnowledgeBase, answerQuestion, promptQuestion } from './kb.js';
+import { registerKnowledgeBase, answerQuestion, promptQuestion, openFiles } from './kb.js';
 import { sendManualReport, startScheduler } from './report.js';
-import { sendLong } from './ui.js';
+import { registerPrompt, openPromptMenu } from './prompt.js';
+import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
+import { setAnalyzePrompt } from './analyze.js';
+import { displayName } from './operators.js';
+import {
+  getUser,
+  canAccess,
+  featureOf,
+  isAdmin,
+  ROLES,
+  ROLE_LABELS,
+  invalidateRole,
+  seedDirectors,
+} from './access.js';
+import { sendLong, withProgress, showScreen, installMessageTracker } from './ui.js';
 
 // Knowledge base needs pgvector; migrateKb() at startup flips this on. Handlers degrade
 // gracefully when it's false.
@@ -20,125 +41,241 @@ if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is not set - put the token of the clean bot from @BotFather there');
 }
 
-// Owner-only allowlist; falls back to TELEGRAM_CHAT_ID (the owner/alert chat) so the owner has
-// access out of the box. Empty everywhere => nobody is allowed; the bot replies with the user
-// id so it can be added to BOT_ALLOWED_CHAT_IDS.
-const ALLOWED = new Set(
-  (process.env.BOT_ALLOWED_CHAT_IDS || process.env.TELEGRAM_CHAT_ID || '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-);
-
-const REPORT_CHAT_ID =
-  process.env.BOT_REPORT_CHAT_ID || process.env.TELEGRAM_CHAT_ID || [...ALLOWED][0] || null;
+// Scheduled reports still go to the owner/admin chat (env), independent of the role table.
+const REPORT_CHAT_ID = process.env.BOT_REPORT_CHAT_ID || process.env.TELEGRAM_CHAT_ID || null;
 
 const bot = new Bot(token);
+// Track outgoing message ids so showScreen knows whether a tapped menu is still at the bottom.
+installMessageTracker(bot);
 
-// --- Auth (runs first) ---------------------------------------------------------------------
+// Session first, so ctx.session is available to the auth middleware (self-claim / menus).
+bot.use(session({ initial: () => ({ awaiting: null, screenId: null }) }));
+
+const cancelKeyboard = () => ({ remove_keyboard: true });
+const isCancel = (t) => /^\s*(✖️|❌)?\s*скасувати\b/i.test(t || '');
+
+// --- Access control (role lookup + per-feature gate + self-claim) ---------------------------
 bot.use(async (ctx, next) => {
   const id = ctx.from?.id;
-  if (id && ALLOWED.has(String(id))) return next();
+  const user = await getUser(id);
 
-  const hint = ALLOWED.size === 0
-    ? `Список доступу порожній. Додайте ваш ID у BOT_ALLOWED_CHAT_IDS і перезапустіть бота.\nВаш ID: ${id ?? '—'}`
-    : `⛔ Немає доступу до цього бота.\nВаш ID: ${id ?? '—'}`;
-  if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: '⛔ Немає доступу', show_alert: true }).catch(() => {});
-  else await ctx.reply(hint).catch(() => {});
-  // do not call next() -> request stops here
+  if (user && user.status === 'active') {
+    ctx.botUser = user;
+    ctx.role = user.role;
+    const feature = featureOf(ctx);
+    if (feature && !canAccess(user.role, feature)) {
+      if (ctx.callbackQuery) await ctx.answerCallbackQuery({ text: '⛔ Немає доступу до цієї функції', show_alert: true }).catch(() => {});
+      else await ctx.reply('⛔ Ця функція недоступна для вашої ролі.').catch(() => {});
+      return;
+    }
+    return next();
+  }
+
+  // Unknown user. Allow self-claim: if they share THEIR OWN contact and a pending invite matches
+  // their phone, activate it. Otherwise deny and offer the share-contact button.
+  const contact = ctx.message?.contact;
+  if (contact && (contact.user_id == null || contact.user_id === id)) {
+    const activated = await activatePendingByPhone(contact.phone_number, {
+      telegramId: id,
+      username: ctx.from?.username,
+      displayName: [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || null,
+    });
+    if (activated) {
+      invalidateRole(id);
+      await ctx.reply(`✅ Доступ надано. Ваша роль: ${ROLE_LABELS[activated.role]}.`, { reply_markup: cancelKeyboard() });
+      await setCommandsForRole(ctx.api, id, activated.role);
+      await showScreen(ctx, 'Оберіть дію:', mainMenu(activated.role));
+      return;
+    }
+    await ctx.reply('Вашого номера немає серед запрошених. Зверніться до директора, щоб він вас додав.', {
+      reply_markup: cancelKeyboard(),
+    });
+    return;
+  }
+
+  if (ctx.callbackQuery) {
+    await ctx.answerCallbackQuery({ text: '⛔ Немає доступу', show_alert: true }).catch(() => {});
+  } else {
+    await ctx
+      .reply(
+        `⛔ Немає доступу до цього бота.\nВаш ID: ${id ?? '—'}\n\n` +
+          'Якщо ви співробітник — поділіться своїм номером кнопкою нижче, щоб увійти (директор має вас попередньо додати).',
+        { reply_markup: { keyboard: [[{ text: '📱 Поділитися номером', request_contact: true }]], resize_keyboard: true, one_time_keyboard: true } }
+      )
+      .catch(() => {});
+  }
 });
 
-bot.use(session({ initial: () => ({ awaiting: null }) }));
+// --- Per-role native command list -----------------------------------------------------------
+const CMD = {
+  menu: { command: 'menu', description: '☰ Головне меню' },
+  stats: { command: 'stats', description: '📊 Статистика менеджера' },
+  archive: { command: 'archive', description: '🗂 Архів розмов' },
+  ask: { command: 'ask', description: '📚 База знань' },
+  files: { command: 'files', description: '📁 Файли (база знань)' },
+  report: { command: 'report', description: '🔄 Звіт зараз' },
+  prompt: { command: 'prompt', description: '🧠 Промпт аналізу' },
+  roles: { command: 'roles', description: '👥 Ролі' },
+  myreport: { command: 'myreport', description: '📊 Мій звіт' },
+};
+
+function commandsForRole(role) {
+  if (isAdmin(role)) return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles];
+  if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
+  return [CMD.menu, CMD.ask]; // mechanic
+}
+
+async function setCommandsForRole(api, chatId, role) {
+  await api
+    .setMyCommands(commandsForRole(role), { scope: { type: 'chat', chat_id: chatId } })
+    .catch((e) => console.error(`[bot] setMyCommands(chat) failed: ${e.message}`));
+}
 
 // --- Main menu / navigation helpers --------------------------------------------------------
 async function openMenu(ctx) {
   ctx.session.awaiting = null;
-  // Re-assert the persistent quick keyboard, then show the inline menu.
-  await ctx.reply('☰ Головне меню:', { reply_markup: quickKeyboard() });
-  await ctx.reply('Оберіть дію:', { reply_markup: mainMenu() });
+  await setCommandsForRole(ctx.api, ctx.chat.id, ctx.role);
+  await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
 }
 
 async function openStats(ctx) {
   ctx.session.awaiting = null;
   const { text, kb } = await statsPicker();
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  await showScreen(ctx, text, kb);
 }
 
 async function openArchive(ctx) {
   ctx.session.awaiting = null;
   const { text, kb } = await archivePicker();
-  await ctx.reply(text, { parse_mode: 'Markdown', reply_markup: kb });
+  await showScreen(ctx, text, kb);
 }
 
 async function openAsk(ctx) {
   await promptQuestion(ctx, kbState);
 }
 
+async function openFilesMenu(ctx) {
+  ctx.session.awaiting = null;
+  await openFiles(ctx, kbState);
+}
+
+// Report is content, not a screen: after it, bring the menu back to the bottom (in focus).
+async function runReport(ctx) {
+  await sendManualReport(ctx.api, ctx.chat.id);
+  await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
+}
+
 // --- Commands (native "Menu" button next to the input lists these) -------------------------
-bot.command(['start', 'menu'], openMenu);
+bot.command('start', async (ctx) => {
+  // The persistent quick keyboard was removed; clear it from existing clients once, then menu.
+  await ctx.reply('Вітаю! Керування — кнопкою «Menu» біля поля вводу або в меню нижче.', {
+    reply_markup: { remove_keyboard: true },
+  });
+  await openMenu(ctx);
+});
+bot.command('menu', openMenu);
 bot.command('stats', openStats);
 bot.command('archive', openArchive);
 bot.command('ask', openAsk);
-bot.command('report', async (ctx) => {
-  await sendManualReport(ctx.api, ctx.chat.id);
-});
+bot.command('files', openFilesMenu);
+bot.command('prompt', openPromptMenu);
+bot.command('report', runReport);
+bot.command('roles', openRolesMenu);
+bot.command('myreport', openMyReport);
 
 // --- Inline callbacks ----------------------------------------------------------------------
 bot.callbackQuery('menu', async (ctx) => {
   ctx.session.awaiting = null;
-  await ctx.editMessageText('Оберіть дію:', { reply_markup: mainMenu() }).catch(() => {});
   await ctx.answerCallbackQuery();
+  await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
 });
 
 bot.callbackQuery('report:now', async (ctx) => {
   await ctx.answerCallbackQuery({ text: 'Генерую звіт…' });
-  await sendManualReport(ctx.api, ctx.chat.id);
+  await runReport(ctx);
 });
 
 // --- Feature modules -----------------------------------------------------------------------
 registerStats(bot);
 registerArchive(bot);
 registerKnowledgeBase(bot, kbState);
+registerPrompt(bot);
+registerRoles(bot);
 
-// --- Free-text input: quick-keyboard buttons first, then the "add note" step ---------------
+// A manager saving their own phone number (request_users doesn't return a phone). Runs after
+// roles.js's contact handler, which passes non-add contacts through via next().
+bot.on('message:contact', async (ctx) => {
+  const st = ctx.session.awaiting;
+  if (st?.type !== 'save_phone') return;
+  const c = ctx.message.contact;
+  if (c.user_id != null && c.user_id !== ctx.from.id) {
+    await ctx.reply('Поділіться, будь ласка, СВОЇМ номером.');
+    return;
+  }
+  await setBotUserPhone(ctx.from.id, c.phone_number);
+  invalidateRole(ctx.from.id);
+  ctx.session.awaiting = null;
+  await ctx.reply(`✅ Номер збережено: +${normalizePhone(c.phone_number)}.`, { reply_markup: { remove_keyboard: true } });
+  await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
+});
+
+// --- Free-text input: routed by the current "awaiting" step --------------------------------
 bot.on('message:text', async (ctx) => {
-  const text = ctx.message.text.trim();
+  const st = ctx.session.awaiting;
 
-  // Persistent quick-keyboard buttons send their label as text - route them (even mid-note).
-  if (text === QUICK.menu) return openMenu(ctx);
-  if (text === QUICK.stats) return openStats(ctx);
-  if (text === QUICK.archive) return openArchive(ctx);
-  if (text === QUICK.ask) return openAsk(ctx);
-  if (text === QUICK.report) {
+  if (st && isCancel(ctx.message.text)) {
     ctx.session.awaiting = null;
-    await sendManualReport(ctx.api, ctx.chat.id);
+    await ctx.reply('Скасовано.', { reply_markup: { remove_keyboard: true } });
+    await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
     return;
   }
 
-  const st = ctx.session.awaiting;
+  if (st?.type === 'role_add') {
+    await addByPhoneText(ctx, st.role);
+    return;
+  }
+
+  if (st?.type === 'save_phone') {
+    await ctx.reply('Скористайтеся кнопкою «📱 Поділитися моїм номером» нижче, або « Скасувати.');
+    return;
+  }
+
   if (st?.type === 'note') {
     const author = ctx.from.username ? `@${ctx.from.username}` : String(ctx.from.id);
     await addOperatorNote(st.operator, author, ctx.message.text);
     ctx.session.awaiting = null;
-    await ctx.reply(`✅ Нотатку збережено для ${st.operator}.`, { reply_markup: mainMenu() });
+    await ctx.reply(`✅ Нотатку збережено для ${displayName(st.operator)}.`, { reply_markup: mainMenu(ctx.role) });
+    return;
+  }
+
+  if (st?.type === 'prompt') {
+    await setAnalyzePrompt(ctx.message.text);
+    ctx.session.awaiting = null;
+    await ctx.reply('✅ Промпт оновлено — застосується до наступних аналізів і звітів.', { reply_markup: mainMenu(ctx.role) });
     return;
   }
 
   if (st?.type === 'kb_question') {
-    ctx.session.awaiting = null;
-    await ctx.replyWithChatAction('typing').catch(() => {});
+    // Stay in question mode so follow-up questions keep working. The user leaves by opening the
+    // menu (/menu or « Меню).
     try {
-      const answer = await answerQuestion(ctx.message.text);
+      const answer = await withProgress(
+        ctx.api,
+        ctx.chat.id,
+        'typing',
+        () => answerQuestion(ctx.message.text),
+        { notice: '⏳ Бот обробляє запит, це може зайняти деякий час…' }
+      );
       await sendLong(ctx.api, ctx.chat.id, answer);
     } catch (err) {
       console.error(`[bot] KB answer failed: ${err.message}`);
       await ctx.reply(`❌ Не вдалося відповісти: ${err.message}`);
     }
-    await ctx.reply('Ще питання? Напишіть його, або скористайтесь меню.', { reply_markup: quickKeyboard() });
+    await ctx.reply('Ще питання? Напишіть його наступним повідомленням, або відкрийте /menu, щоб вийти.');
     return;
   }
 
-  await ctx.reply('Скористайтеся меню нижче або кнопкою «☰ Меню».', { reply_markup: quickKeyboard() });
+  await ctx.reply('Скористайтеся кнопкою «Menu» біля поля вводу або командою /menu.');
 });
 
 bot.catch((err) => {
@@ -147,6 +284,9 @@ bot.catch((err) => {
 
 async function main() {
   await migrate();
+
+  const seeded = await seedDirectors();
+  console.log(`[bot] seeded ${seeded} director(s) from env`);
 
   // Knowledge base is optional - if pgvector isn't available, the rest of the bot still runs.
   try {
@@ -157,24 +297,23 @@ async function main() {
     console.error(`[bot] knowledge base DISABLED: ${err.message}`);
   }
 
-  // Native "Menu" button next to the input → lists these commands.
-  await bot.api.setMyCommands([
-    { command: 'menu', description: '☰ Головне меню' },
-    { command: 'stats', description: '📊 Статистика менеджера' },
-    { command: 'archive', description: '🗂 Архів розмов' },
-    { command: 'ask', description: '❓ Поставити питання (база знань)' },
-    { command: 'report', description: '🔄 Звіт зараз' },
-  ]).catch((e) => console.error(`[bot] setMyCommands failed: ${e.message}`));
-  await bot.api.setChatMenuButton({ menu_button: { type: 'commands' } }).catch((e) => console.error(`[bot] setChatMenuButton failed: ${e.message}`));
+  // Default command list (shown before a role-scoped list is set for a chat). Per-role lists are
+  // applied lazily via setCommandsForRole when a user opens the menu.
+  await bot.api
+    .setMyCommands([CMD.menu, CMD.ask])
+    .catch((e) => console.error(`[bot] setMyCommands failed: ${e.message}`));
+  await bot.api
+    .setChatMenuButton({ menu_button: { type: 'commands' } })
+    .catch((e) => console.error(`[bot] setChatMenuButton failed: ${e.message}`));
 
   if (REPORT_CHAT_ID) {
     startScheduler(bot.api, REPORT_CHAT_ID);
   } else {
-    console.warn('[bot] no BOT_REPORT_CHAT_ID / allowlist set - scheduled reports are OFF until configured');
+    console.warn('[bot] no BOT_REPORT_CHAT_ID / TELEGRAM_CHAT_ID set - scheduled reports are OFF until configured');
   }
 
   await bot.start({
-    onStart: (info) => console.log(`[bot] @${info.username} started (long polling), allowlist: ${ALLOWED.size} id(s)`),
+    onStart: (info) => console.log(`[bot] @${info.username} started (long polling)`),
   });
 }
 

@@ -1,58 +1,62 @@
-import { InlineKeyboard, Keyboard } from 'grammy';
-
-// Persistent reply keyboard shown above the input at all times, so the menu never gets "lost"
-// while navigating deep into the archive/audio. Buttons send their label as a text message,
-// which the bot routes (see index.js message:text handler). Labels are also the nav keys.
-const QUICK = {
-  stats: '📊 Статистика',
-  archive: '🗂 Архів',
-  ask: '❓ Питання',
-  report: '🔄 Звіт зараз',
-  menu: '☰ Меню',
-};
-
-function quickKeyboard() {
-  return new Keyboard()
-    .text(QUICK.stats)
-    .text(QUICK.archive)
-    .row()
-    .text(QUICK.ask)
-    .text(QUICK.report)
-    .row()
-    .text(QUICK.menu)
-    .resized()
-    .persistent();
-}
+import { InlineKeyboard } from "grammy";
+import { shortDate } from "./time.js";
+import { displayName, hasAlias } from "./operators.js";
+import { isAdmin, ROLES } from "./access.js";
 
 const PERIODS = [
-  ['day', 'День'],
-  ['week', 'Тиждень'],
-  ['month', 'Місяць'],
-  ['quarter', 'Квартал'],
+  ["day", "День"],
+  ["week", "Тиждень"],
+  ["month", "Місяць"],
+  ["quarter", "Квартал"],
 ];
 
-function mainMenu() {
-  return new InlineKeyboard()
-    .text('📊 Статистика менеджера', 'stat:pick')
-    .row()
-    .text('🗂 Архів розмов', 'arch:pick')
-    .row()
-    .text('❓ Поставити питання', 'kb:ask')
-    .text('📚 Файли', 'kb:menu')
-    .row()
-    .text('🔄 Звіт зараз', 'report:now');
+// The main menu is role-aware: admins (director/marketer) see everything, a manager sees their
+// own report + the knowledge base, a mechanic sees only the knowledge base.
+function mainMenu(role) {
+  const kb = new InlineKeyboard();
+  if (isAdmin(role)) {
+    kb.text("📊 Статистика менеджера", "stat:pick")
+      .row()
+      .text("🗂 Архів розмов", "arch:pick")
+      .row()
+      .text("📚 База знань", "kb:ask")
+      .text("📁 Файли", "kb:menu")
+      .row()
+      .text("🔄 Звіт зараз", "report:now")
+      .row()
+      .text("👥 Ролі", "roles");
+    return kb;
+  }
+  if (role === ROLES.MANAGER) {
+    kb.text("📊 Мій звіт", "me:pick").row().text("📚 База знань", "kb:ask");
+    return kb;
+  }
+  // mechanic (and any other limited role)
+  kb.text("📚 База знань", "kb:ask");
+  return kb;
 }
 
 function operatorLabel(name) {
+  // An aliased number (e.g. the director's 0674738200 → "Богдан") is a named person, not a
+  // shared handset, so it gets the 👤 label with the friendly name.
+  if (hasAlias(name)) return `👤 ${displayName(name)}`;
   return /^[0-9]+$/.test(name) ? `☎️ Спільний ${name}` : `👤 ${name}`;
 }
 
-// operators: [{ name, n }]. prefix is 'stat' or 'arch'; the operator name is the trailing
-// segment of the callback data so it can contain anything except a colon (first names don't).
-function operatorListKeyboard(operators, prefix) {
+// operators: [{ name, n, firstCall? }]. prefix is 'stat' or 'arch'; the operator name is the
+// trailing segment of the callback data so it can contain anything except a colon (first names
+// don't). With { showDates: true } (Archive) each label gains the operator's active period —
+// from their first processed call (proxy for when Binotel first saw the name) to today, e.g.
+// "👤 Роман (175) — 01.02.25-01.02.26".
+function operatorListKeyboard(operators, prefix, { showDates = false } = {}) {
   const kb = new InlineKeyboard();
-  for (const o of operators) kb.text(`${operatorLabel(o.name)} (${o.n})`, `${prefix}:op:${o.name}`).row();
-  kb.text('« Меню', 'menu');
+  const today = new Date();
+  for (const o of operators) {
+    let label = `${operatorLabel(o.name)} (${o.n})`;
+    if (showDates && o.firstCall) label += ` — ${shortDate(o.firstCall)}-${shortDate(today)}`;
+    kb.text(label, `${prefix}:op:${o.name}`).row();
+  }
+  kb.text("« Меню", "menu");
   return kb;
 }
 
@@ -60,8 +64,8 @@ function operatorListKeyboard(operators, prefix) {
 function periodKeyboard(makeData, backData) {
   const kb = new InlineKeyboard();
   for (const [p, label] of PERIODS) kb.text(label, makeData(p));
-  kb.row().text('« Назад', backData);
+  kb.row().text("« Назад", backData);
   return kb;
 }
 
-export { mainMenu, operatorListKeyboard, periodKeyboard, operatorLabel, quickKeyboard, QUICK, PERIODS };
+export { mainMenu, operatorListKeyboard, periodKeyboard, operatorLabel, PERIODS };

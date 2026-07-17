@@ -1,3 +1,4 @@
+import { InputFile } from 'grammy';
 import {
   getCallsWithTranscriptsInRange,
   getReportSlot,
@@ -6,8 +7,10 @@ import {
   setReportUntil,
 } from '../core/store.js';
 import { analyzeManager } from './analyze.js';
-import { sendLong } from './ui.js';
-import { kyivParts, startOfDay, formatKyiv } from './time.js';
+import { withProgress } from './ui.js';
+import { generateReportPdf } from './pdfReport.js';
+import { displayName } from './operators.js';
+import { kyivParts, startOfDay, formatKyiv, shortDate } from './time.js';
 
 const REPORT_TIMES = (process.env.BOT_REPORT_TIMES || '13:00,19:30')
   .split(',')
@@ -24,31 +27,52 @@ function groupByManager(rows) {
   return [...groups.values()];
 }
 
-// Returns the assembled report text, or null when there were no processed calls in the period.
+// Builds the per-manager analyses for [start, end). Returns { managerReports, totalCalls,
+// periodLabel } or null when there were no processed calls in the period. managerReports is
+// shaped for pdfReport.js (one entry -> one page). Manager names are aliased for display
+// (displayName), so e.g. the director's number shows as "Богдан" in the PDF too.
 async function buildReport(start, end) {
   const rows = await getCallsWithTranscriptsInRange(start, end);
   if (rows.length === 0) return null;
 
   const groups = groupByManager(rows);
-  const parts = [];
+  const managerReports = [];
   for (const g of groups) {
+    const name = displayName(g.name);
     try {
       const { stats, summary } = await analyzeManager(g.name, g.calls);
       const rate = stats.callCount ? Math.round((stats.successCount / stats.callCount) * 100) : 0;
-      parts.push(`👤 *${g.name}* — ${stats.callCount} дзв., успішність ${rate}%, бал ${stats.avgScore ?? '—'}\n${summary}`);
+      managerReports.push({
+        managerName: name,
+        subtitle: `${stats.callCount} дзв. · успішність ${rate}% · середній бал ${stats.avgScore ?? '—'}`,
+        reportText: summary,
+      });
     } catch (err) {
-      parts.push(`👤 *${g.name}* — не вдалося згенерувати аналіз: ${err.message}`);
+      managerReports.push({
+        managerName: name,
+        subtitle: '',
+        reportText: `Не вдалося згенерувати аналіз: ${err.message}`,
+      });
     }
   }
 
-  const header = `📊 *Звіт за період*\n${formatKyiv(start)} – ${formatKyiv(end)}\nМенеджерів: ${groups.length}, дзвінків: ${rows.length}`;
-  return `${header}\n\n${parts.join('\n\n———\n\n')}`;
+  const periodLabel = `${formatKyiv(start)} – ${formatKyiv(end)}`;
+  return { managerReports, totalCalls: rows.length, periodLabel };
 }
 
+// Generates the PDF report and sends it as a document. Used by BOTH the scheduled reports
+// (13:00 / 19:30) and the manual "Звіт зараз", so the format is identical everywhere.
 async function sendReport(api, chatId, start, end) {
-  const text = await buildReport(start, end);
-  if (!text) return { sent: false, empty: true };
-  await sendLong(api, chatId, text, { parseMode: 'Markdown' });
+  const built = await buildReport(start, end);
+  if (!built) return { sent: false, empty: true };
+
+  const { managerReports, totalCalls, periodLabel } = built;
+  const pdf = await generateReportPdf(managerReports, { periodLabel });
+  const filename = `zvit_${shortDate(start).replace(/\./g, '-')}_${shortDate(end).replace(/\./g, '-')}.pdf`;
+  const caption =
+    `📊 Звіт за період\n${periodLabel}\n` +
+    `Менеджерів: ${managerReports.length}, дзвінків: ${totalCalls}`;
+  await api.sendDocument(chatId, new InputFile(pdf, filename), { caption });
   return { sent: true };
 }
 
@@ -56,7 +80,15 @@ async function sendReport(api, chatId, start, end) {
 // disturb the next automatic slot.
 async function sendManualReport(api, chatId) {
   const end = new Date();
-  const res = await sendReport(api, chatId, startOfDay(end), end);
+  // Report generation calls OpenAI once per manager then renders a PDF (15-40s total); keep an
+  // "надсилає документ" indicator alive so the chat doesn't look frozen while it works.
+  const res = await withProgress(
+    api,
+    chatId,
+    'upload_document',
+    () => sendReport(api, chatId, startOfDay(end), end),
+    { notice: '⏳ Бот формує PDF-звіт, це може зайняти деякий час…' }
+  );
   if (res.empty) await api.sendMessage(chatId, 'За сьогодні ще немає оброблених дзвінків для звіту.');
   return res;
 }

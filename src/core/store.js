@@ -57,7 +57,133 @@ async function migrate() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE manager_notes ADD COLUMN IF NOT EXISTS operator_name TEXT;
+
+    -- One-time cleanup of pre-refactor artifacts. Binotel is now the source of truth for
+    -- operators (see identifyManager / resolveManagerName), so the local managers table and
+    -- the manager_id foreign keys are gone; attribution keys off calls.manager_name only.
+    -- Dropping calls.manager_id / manager_notes.manager_id also drops their FKs to managers,
+    -- which is why those columns go before the table. Guarded with IF EXISTS => a no-op once
+    -- applied. Both columns were 100% NULL before removal, so no data is lost.
+    ALTER TABLE calls DROP COLUMN IF EXISTS manager_id;
+    ALTER TABLE manager_notes DROP COLUMN IF EXISTS manager_id;
+    DROP TABLE IF EXISTS managers;
+
+    -- Bot access control (role system). Purely for AUTHORIZING who may use the bot and which
+    -- features they see — NOT a revival of the old attribution "managers" table (Binotel stays
+    -- the source of truth for who spoke on a call). role: director|marketer|manager|mechanic.
+    -- telegram_id is NULL for a "pending" invite (added by phone before the person opened the
+    -- bot); it's filled and status flips to 'active' when they share their contact. operator_name
+    -- links a manager row to calls.manager_name so they can see their own stats.
+    CREATE TABLE IF NOT EXISTS bot_users (
+      id SERIAL PRIMARY KEY,
+      telegram_id BIGINT UNIQUE,
+      role TEXT NOT NULL,
+      phone TEXT,
+      username TEXT,
+      display_name TEXT,
+      operator_name TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      added_by BIGINT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
   `);
+}
+
+// ---- Bot users / roles (access control) ---------------------------------------------------
+
+const BOT_USER_COLS = `id, telegram_id AS "telegramId", role, phone, username,
+  display_name AS "displayName", operator_name AS "operatorName", status`;
+
+// Digits only; phones are matched by their last 9 digits so +380/0-prefix variants still line up.
+function normalizePhone(raw) {
+  return String(raw || '').replace(/\D/g, '');
+}
+
+async function getBotUser(telegramId) {
+  const { rows } = await pool.query(
+    `SELECT ${BOT_USER_COLS} FROM bot_users WHERE telegram_id = $1`,
+    [telegramId]
+  );
+  return rows[0] || null;
+}
+
+async function getBotUserById(id) {
+  const { rows } = await pool.query(`SELECT ${BOT_USER_COLS} FROM bot_users WHERE id = $1`, [id]);
+  return rows[0] || null;
+}
+
+async function getBotUsersByRole(role) {
+  const { rows } = await pool.query(
+    `SELECT ${BOT_USER_COLS} FROM bot_users WHERE role = $1 ORDER BY status, display_name NULLS LAST, id`,
+    [role]
+  );
+  return rows;
+}
+
+// Insert or update a person identified by their Telegram id (the request_users path — we know
+// their id immediately). Non-null fields overwrite; nulls keep the existing value.
+async function upsertBotUserByTelegram({ telegramId, role, phone, username, displayName, operatorName, addedBy }) {
+  const { rows } = await pool.query(
+    `INSERT INTO bot_users (telegram_id, role, phone, username, display_name, operator_name, status, added_by)
+     VALUES ($1, $2, $3, $4, $5, $6, 'active', $7)
+     ON CONFLICT (telegram_id) DO UPDATE SET
+       role = $2,
+       phone = COALESCE($3, bot_users.phone),
+       username = COALESCE($4, bot_users.username),
+       display_name = COALESCE($5, bot_users.display_name),
+       operator_name = COALESCE($6, bot_users.operator_name),
+       status = 'active'
+     RETURNING id`,
+    [telegramId, role, phone ? normalizePhone(phone) : null, username || null, displayName || null, operatorName || null, addedBy || null]
+  );
+  return rows[0].id;
+}
+
+// Invite by phone before the person has opened the bot (telegram_id unknown yet).
+async function addPendingBotUser({ phone, role, displayName, addedBy }) {
+  const { rows } = await pool.query(
+    `INSERT INTO bot_users (telegram_id, role, phone, display_name, status, added_by)
+     VALUES (NULL, $2, $1, $3, 'pending', $4) RETURNING id`,
+    [normalizePhone(phone), role, displayName || null, addedBy || null]
+  );
+  return rows[0].id;
+}
+
+// When an unknown user shares their contact, match a pending invite by the last 9 phone digits.
+async function activatePendingByPhone(phone, { telegramId, username, displayName }) {
+  const { rows } = await pool.query(
+    `UPDATE bot_users SET telegram_id = $2, username = COALESCE($3, username),
+       display_name = COALESCE($4, display_name), status = 'active'
+     WHERE status = 'pending' AND telegram_id IS NULL
+       AND RIGHT(regexp_replace(phone, '\\D', '', 'g'), 9) = RIGHT($1, 9)
+     RETURNING id, role`,
+    [normalizePhone(phone), telegramId, username || null, displayName || null]
+  );
+  return rows[0] || null;
+}
+
+async function setBotUserOperator(id, operatorName) {
+  await pool.query('UPDATE bot_users SET operator_name = $2 WHERE id = $1', [id, operatorName]);
+}
+
+async function setBotUserPhone(telegramId, phone) {
+  await pool.query('UPDATE bot_users SET phone = $2 WHERE telegram_id = $1', [telegramId, normalizePhone(phone)]);
+}
+
+async function deleteBotUser(id) {
+  const { rows } = await pool.query('DELETE FROM bot_users WHERE id = $1 RETURNING telegram_id AS "telegramId", role', [id]);
+  return rows[0] || null;
+}
+
+// Bootstrap: make sure a chat id is a director (used to seed TELEGRAM_CHAT_ID at startup so the
+// owner can never lock themselves out). Never downgrades an existing row.
+async function seedDirector(telegramId) {
+  await pool.query(
+    `INSERT INTO bot_users (telegram_id, role, display_name, status)
+     VALUES ($1, 'director', 'Директор', 'active')
+     ON CONFLICT (telegram_id) DO NOTHING`,
+    [telegramId]
+  );
 }
 
 async function callExists(generalCallId) {
@@ -103,7 +229,7 @@ async function getOperatorRoster() {
 // numbers), most active first - this is the bot's manager picker.
 async function getOperators() {
   const { rows } = await pool.query(
-    `SELECT manager_name AS name, COUNT(*)::int AS n
+    `SELECT manager_name AS name, COUNT(*)::int AS n, MIN(start_time) AS "firstCall"
      FROM calls
      WHERE transcript IS NOT NULL AND transcript <> '' AND manager_name IS NOT NULL AND manager_name <> ''
      GROUP BY manager_name
@@ -347,6 +473,25 @@ async function setState(key, value) {
   );
 }
 
+async function deleteState(key) {
+  await pool.query('DELETE FROM app_state WHERE key = $1', [key]);
+}
+
+// Analysis prompt (system instruction for the per-manager report / operator-quality analysis).
+// Editable by the owner via the bot's /prompt flow; null when unset -> analyze.js falls back to
+// its built-in default. Kept here (typed wrapper) like the other app_state keys.
+async function getStoredAnalyzePrompt() {
+  return getState('analyze_prompt');
+}
+
+async function setStoredAnalyzePrompt(text) {
+  await setState('analyze_prompt', text);
+}
+
+async function clearStoredAnalyzePrompt() {
+  await deleteState('analyze_prompt');
+}
+
 async function getCheckpoint() {
   const value = await getState('last_polled_until');
   return value ? new Date(value) : null;
@@ -405,4 +550,18 @@ export {
   setReportSlot,
   getReportUntil,
   setReportUntil,
+  getStoredAnalyzePrompt,
+  setStoredAnalyzePrompt,
+  clearStoredAnalyzePrompt,
+  normalizePhone,
+  getBotUser,
+  getBotUserById,
+  getBotUsersByRole,
+  upsertBotUserByTelegram,
+  addPendingBotUser,
+  activatePendingByPhone,
+  setBotUserOperator,
+  setBotUserPhone,
+  deleteBotUser,
+  seedDirector,
 };
