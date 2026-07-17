@@ -1,67 +1,118 @@
-# Деплой на Render — покрокова інструкція
+# Деплой на VPS (AlmaLinux) — покрокова інструкція
 
-Репозиторій на GitHub (`TimohaVysochynskyi/BinotelCallAnalyzer`), Render сам збирає образ з `Dockerfile` при кожному пуші в `main`.
+Хостинг — власний VPS на **AlmaLinux 10**. Два процеси з одного репо тримає **pm2**:
 
-## Крок 0 — що вже готово
+| Процес | Команда | Режим |
+|---|---|---|
+| `obv-bot` | `node src/bot/index.js` | Постійно онлайн 24/7 (long-polling) — бот звітності + авто-звіти 13:00/19:30 (Kyiv) |
+| `obv-poller` | `node src/jobs/index.js` (`JOB_TYPE=poll`) | Разова задача кожні 15 хв: тягне нові дзвінки з Binotel → транскрибує → класифікує → визначає менеджера → пише в Postgres |
 
-- [x] Docker Desktop, локальний білд перевірено
-- [x] Репозиторій на GitHub, підключений до Render
-- [x] `DATABASE_URL` (Neon), `BINOTEL_API_KEY/SECRET`, `OPENAI_API_KEY`, `TELEGRAM_BOT_TOKEN` — всі є
-- [x] `binotel-poller` створено й задеплоєно
+Обидва читають один `.env` з кореня проєкту (кожен entrypoint робить `import 'dotenv/config'`). Розклад поллера й тримання бота живим — усе через pm2 (`ecosystem.config.cjs` у репо), окремий system-cron чи Docker не потрібні.
 
-## Два сервіси з одного репо/образу
+Схема БД створюється сама при першому старті (`migrate()` / `migrateKb()`) — **ніяких ручних seed-кроків немає**.
 
-| Сервіс | Тип | Команда / Schedule | Що робить |
-|---|---|---|---|
-| `binotel-poller` | Cron Job | `*/15 * * * *`, `JOB_TYPE=poll` (CMD за замовч. `node src/jobs/index.js`) | Кожні 15 хв: тягне нові дзвінки з Binotel, транскрибує, класифікує, визначає менеджера, зберігає в Postgres |
-| `binotel-bot` | Background Worker | Docker Command → `node src/bot/index.js` | Постійно онлайн: інтерактивний бот звітності + авто-звіти о 13:00/19:30 (Kyiv) |
+## Крок 1 — Node.js 20+ і git
 
-Обидва — з того самого `Dockerfile` (образ спільний, бот лише перевизначає стартову команду). Regione обох — **Frankfurt (EU Central)** (як Neon). Cron Job — **Starter**; Background Worker — найдешевший постійний план (~$7/міс, бо процес живе 24/7).
+Підключись по SSH (PuTTY: Host = IP, Port 22, логін+пароль). Перевір, що є:
 
-## Env-змінні
-
-`binotel-poller` (Cron Job):
+```bash
+node -v; git --version
 ```
-BINOTEL_API_KEY, BINOTEL_API_SECRET, BINOTEL_BASE_URL,
-OPENAI_API_KEY, OPENAI_TRANSCRIBE_MODEL, OPENAI_ANALYZE_MODEL, CALL_LANGUAGE,
-TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TELEGRAM_ADMIN_CHAT_ID,
-DATABASE_URL, POLL_WINDOW_MINUTES, SHARED_EXTENSIONS, MAX_PENDING_ATTEMPTS,
+
+Якщо Node немає або версія < 20 — постав Node 20 з NodeSource:
+
+```bash
+curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
+sudo dnf install -y nodejs git
+node -v   # має бути v20.x
+```
+
+## Крок 2 — Клонувати репо і поставити залежності
+
+```bash
+cd ~
+git clone https://github.com/TimohaVysochynskyi/BinotelCallAnalyzer.git
+cd BinotelCallAnalyzer
+npm install --omit=dev
+```
+
+## Крок 3 — Файл `.env`
+
+Створи `.env` у корені (`nano .env`) з реальними значеннями. Повний список і коментарі — `.env.example`. Ключове:
+
+```ini
+DATABASE_URL=postgres://...neon.tech/...?sslmode=require
+BINOTEL_API_KEY=...
+BINOTEL_API_SECRET=...
+BINOTEL_BASE_URL=https://api.binotel.com/api/4.0
+OPENAI_API_KEY=...
+OPENAI_TRANSCRIBE_MODEL=gpt-4o-mini-transcribe
+OPENAI_ANALYZE_MODEL=gpt-4o-mini
+OPENAI_EMBED_MODEL=text-embedding-3-small
+CALL_LANGUAGE=
 JOB_TYPE=poll
-```
-
-`binotel-bot` (Background Worker):
-```
-TELEGRAM_BOT_TOKEN        (той самий єдиний бот @OBVCarServiceWork_bot, що й у поллера)
-TELEGRAM_CHAT_ID          (owner chat: дефолт для allowlist і отримувача звітів)
-BOT_ALLOWED_CHAT_IDS      (comma-separated user IDs, owner-only; дефолт — TELEGRAM_CHAT_ID)
-BOT_REPORT_CHAT_ID        (куди слати авто-звіти; дефолт — TELEGRAM_CHAT_ID)
+POLL_WINDOW_MINUTES=20
+SHARED_EXTENSIONS=901,902
+MAX_PENDING_ATTEMPTS=20
+TELEGRAM_BOT_TOKEN=...
+TELEGRAM_CHAT_ID=...
+TELEGRAM_ADMIN_CHAT_ID=
+BOT_ALLOWED_CHAT_IDS=...
+BOT_REPORT_CHAT_ID=...
 BOT_REPORT_TIMES=13:00,19:30
-DATABASE_URL, OPENAI_API_KEY, OPENAI_ANALYZE_MODEL, OPENAI_EMBED_MODEL,
-BINOTEL_API_KEY, BINOTEL_API_SECRET, BINOTEL_BASE_URL   (для "прослухати запис")
+OPERATOR_ALIASES=
 ```
 
-База знань бота потребує розширення **pgvector** — `migrateKb()` створює його автоматично (`CREATE EXTENSION IF NOT EXISTS vector`); Neon підтримує (перевірено, v0.8.1). Якщо його раптом нема — база знань просто вимкнеться, решта бота працює.
+База знань бота потребує **pgvector** — `migrateKb()` створює розширення сам (`CREATE EXTENSION IF NOT EXISTS vector`); Neon підтримує (перевірено, v0.8.1). Нема розширення → база знань просто вимкнеться, решта бота живе.
 
-Обидва сервіси використовують **один** `TELEGRAM_BOT_TOKEN` (новий чистий бот). Поллер шле ним лише вихідні алерти, бот — інтерактив + звіти; конфлікту немає.
+Бот і поллер використовують **один** `TELEGRAM_BOT_TOKEN` (`@OBVCarServiceWork_bot`): поллер шле ним лише вихідні алерти, бот — інтерактив + звіти; конфлікту `getUpdates` немає.
 
-## Перший запуск таблиці менеджерів
+## Крок 4 — pm2: запуск обох процесів
 
-Один раз (локально або будь-де з доступом до `DATABASE_URL`):
-
+```bash
+sudo npm install -g pm2
+pm2 start ecosystem.config.cjs
+pm2 status
 ```
-npm run seed:managers
+
+`ecosystem.config.cjs` уже в репо: `obv-bot` (autorestart, тримається online) і `obv-poller` (`autorestart:false` + `cron_restart: */15 * * * *` — pm2 перезапускає його кожні 15 хв; між запусками статус `stopped` — це нормально).
+
+## Крок 5 — Автозапуск після ребуту
+
+```bash
+pm2 save
+pm2 startup
 ```
 
-Заповнює `managers` трьома відомими менеджерами (Роман/903, Андрій/904, Володимир/905). Idempotent — можна перезапускати, ручні правки не затирає.
+`pm2 startup` виведе готовий рядок `sudo env PATH=... pm2 startup systemd -u <user> ...` — скопіюй і виконай його. Після цього pm2 підніме обидва процеси після будь-якого перезавантаження VPS.
 
-## Перевірка на Render
+> Вхідні порти відкривати не треба: бот працює на long-polling (лише вихідні з'єднання), inbound не використовується.
 
-Вкладка **Logs** сервіса `binotel-poller` — той самий вивід, що й локально (`[poll]`, `[binotel]`, `[processCalls]`). Кожен запуск: ретрай pending → поллінг нових дзвінків від чекпоінта → транскрипція/класифікація/атрибуція/збереження.
+## Крок 6 — Перевірка
+
+```bash
+pm2 logs obv-bot --lines 30      # старт grammy без помилок
+pm2 logs obv-poller --lines 30   # [poll], [binotel], [processCalls]
+```
+
+У Telegram відкрий `@OBVCarServiceWork_bot` → `/start` → `/menu`.
 
 ## Оновлення коду
 
-Просто `git push` у `main` — Render автоматично пересобере й передеплоїть.
+```bash
+cd ~/BinotelCallAnalyzer
+git pull
+npm install --omit=dev
+pm2 reload ecosystem.config.cjs
+```
+
+## Корисні команди pm2
+
+- `pm2 status` — стан процесів
+- `pm2 logs` — живі логи обох
+- `pm2 restart obv-bot` / `pm2 restart obv-poller`
+- `pm2 reload ecosystem.config.cjs` — застосувати оновлення без простою
 
 ## Вартість
 
-Мінімум $1/міс (один сервіс), плюс змінна частина OpenAI.
+VPS (постійний, бо бот живе 24/7) + змінна частина OpenAI. Neon Postgres — безкоштовний тариф із запасом.
