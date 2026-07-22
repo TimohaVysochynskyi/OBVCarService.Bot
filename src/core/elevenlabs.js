@@ -66,23 +66,76 @@ const ROLE_SCHEMA = {
   strict: true,
   schema: {
     type: 'object',
-    properties: { manager: { type: 'string' } },
-    required: ['manager'],
+    properties: {
+      reasoning: { type: 'string' },
+      manager: { type: 'string' },
+      confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+    },
+    required: ['reasoning', 'manager', 'confidence'],
     additionalProperties: false,
   },
 };
 
-// Ask the model which speaker id is the auto-service MANAGER. Cheap (a short sample + one id back).
-// Falls back to "first speaker = manager" on any failure.
+// Phrases the SERVICE OPERATOR (manager) uses far more than the client, uk + ru. Substring match,
+// lowercased. Used as (a) the deterministic fallback when the LLM call fails and (b) a tie-breaker
+// when the LLM is unsure — much more reliable than the old "first speaker = manager" guess.
+const MANAGER_MARKERS = [
+  'автосервіс', 'автосервис', 'сервіс', 'сервис', 'сто', 'наш майстер', 'майстер', 'мастер',
+  'запиш', 'записати', 'запишу', 'запишемо', 'запис на', 'на яку годину', 'на яке авто', 'яка марка',
+  'яке авто', 'яка машина', 'діагностик', 'диагностик', 'вартість', 'коштує', 'стоит', 'по ціні',
+  'приїжджайте', 'приезжайте', 'підʼїжджайте', 'подъезжайте', 'чим можу допомогти', 'чем могу помочь',
+  'передзвоню', 'перезвоню', 'уточню', 'вільн', 'свободн', 'гарного дня', 'працюємо до', 'гривень', 'грн',
+  'у нас є', 'наша адреса', 'запчастин', 'запчаст',
+];
+
+// Score each speaker by how many operator-markers their lines contain; the highest = manager.
+// Returns null when nobody used any marker (no signal to decide on).
+function heuristicManager(turns, speakerIds) {
+  const score = Object.fromEntries(speakerIds.map((s) => [s, 0]));
+  for (const t of turns) {
+    const low = t.text.toLowerCase();
+    for (const m of MANAGER_MARKERS) if (low.includes(m)) score[t.speaker] += 1;
+  }
+  let best = null;
+  let bestScore = 0;
+  for (const sid of speakerIds) {
+    if (score[sid] > bestScore) {
+      bestScore = score[sid];
+      best = sid;
+    }
+  }
+  return best; // null when all scores are 0
+}
+
+// Decide which speaker id is the auto-service MANAGER. Primary: an LLM over the WHOLE dialogue with
+// a sharp bilingual prompt and explicit reasoning. Backed by the keyword heuristic — used on LLM
+// failure, on an out-of-range answer, and as a tie-breaker when the LLM is "low" confidence. Last
+// resort (no LLM, no keyword signal): first speaker.
 async function pickManagerSpeaker(turns, speakerIds) {
-  const sample = turns.slice(0, 14).map((t) => `[${t.speaker}] ${t.text}`).join('\n');
+  const heuristic = heuristicManager(turns, speakerIds);
+
+  // Feed as much of the dialogue as fits a char budget (whole call, not just the opening).
+  const MAX_CHARS = 8000;
+  let body = '';
+  for (const t of turns) {
+    const line = `[${t.speaker}] ${t.text}\n`;
+    if (body.length + line.length > MAX_CHARS) break;
+    body += line;
+  }
+
   const system =
-    `Це діалог телефонної розмови автосервісу. Мовці позначені: ${speakerIds.join(', ')}. ` +
-    `Визнач, який із них МЕНЕДЖЕР (працівник автосервісу: вітає від імені сервісу, консультує, ` +
-    `пропонує запис/послуги, називає ціни й дати), а не клієнт. ` +
-    `Поверни JSON {"manager":"<id>"} рівно з одним зі значень: ${speakerIds.join(', ')}.`;
+    `Ти аналізуєш транскрипт телефонної розмови в автосервісі (СТО). Учасники: ${speakerIds.join(', ')}. ` +
+    `Рівно один із них — МЕНЕДЖЕР (працівник СТО), решта — КЛІЄНТ.\n` +
+    `Ознаки МЕНЕДЖЕРА: вітається від імені сервісу; питає марку/модель і проблему авто; пропонує запис, ` +
+    `називає дату/час і ціни; згадує майстра, діагностику, роботи, запчастини; каже "запишу вас", ` +
+    `"приїжджайте", "у нас", "передзвоню".\n` +
+    `Ознаки КЛІЄНТА: описує СВОЮ проблему ("у мене стукає", "моя машина"), питає ціну/чи є місце, ` +
+    `погоджується або відмовляється, дякує.\n` +
+    `Аналізуй ВЕСЬ діалог, а не лише початок — клієнт міг заговорити першим ("алло?"). ` +
+    `Поверни JSON: reasoning (1-2 речення чому), manager (рівно один id зі списку: ${speakerIds.join(', ')}), confidence.`;
+
   try {
-    const manager = await withRetry(
+    const out = await withRetry(
       async () => {
         const res = await fetch('https://api.openai.com/v1/chat/completions', {
           method: 'POST',
@@ -91,21 +144,27 @@ async function pickManagerSpeaker(turns, speakerIds) {
             model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
             messages: [
               { role: 'system', content: system },
-              { role: 'user', content: sample },
+              { role: 'user', content: body },
             ],
             response_format: { type: 'json_schema', json_schema: ROLE_SCHEMA },
           }),
         });
         if (!res.ok) throw new Error(`OpenAI speaker role failed: ${res.status} ${await res.text()}`);
-        const data = await res.json();
-        return JSON.parse(data.choices[0].message.content).manager;
+        return JSON.parse((await res.json()).choices[0].message.content);
       },
       { attempts: 2, delayMs: 1000, label: 'OpenAI speaker role' }
     );
-    return speakerIds.includes(manager) ? manager : turns[0].speaker;
+
+    if (!speakerIds.includes(out.manager)) return heuristic ?? turns[0].speaker;
+    // Low-confidence LLM that disagrees with a clear keyword signal → trust the heuristic.
+    if (out.confidence === 'low' && heuristic && heuristic !== out.manager) {
+      console.log(`[elevenlabs] low-confidence role (LLM=${out.manager}, keyword=${heuristic}) → using keyword heuristic`);
+      return heuristic;
+    }
+    return out.manager;
   } catch (err) {
-    console.error(`[elevenlabs] role labeling failed, first speaker = manager: ${err.message}`);
-    return turns[0].speaker; // heuristic fallback
+    console.error(`[elevenlabs] role labeling failed, using keyword heuristic: ${err.message}`);
+    return heuristic ?? turns[0].speaker;
   }
 }
 
@@ -125,4 +184,4 @@ async function transcribeDiarized(audioBlob) {
   return turns.map((t) => `${label(t.speaker)}: ${t.text}`).join('\n\n');
 }
 
-export { transcribeDiarized, sttDiarize, buildTurns };
+export { transcribeDiarized, sttDiarize, buildTurns, heuristicManager };
