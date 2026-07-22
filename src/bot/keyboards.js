@@ -28,7 +28,7 @@ function mainMenu(role) {
     return kb;
   }
   if (role === ROLES.MANAGER) {
-    kb.text("📊 Мій звіт", "me:pick").row().text("📚 База знань", "kb:ask");
+    kb.text("📊 Моя статистика", "me:pick").row().text("📚 База знань", "kb:ask");
     return kb;
   }
   // mechanic (and any other limited role)

@@ -2,9 +2,19 @@ import pg from 'pg';
 
 const { Pool } = pg;
 
+// SSL policy. The DB is now a LOCAL Postgres (localhost, same VPS) which speaks no SSL, so forcing
+// it (the Neon-era default) would fail with "server does not support SSL connections". Disable SSL
+// for localhost / an explicit sslmode=disable; keep permissive SSL for any remote/managed DB.
+function sslConfig() {
+  const url = process.env.DATABASE_URL || '';
+  if (/\bsslmode=disable\b/i.test(url)) return false;
+  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/i.test(url)) return false;
+  return { rejectUnauthorized: false };
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: sslConfig(),
 });
 
 async function migrate() {
@@ -26,6 +36,22 @@ async function migrate() {
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS is_success BOOLEAN;
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS weakest_stage TEXT;
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS communication_score INTEGER;
+
+    -- Evidence-first analysis (see src/core/analyzeCall.js + src/bot/analyze.js). Computed ONCE
+    -- per call at ingest and cached, so per-period reports (day/week/month/quarter) only aggregate
+    -- stored data instead of re-analysing every transcript.
+    --   segments: the diarized dialogue WITH per-turn timecodes — [{role,text,start,end}] — kept so
+    --     we can cut audio clips around a quoted line (ElevenLabs words[] give start/end; the plain
+    --     transcript string still holds the same dialogue for the instant archive view). NULL for
+    --     the OpenAI fallback path (no diarization/timecodes) and for calls ingested before this.
+    --   behaviors: the per-call map — {version, items:[{type,stage,label,quote,start,end,segIndex}]}
+    --     where each item is a tagged strength/error with a verbatim manager quote and (when the
+    --     quote was located in segments) its timecode. The report "reduce" pulls these and clusters
+    --     them into evidence-backed findings.
+    --   analysis_version: lets a future taxonomy change trigger a re-map (backfill) of old rows.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS segments JSONB;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS behaviors JSONB;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS analysis_version INTEGER;
 
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
@@ -89,6 +115,14 @@ async function migrate() {
       added_by BIGINT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- One-time reset of the legacy PROSE analysis prompt. The report was rewritten to an
+    -- evidence-first pipeline (analyze.js), so an old stored prose prompt would be stale guidance.
+    -- Guarded by a marker key => runs at most once; the owner can re-customize via /prompt after.
+    DELETE FROM app_state WHERE key = 'analyze_prompt'
+      AND NOT EXISTS (SELECT 1 FROM app_state WHERE key = 'analyze_prompt_v2');
+    INSERT INTO app_state (key, value) VALUES ('analyze_prompt_v2', '1')
+      ON CONFLICT (key) DO NOTHING;
   `);
 }
 
@@ -194,10 +228,13 @@ async function callExists(generalCallId) {
   return rows.length > 0;
 }
 
+// JSONB params are stringified + cast (::jsonb) explicitly; null stays null.
+const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
+
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -209,9 +246,24 @@ async function saveCall(call) {
       call.isSuccess,
       call.weakestStage,
       call.communicationScore,
+      jsonParam(call.segments),
+      jsonParam(call.behaviors),
+      call.analysisVersion ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
+}
+
+// Backfill / re-map: overwrite the analysis artifacts of an existing call (transcript + segments +
+// per-call behaviors) without touching its classification or attribution. Used by the analysis
+// backfill script (src/scripts/backfillAnalysis.js).
+async function updateCallAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion }) {
+  await pool.query(
+    `UPDATE calls SET transcript = COALESCE($2, transcript),
+       segments = $3::jsonb, behaviors = $4::jsonb, analysis_version = $5
+     WHERE general_call_id = $1`,
+    [generalCallId, transcript ?? null, jsonParam(segments), jsonParam(behaviors), analysisVersion ?? null]
+  );
 }
 
 // ---- Operators (source of truth = Binotel names on the calls) -----------------------------
@@ -279,29 +331,32 @@ async function listOperatorCalls(name, start, end, limit, offset) {
   return rows;
 }
 
-// One manager's calls with transcripts in [start, end) — feeds the per-period AI analysis in the
-// bot's "Статистика менеджера" / "Мій звіт" (analyze.js: analyzeManager). Same shape analyzeManager
-// expects; same transcript filter as getOperatorStats so counts line up.
-async function getOperatorCallsWithTranscripts(name, start, end) {
+// The N most recent calls of an operator (any period). Used by the one-off re-transcription script
+// and the analysis backfill (hasSegments lets the backfill skip calls already processed).
+async function getRecentCallsForOperator(name, limit = 5) {
   const { rows } = await pool.query(
-    `SELECT transcript, start_time AS "startTime", is_success AS "isSuccess",
-            weakest_stage AS "weakestStage", communication_score AS "communicationScore"
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+            (segments IS NOT NULL) AS "hasSegments"
+     FROM calls WHERE manager_name = $1
+     ORDER BY start_time DESC LIMIT $2`,
+    [name, limit]
+  );
+  return rows;
+}
+
+// One manager's calls in [start, end) with the cached per-call analysis (behaviors + segments) and
+// metrics — feeds the report "reduce" (src/bot/analyze.js: reduceFindings). Same transcript filter
+// as getOperatorStats so counts line up. No LLM here: this is the cached "map" the reduce aggregates.
+async function getCallsForReport(name, start, end) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+            is_success AS "isSuccess", weakest_stage AS "weakestStage",
+            communication_score AS "communicationScore", segments, behaviors
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
        AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time`,
     [name, start, end]
-  );
-  return rows;
-}
-
-// The N most recent calls of an operator (any period). Used by the one-off re-transcription script.
-async function getRecentCallsForOperator(name, limit = 5) {
-  const { rows } = await pool.query(
-    `SELECT general_call_id AS "generalCallId", start_time AS "startTime"
-     FROM calls WHERE manager_name = $1
-     ORDER BY start_time DESC LIMIT $2`,
-    [name, limit]
   );
   return rows;
 }
@@ -332,6 +387,19 @@ async function getCallsWithTranscriptsInRange(start, end) {
      FROM calls
      WHERE start_time >= $1 AND start_time < $2 AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY manager_name, start_time`,
+    [start, end]
+  );
+  return rows;
+}
+
+// Distinct operators that have processed calls in [start, end) — the set the periodic/manual
+// evidence report iterates over (one report per manager).
+async function getActiveOperatorsInRange(start, end) {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS name, COUNT(*)::int AS n FROM calls
+     WHERE start_time >= $1 AND start_time < $2 AND transcript IS NOT NULL AND transcript <> ''
+       AND manager_name IS NOT NULL AND manager_name <> ''
+     GROUP BY manager_name ORDER BY n DESC, manager_name`,
     [start, end]
   );
   return rows;
@@ -649,13 +717,15 @@ export {
   getOperatorRoster,
   getOperators,
   getOperatorStats,
-  getOperatorCallsWithTranscripts,
+  getCallsForReport,
   getRecentCallsForOperator,
   updateCallTranscript,
+  updateCallAnalysis,
   countOperatorCalls,
   listOperatorCalls,
   getCallByGeneralId,
   getCallsWithTranscriptsInRange,
+  getActiveOperatorsInRange,
   getNumericManagerCalls,
   updateManagerName,
   addOperatorNote,

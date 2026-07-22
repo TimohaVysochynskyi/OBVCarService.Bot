@@ -3,11 +3,11 @@
 Інжест-пайплайн дзвінків автосервісу. Один cron-джоб (`JOB_TYPE=poll`), що запускається кожні ~15 хв:
 
 1. Бере нові дзвінки з Binotel з моменту останнього успішного запуску (чекпоінт, не фіксоване вікно)
-2. Транскрибує запис через ElevenLabs (STT + розділення мовців в одному виклику) → зберігає готовий діалог; fallback — OpenAI, якщо ElevenLabs недоступний
-3. Класифікує дзвінок (успішність / найслабший етап / оцінка 1–10)
+2. Транскрибує запис через ElevenLabs (STT + розділення мовців в одному виклику) → зберігає готовий діалог **+ таймкоди реплік** (`calls.segments`, для аудіо-фрагментів у звіті); fallback — OpenAI, якщо ElevenLabs недоступний
+3. Класифікує дзвінок (успішність / найслабший етап / оцінка 1–10) і робить **per-call аналіз поведінок** (`calls.behaviors`, кеш для доказового звіту)
 4. Визначає, **якому менеджеру** належить дзвінок, і зберігає все в Postgres
 
-Звітності, PDF і Google Sheets у самому інжесті **немає свідомо** — це чистий збір даних. Звіти, статистика й доступ до дзвінків — окремий Telegram-бот (`src/bot/`, `npm run bot`), що читає ту саму БД. Деталі бота — [`src/bot/README.md`](src/bot/README.md).
+Звітності, PDF і Google Sheets у самому інжесті **немає свідомо** — це чистий збір даних. Звіти (тепер **доказові**: findings з реальними цитатами + аудіо-фрагменти), статистика й доступ до дзвінків — окремий Telegram-бот (`src/bot/`, `npm run bot`), що читає ту саму БД. Деталі бота — [`src/bot/README.md`](src/bot/README.md).
 
 ## Структура
 
@@ -15,10 +15,10 @@
 
 ```
 src/
-  core/     — спільне ядро (store, binotel, transcribe, elevenlabs, classifyCall, identifyManager, telegram, retry)
+  core/     — спільне ядро (store, binotel, transcribe, elevenlabs, classifyCall, analyzeCall, quoteMatch, identifyManager, telegram, retry)
   jobs/     — задеплоєний cron-джоб інжесту (index.js + pollNewCalls + processCalls)
-  scripts/  — одноразові тули (backfill, testSingleCall, reattributeShared)
-  bot/      — Telegram-бот звітності (grammy, окремий токен): авто-звіти, статистика, архів розмов
+  scripts/  — одноразові тули (backfill, testSingleCall, reattributeShared, retranscribeRecent, backfillAnalysis)
+  bot/      — Telegram-бот звітності (grammy, окремий токен): доказові звіти (текст+аудіо), статистика, архів розмов
 ```
 
 ## Ідентифікація оператора (джерело — Binotel)
@@ -32,12 +32,12 @@ src/
 
 Переприв'язати старі спільні дзвінки (з голим номером) через ту саму AI-ідентифікацію: `npm run reattribute:shared`.
 
-## Сховище — Postgres (Neon)
+## Сховище — Postgres (локальний PG18 на VPS)
 
-1. Зареєструватись на [neon.tech](https://neon.tech), створити проєкт, скопіювати `DATABASE_URL`
-2. Вставити в `.env` — таблиці (`calls`, `pending_calls`, `manager_notes`, `app_state`) створюються автоматично при першому запуску (`migrate()`)
+1. `DATABASE_URL=postgres://obvbot:password@localhost:5432/obvbot` у `.env` (локальний Postgres на тому ж VPS). SSL авто-вимикається для localhost (`store.js: sslConfig()`); для віддаленого/managed з `sslmode=require` — лишається.
+2. Таблиці (`calls` з `segments`/`behaviors`, `pending_calls`, `manager_notes`, `bot_users`, `app_state`) створюються автоматично при першому запуску (`migrate()`). База знань бота потребує **pgvector** (на локальному PG18 поставити пакетом — див. `DEPLOY.md`).
 
-Безкоштовного тарифу вистачить з великим запасом.
+Після деплою одноразово прогнати `npm run backfill:analysis` (таймкоди + per-call аналіз для наявних дзвінків).
 
 ## Надійність — як уникаємо провалів у даних
 
@@ -65,6 +65,7 @@ npm run test:call -- <generalCallID>      # смок-тест транскрип
 npm run backfill -- "2026-07-01 00:00:00" "2026-07-03 23:59:59"   # історичний період
 npm run reattribute:shared               # переприв'язати старі 901/902 до людей (AI)
 npm run retranscribe:recent              # одноразово: останні 5 дзвінків кожного менеджера+Богдан → ElevenLabs (діаризація)
+npm run backfill:analysis                # одноразово: останні 30/людину → таймкоди (segments) + per-call аналіз (behaviors) для доказового звіту
 ```
 
 Backfill: дати в локальному часі машини, період ріжеться на шматки ≤23 год (ліміт Binotel), вже оброблені дзвінки пропускаються — безпечно перезапускати.

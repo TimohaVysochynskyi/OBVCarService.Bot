@@ -17,9 +17,11 @@ async function main() {
   console.log('Record URL:', recordUrl);
 
   console.log('Transcribing...');
-  const transcript = await transcribeAudio(recordUrl);
+  const { transcript, segments } = await transcribeAudio(recordUrl);
   console.log('\n--- Transcript ---\n');
   console.log(transcript);
+  console.log(`\n--- Segments (${segments?.length ?? 0}) ---\n`);
+  if (segments) console.log(JSON.stringify(segments.slice(0, 5), null, 2));
 }
 
 main().catch((err) => {

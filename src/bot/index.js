@@ -115,7 +115,7 @@ const CMD = {
   prompt: { command: 'prompt', description: '🧠 Промпт аналізу' },
   roles: { command: 'roles', description: '👥 Ролі' },
   settings: { command: 'settings', description: '⚙️ Налаштування' },
-  myreport: { command: 'myreport', description: '📊 Мій звіт' },
+  myreport: { command: 'myreport', description: '📊 Моя статистика' },
 };
 
 function commandsForRole(role) {

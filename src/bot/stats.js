@@ -1,31 +1,13 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
-import { getOperators, getOperatorStats, getOperatorCallsWithTranscripts, listOperatorNotes } from '../core/store.js';
+import { getOperators, getOperatorStats, listOperatorNotes } from '../core/store.js';
 import { operatorListKeyboard, periodKeyboard, operatorLabel } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
-import { analyzeManager } from './analyze.js';
+import { deliverManagerReport } from './report.js';
 import { periodRange, formatKyiv } from './time.js';
 import { sendLong, showScreen, withProgress } from './ui.js';
 
-// Runs the per-period AI analysis (same /prompt as the reports) for one manager and sends it as a
-// message under the already-shown stats header. Slow + paid (OpenAI, ~20-40s) and generated fresh
-// every time — see the "Активне нагадування" in CLAUDE.md about future caching. Returns true when
-// something was sent, false when there were no calls to analyse.
-async function sendPeriodAnalysis(ctx, name, start, end) {
-  const calls = await getOperatorCallsWithTranscripts(name, start, end);
-  if (!calls.length) return false;
-  const summary = await withProgress(
-    ctx.api,
-    ctx.chat.id,
-    'typing',
-    async () => (await analyzeManager(name, calls)).summary,
-    { notice: '⏳ Формую розгорнутий аналіз за період… (це може зайняти до хвилини)' }
-  );
-  await sendLong(ctx.api, ctx.chat.id, summary, { parseMode: 'Markdown' });
-  return true;
-}
-
 // Content for the "choose a manager" screen - reused by the inline button (edits the message)
-// and by the /stats command and the quick-keyboard button (send a new message).
+// and by the /stats command.
 async function statsPicker() {
   const operators = await getOperators();
   if (!operators.length) {
@@ -50,31 +32,27 @@ function registerStats(bot) {
   bot.callbackQuery(/^stat:go:(day|week|month|quarter):(.+)$/, async (ctx) => {
     const period = ctx.match[1];
     const name = ctx.match[2];
-    const { start, end, label } = periodRange(period);
-    const s = await getOperatorStats(name, start, end);
-    const rate = s.callCount ? Math.round((s.successCount / s.callCount) * 100) : 0;
-    // The short numeric block always stays on top, regardless of the /prompt used for the analysis.
-    const header =
-      `${operatorLabel(name)} — ${label}\n` +
-      `_${formatKyiv(start)} – ${formatKyiv(end)}_\n\n` +
-      `Дзвінків: *${s.callCount}*\n` +
-      `Успішних: *${s.successCount}* (${rate}%)\n` +
-      `Середній бал: *${s.avgScore ?? '—'}*\n` +
-      `Найчастіший слабкий етап: *${s.topWeakStage ?? '—'}*`;
+    const { start, end } = periodRange(period);
+    await ctx.answerCallbackQuery();
     const kb = new InlineKeyboard()
       .text('📝 Додати нотатку', `note:add:${name}`)
       .text('🗒 Нотатки', `note:list:${name}`)
       .row()
       .text('« Періоди', `stat:op:${name}`)
       .text('« Меню', 'menu');
-    await ctx.answerCallbackQuery();
-    if (!s.callCount) {
-      await showScreen(ctx, `${header}\n\n_Немає дзвінків за період для аналізу._`, kb);
+    // The full evidence report (numeric header + findings + audio clips) is admin-only. It's built
+    // from the cached per-call analysis (analyze.reduceFindings) and cuts audio for negatives.
+    const res = await withProgress(
+      ctx.api,
+      ctx.chat.id,
+      'upload_voice',
+      () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { audio: true }),
+      { notice: '⏳ Формую доказовий звіт (аналіз + аудіо), це може зайняти деякий час…' }
+    );
+    if (res.empty) {
+      await showScreen(ctx, `${operatorLabel(name)}\n\nНемає оброблених дзвінків за період.`, kb);
       return;
     }
-    // Header first (stays on top), then the AI analysis, then bring the action menu to the bottom.
-    await sendLong(ctx.api, ctx.chat.id, header, { parseMode: 'Markdown' });
-    await sendPeriodAnalysis(ctx, name, start, end);
     await showScreen(ctx, `${operatorLabel(name)} — дії:`, kb);
   });
 
@@ -101,25 +79,25 @@ function registerStats(bot) {
     await sendLong(ctx.api, ctx.chat.id, text, { parseMode: 'Markdown' });
   });
 
-  registerMyReport(bot);
+  registerMyStats(bot);
 }
 
-// --- Manager self-report ("Мій звіт") -------------------------------------------------------
-// A manager sees stats about THEMSELVES only, plus their phone number. Their identity comes from
-// bot_users.operator_name (linked by the director when adding them), so it naturally includes any
-// shared-handset calls that were attributed to that same name.
+// --- Manager self-view ("Моя статистика") ---------------------------------------------------
+// A manager sees ONLY their own numeric statistics (calls / conversion / score / weakest stage) +
+// their phone. NOT the evidence report — that is an admin (director/marketer) tool. Their identity
+// comes from bot_users.operator_name (linked by the director when adding them).
 
-// Shared by the "📊 Мій звіт" button (me:pick) and the /myreport command.
+// Shared by the "📊 Моя статистика" button (me:pick) and the /myreport command.
 async function openMyReport(ctx) {
   ctx.session.awaiting = null;
   if (!ctx.botUser?.operatorName) {
     await ctx.reply('Ваш акаунт ще не звʼязано з оператором. Зверніться до директора, щоб він привʼязав вас.');
     return;
   }
-  await showScreen(ctx, '📊 Мій звіт — оберіть період:', periodKeyboard((p) => `me:go:${p}`, 'menu'));
+  await showScreen(ctx, '📊 Моя статистика — оберіть період:', periodKeyboard((p) => `me:go:${p}`, 'menu'));
 }
 
-function registerMyReport(bot) {
+function registerMyStats(bot) {
   bot.callbackQuery('me:pick', async (ctx) => {
     await ctx.answerCallbackQuery();
     await openMyReport(ctx);
@@ -137,9 +115,8 @@ function registerMyReport(bot) {
     const s = await getOperatorStats(name, start, end);
     const rate = s.callCount ? Math.round((s.successCount / s.callCount) * 100) : 0;
     const phone = ctx.botUser?.phone ? formatPhone(ctx.botUser.phone) : 'не збережено';
-    // Numeric block stays on top; the AI analysis (same /prompt) follows below.
     const header =
-      `📊 *Мій звіт* — ${label}\n` +
+      `📊 *Моя статистика* — ${label}\n` +
       `_${formatKyiv(start)} – ${formatKyiv(end)}_\n\n` +
       `Оператор: *${displayName(name)}*\n` +
       `Телефон: ${phone}\n\n` +
@@ -152,13 +129,8 @@ function registerMyReport(bot) {
       .row()
       .text('« Період', 'me:pick')
       .text('« Меню', 'menu');
-    if (!s.callCount) {
-      await showScreen(ctx, `${header}\n\n_Немає дзвінків за період для аналізу._`, kb);
-      return;
-    }
-    await sendLong(ctx.api, ctx.chat.id, header, { parseMode: 'Markdown' });
-    await sendPeriodAnalysis(ctx, name, start, end);
-    await showScreen(ctx, '📊 Мій звіт — дії:', kb);
+    const body = s.callCount ? header : `${header}\n\n_Немає дзвінків за період._`;
+    await showScreen(ctx, body, kb);
   });
 
   // Let a manager store their own phone (request_users doesn't return a phone, so a manager added

@@ -2,6 +2,7 @@ import { callExists, saveCall, upsertPending, markPendingFailed, getPendingCalls
 import { listCallsForPeriod, getCallRecordUrl } from '../core/binotel.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { classifyCall } from '../core/classifyCall.js';
+import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { identifyManager } from '../core/identifyManager.js';
 import { sendAlert } from '../core/telegram.js';
 
@@ -50,9 +51,19 @@ async function transcribeClassifyAndSave(call, roster) {
   const recordUrl = await getCallRecordUrl(call.generalCallId);
   // employeeName (Binotel, personal extensions) anchors speaker-role detection on our actual
   // employee. Null for shared handsets — role detection falls back to operator-role heuristics.
-  const transcript = await transcribeAudio(recordUrl, { managerName: call.employeeName });
+  // segments = timecoded diarized turns (null on the OpenAI fallback / single-speaker calls).
+  const { transcript, segments } = await transcribeAudio(recordUrl, { managerName: call.employeeName });
   const classification = await classifyCall(transcript);
   const managerName = await resolveManagerName(call, transcript, roster);
+
+  // Per-call "map": tag manager behaviours + verbatim quotes, cached for the report reduce. Never
+  // fatal — if it fails, save the call without behaviors so ingest still succeeds (backfill later).
+  let behaviors = null;
+  try {
+    behaviors = await analyzeCallBehaviors(transcript, segments, managerName);
+  } catch (err) {
+    console.error(`[processCalls]   behavior analysis failed for ${call.generalCallId}: ${err.message}`);
+  }
 
   await saveCall({
     generalCallId: call.generalCallId,
@@ -61,6 +72,9 @@ async function transcribeClassifyAndSave(call, roster) {
     startTime: call.startTime,
     durationSec: call.durationSec,
     transcript,
+    segments,
+    behaviors,
+    analysisVersion: behaviors ? ANALYSIS_VERSION : null,
     isSuccess: classification.isSuccess,
     weakestStage: classification.weakestStage,
     communicationScore: classification.communicationScore,

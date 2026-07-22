@@ -37,9 +37,10 @@ async function sttDiarize(audioBlob) {
   );
 }
 
-// Group the flat words[] into speaker turns. 'spacing' tokens carry the whitespace and have no
-// speaker of their own, so they just extend the current turn; a real word with a different
-// speaker_id starts a new turn.
+// Group the flat words[] into speaker turns, KEEPING each turn's timecode (start of its first word,
+// end of its last) — the report needs these to cut an audio clip around a quoted line. 'spacing'
+// tokens carry the whitespace and have no speaker of their own, so they just extend the current
+// turn; a real word with a different speaker_id starts a new turn.
 function buildTurns(words) {
   const turns = [];
   let cur = null;
@@ -52,13 +53,17 @@ function buildTurns(words) {
     const sid = w.speaker_id ?? (cur ? cur.speaker : 'speaker_0');
     if (!cur || cur.speaker !== sid) {
       if (cur) turns.push(cur);
-      cur = { speaker: sid, text: t };
+      cur = { speaker: sid, text: t, start: w.start ?? null, end: w.end ?? null };
     } else {
       cur.text += t;
+      if (w.start != null && cur.start == null) cur.start = w.start;
+      if (w.end != null) cur.end = w.end;
     }
   }
   if (cur) turns.push(cur);
-  return turns.map((x) => ({ speaker: x.speaker, text: x.text.replace(/\s+/g, ' ').trim() })).filter((x) => x.text);
+  return turns
+    .map((x) => ({ speaker: x.speaker, text: x.text.replace(/\s+/g, ' ').trim(), start: x.start, end: x.end }))
+    .filter((x) => x.text);
 }
 
 const ROLE_SCHEMA = {
@@ -199,21 +204,29 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
   }
 }
 
-// Full pipeline: STT + diarize -> "Менеджер:/Клієнт:" dialogue string ready to store. managerName
-// (when known from Binotel) anchors role detection on our specific employee. If only one speaker is
-// detected (voicemail / IVR) there's no dialogue to build, so the plain text is returned.
+// Full pipeline: STT + diarize -> a ready "Менеджер:/Клієнт:" dialogue AND the same dialogue as
+// timecoded segments. Returns { transcript, segments } where:
+//   transcript: the string stored in calls.transcript (instant archive view), same as before;
+//   segments:   [{ role:'manager'|'client', text, start, end }] with per-turn timecodes for audio
+//               clipping, or null when there's nothing to diarize (voicemail / single speaker).
+// managerName (when known from Binotel) anchors role detection on our specific employee.
 async function transcribeDiarized(audioBlob, managerName) {
   const data = await sttDiarize(audioBlob);
   const plain = (data.text || '').trim();
   const turns = buildTurns(data.words);
-  if (turns.length === 0) return plain || '(порожньо)';
+  if (turns.length === 0) return { transcript: plain || '(порожньо)', segments: null };
 
   const speakerIds = [...new Set(turns.map((t) => t.speaker))];
-  if (speakerIds.length < 2) return plain || turns.map((t) => t.text).join(' ');
+  if (speakerIds.length < 2) {
+    return { transcript: plain || turns.map((t) => t.text).join(' '), segments: null };
+  }
 
   const managerId = await pickManagerSpeaker(turns, speakerIds, managerName);
+  const role = (sid) => (sid === managerId ? 'manager' : 'client');
   const label = (sid) => (sid === managerId ? 'Менеджер' : 'Клієнт');
-  return turns.map((t) => `${label(t.speaker)}: ${t.text}`).join('\n\n');
+  const transcript = turns.map((t) => `${label(t.speaker)}: ${t.text}`).join('\n\n');
+  const segments = turns.map((t) => ({ role: role(t.speaker), text: t.text, start: t.start, end: t.end }));
+  return { transcript, segments };
 }
 
 export { transcribeDiarized, sttDiarize, buildTurns, heuristicManager };

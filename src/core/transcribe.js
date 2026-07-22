@@ -97,13 +97,14 @@ async function transcribeAudio(audioUrl, { managerName } = {}) {
   console.log(`[transcribe] downloaded ${audioBlob.size} bytes`);
 
   // Primary path: ElevenLabs (Scribe) — transcription + speaker diarization in one call, returning
-  // a ready "Менеджер:/Клієнт:" dialogue that the archive shows instantly (no second request). If
-  // it fails (no key / API error / quota), fall through to the OpenAI path below so no call is lost.
+  // a ready "Менеджер:/Клієнт:" dialogue AND timecoded segments (for audio clipping). If it fails
+  // (no key / API error / quota), fall through to the OpenAI path below so no call is lost — that
+  // path has no diarization/timecodes, so segments is null (report shows text quotes, no clips).
   if (process.env.ELEVENLABS_API_KEY) {
     try {
-      const dialogue = await transcribeDiarized(audioBlob, managerName);
-      console.log(`[transcribe] ElevenLabs OK — ${dialogue.length} chars (diarized)`);
-      return dialogue;
+      const result = await transcribeDiarized(audioBlob, managerName);
+      console.log(`[transcribe] ElevenLabs OK — ${result.transcript.length} chars (diarized, ${result.segments?.length ?? 0} segments)`);
+      return result;
     } catch (err) {
       console.error(`[transcribe] ElevenLabs failed, falling back to OpenAI: ${err.message}`);
     }
@@ -116,7 +117,7 @@ async function transcribeAudio(audioUrl, { managerName } = {}) {
   if (forced) {
     const text = await transcribeOnce(audioBlob, { language: forced, prompt: PROMPTS[forced] });
     console.log(`[transcribe] received ${text.length} chars (forced ${forced})`);
-    return text;
+    return { transcript: text, segments: null };
   }
 
   // Pass 1: Ukrainian-leaning transcription.
@@ -135,7 +136,7 @@ async function transcribeAudio(audioUrl, { managerName } = {}) {
   }
 
   console.log(`[transcribe] received ${text.length} chars`);
-  return text;
+  return { transcript: text, segments: null };
 }
 
 export { transcribeAudio };
