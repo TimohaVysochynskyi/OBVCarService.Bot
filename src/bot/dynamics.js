@@ -66,18 +66,24 @@ function buildDynamicsText(name, bucket, buckets) {
     .map((b) => `• ${bucketLabel(b.bucketStart, bucket)}: ${shortStage(b.topWeakStage)}`)
     .join('\n');
 
-  // Growth verdict: first vs last bucket.
-  const first = buckets[0];
-  const last = buckets[buckets.length - 1];
-  const dConv = convOf(last) - convOf(first);
-  const fScore = first.avgScore == null ? null : Number(first.avgScore);
-  const lScore = last.avgScore == null ? null : Number(last.avgScore);
-  const dScore = fScore != null && lScore != null ? Math.round((lScore - fScore) * 10) / 10 : null;
+  // Growth verdict: compare the first vs last MEANINGFUL bucket, ignoring near-empty ones (a bucket
+  // with 0 sales / no score would otherwise distort the trend — e.g. a 2-call week reading as 0%).
+  const salesB = buckets.filter((b) => b.salesCount > 0);
+  const scoreB = buckets.filter((b) => b.avgScore != null);
+  const convFirst = salesB.length ? convOf(salesB[0]) : null;
+  const convLast = salesB.length ? convOf(salesB[salesB.length - 1]) : null;
+  const dConv = salesB.length >= 2 ? convLast - convFirst : null;
+  const sFirst = scoreB.length ? Number(scoreB[0].avgScore) : null;
+  const sLast = scoreB.length ? Number(scoreB[scoreB.length - 1].avgScore) : null;
+  const dScore = scoreB.length >= 2 ? Math.round((sLast - sFirst) * 10) / 10 : null;
 
+  // Dead-zones so small fluctuations (noise) don't read as a real trend.
+  const CONV_EPS = 3; // percentage points
+  const SCORE_EPS = 0.3;
   let verdict = 'недостатньо даних для тренду';
-  if (buckets.length >= 2) {
-    const ups = (dConv > 0 ? 1 : 0) + (dScore != null && dScore > 0 ? 1 : 0);
-    const downs = (dConv < 0 ? 1 : 0) + (dScore != null && dScore < 0 ? 1 : 0);
+  if (dConv != null || dScore != null) {
+    const ups = (dConv != null && dConv >= CONV_EPS ? 1 : 0) + (dScore != null && dScore >= SCORE_EPS ? 1 : 0);
+    const downs = (dConv != null && dConv <= -CONV_EPS ? 1 : 0) + (dScore != null && dScore <= -SCORE_EPS ? 1 : 0);
     if (ups && !downs) verdict = 'РІСТ ✅';
     else if (downs && !ups) verdict = 'СПАД ⚠️';
     else if (ups && downs) verdict = 'змішана 🔄';
@@ -91,11 +97,13 @@ function buildDynamicsText(name, bucket, buckets) {
   });
   const recurring = Object.entries(freq).sort((a, b) => b[1] - a[1])[0];
 
-  const convWord = dConv === 0 ? '±0' : `${dConv > 0 ? '+' : ''}${dConv} п.п.`;
+  const convWord = dConv == null ? '—' : dConv === 0 ? '±0' : `${dConv > 0 ? '+' : ''}${dConv} п.п.`;
   const scoreWord = dScore == null ? '—' : dScore === 0 ? '±0' : `${dScore > 0 ? '+' : ''}${dScore}`;
+  const convLine = `Конверсія ${convFirst ?? '—'}%→${convLast ?? '—'}% (${convWord})`;
+  const scoreLine = `бал ${sFirst ?? '—'}→${sLast ?? '—'} (${scoreWord})`;
   const summary =
     `📊 *Підсумок за ${buckets.length} ${bucket === 'month' ? 'міс.' : 'тижн.'}:*\n` +
-    `Конверсія ${convOf(first)}%→${convOf(last)}% (${convWord}), бал ${first.avgScore ?? '—'}→${last.avgScore ?? '—'} (${scoreWord}).\n` +
+    `${convLine}, ${scoreLine}.\n` +
     (recurring ? `Найчастіша слабина: ${shortStage(recurring[0])} (${recurring[1]}/${buckets.length}).\n` : '') +
     `Динаміка: *${verdict}*`;
 
