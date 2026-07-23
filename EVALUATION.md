@@ -30,7 +30,9 @@
    - `callPurpose`: `sales` | `info` | `other` (`CALL_PURPOSES`). **Тільки `sales` дає `items`**; `info`/`other` → `items:[]`.
    - `items[]`: `{type:'strength'|'error', stage, label, quote}`. Цитата приймається лише якщо `findQuote(segments, quote, {requireRole:'manager'})` знайшла її **в сегменті менеджера** → привʼязує `{start,end,segIndex}`. Інакше item відкидається (анти-фабрикація + анти-мисатрибуція).
    - `ANALYSIS_VERSION=2` (bump → re-map через беклог).
-6. **ГЕЙТ ЕФЕКТИВНОСТІ за метою** (Задача 1) — `classifyCall(transcript)` → `{isSuccess, weakestStage, communicationScore}` ([classifyCall.js](src/core/classifyCall.js); enum `WEAKEST_STAGES`; `OPENAI_ANALYZE_MODEL`) виконується **ЛИШЕ якщо `callPurpose === 'sales'`**. Для `info`/`other` `classifyCall` **не викликається взагалі** (нуль ресурсу на оцінку непродажного), поля = NULL. Стійкість: MAP впав (мета невідома) → трактуємо як `sales` і все ж робимо `classifyCall`, щоб транзієнтна помилка не з'їла оцінку.
+6. **ГЕЙТ ЕФЕКТИВНОСТІ за метою** (Задача 1) — `classifyCall(transcript)` → `{isSuccess, weakestStage, communicationScore}` ([classifyCall.js](src/core/classifyCall.js); `OPENAI_ANALYZE_MODEL`) виконується **ЛИШЕ якщо `callPurpose === 'sales'`**. Для `info`/`other` `classifyCall` **не викликається взагалі** (нуль ресурсу на оцінку непродажного), поля = NULL. Стійкість: MAP впав (мета невідома) → трактуємо як `sales` і все ж робимо `classifyCall`, щоб транзієнтна помилка не з'їла оцінку.
+   - `weakestStage` enum — спільна таксономія **4 етапів** [stages.js](src/core/stages.js): `SALES_STAGES` (та сама, що й `analyzeCall.item.stage`; + `null` коли етап не застосовний). **НЕ редагована** (Задача 2B).
+   - `communicationScore` (1-10) — за **редагованою РУБРИКОЮ** (Задача 2A): `getScoreRubric()` = `app_state.score_rubric` (правив власник через `/rubric`) або `DEFAULT_SCORE_RUBRIC` (анкерована шкала 9-10…1-2). Рубрика інжектиться в system-промпт; редагується лише формулювання критеріїв — шкалу/структуру/enum тримає код.
 7. **Збереження** — `saveCall(...)` ([store.js](src/core/store.js)): `transcript`, `segments`, `behaviors`, `analysis_version`, `call_purpose`, класифікація-або-NULL, `manager_name`. MAP не фатальний (фейл → `behaviors=null`, мета трактується як sales на кроці 6).
 8. **Watchdog балансу** — `checkElevenLabsBalance()` ([pollNewCalls.js](src/jobs/pollNewCalls.js)): `getElevenLabsBalance()` → `character_limit-character_count`; USD-оцінка (`ELEVENLABS_USD_PER_1000_CREDITS`); `< ELEVENLABS_MIN_BALANCE_USD` → `sendAlert`. Дедуп `app_state.elevenlabs_balance_state` (`ok`/`low`/`no_permission`). Потребує права ключа `user_read`.
 
@@ -48,7 +50,7 @@
 | `analysis_version` | INT | =2. |
 | `is_success`,`weakest_stage`,`communication_score` | — | Класифікація. |
 
-`app_state`: `last_polled_until`, `last_report_slot`/`last_report_until`, `analyze_prompt`, `report_recipients`/`alert_recipients`, `report_times`, `elevenlabs_balance_state`.
+`app_state`: `last_polled_until`, `last_report_slot`/`last_report_until`, `analyze_prompt`, `score_rubric` (рубрика `communicationScore`, `/rubric`), `report_recipients`/`alert_recipients`, `report_times`, `elevenlabs_balance_state`.
 
 ---
 
@@ -92,13 +94,13 @@ Fan-out: `sendScheduledReport` будує звіт+кліпи ОДИН раз н
 4. Мінімум 3 докази — `MIN_EVIDENCE` в `assembleFindings`.
 5. Без дублів — глобальний `usedIds`.
 6. Релевантність — `verifyFindingsRelevance`.
-7. Промпт `/prompt` керує ЛИШЕ тоном/формулюваннями; структуру й правила — код.
+7. Промпт `/prompt` керує ЛИШЕ тоном/формулюваннями звіту; рубрика `/rubric` — ЛИШЕ критеріями балу 1-10. Структуру, правила доказів, шкалу й таксономію етапів (`core/stages.js`) — код.
 
 ---
 
 ## F. Ролі / доступ ([access.js](src/bot/access.js), таблиця `bot_users`)
 
-- `director`/`marketer` (admin) — повний доказовий звіт (`deliverManagerReport`, audio).
+- `director`/`marketer` (admin) — повний доказовий звіт (`deliverManagerReport`, audio) + редагування промпта звіту (`/prompt`) і рубрики оцінки (`/rubric`).
 - `manager` — ЛИШЕ числовий блок про себе (`me:go` у [stats.js](src/bot/stats.js)), БЕЗ findings/аудіо. Ідентичність — `bot_users.operator_name`.
 - `mechanic` — лише база знань.
 - Gate: `featureOf(ctx)` + `canAccess(role, feature)`. Меню — `mainMenu(role)` ([keyboards.js](src/bot/keyboards.js)).

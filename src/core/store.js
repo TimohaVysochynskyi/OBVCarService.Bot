@@ -663,6 +663,21 @@ async function clearStoredAnalyzePrompt() {
   await deleteState('analyze_prompt');
 }
 
+// Communication-score rubric (the tunable criteria for the per-call communicationScore 1-10).
+// Editable by the owner via the bot's /rubric flow; null when unset -> classifyCall falls back to
+// its built-in DEFAULT_SCORE_RUBRIC. Same typed-wrapper pattern as the analysis prompt.
+async function getStoredScoreRubric() {
+  return getState('score_rubric');
+}
+
+async function setStoredScoreRubric(text) {
+  await setState('score_rubric', text);
+}
+
+async function clearStoredScoreRubric() {
+  await deleteState('score_rubric');
+}
+
 // Notification recipients (ingest failure alerts + daily PDF reports). Managed by admins in the
 // bot's /settings screen and stored here as a JSON array of { id, name }: id is a Telegram chat id
 // (a user who has started the bot, or a group), name is a human label shown in the settings list.
@@ -812,6 +827,9 @@ export {
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,
+  getStoredScoreRubric,
+  setStoredScoreRubric,
+  clearStoredScoreRubric,
   getRecipients,
   addRecipient,
   removeRecipient,

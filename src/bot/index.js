@@ -14,9 +14,11 @@ import { registerArchive, archivePicker } from './archive.js';
 import { registerKnowledgeBase, answerQuestion, promptQuestion, openFiles, openKbDocById } from './kb.js';
 import { sendManualReport, startScheduler } from './report.js';
 import { registerPrompt, openPromptMenu } from './prompt.js';
+import { registerRubric, openRubricMenu } from './rubric.js';
 import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
 import { registerSettings, openSettings, addRecipientByIdText } from './settings.js';
 import { setAnalyzePrompt } from './analyze.js';
+import { setScoreRubric } from '../core/classifyCall.js';
 import { displayName, formatPhone } from './operators.js';
 import {
   getUser,
@@ -113,13 +115,14 @@ const CMD = {
   files: { command: 'files', description: '📁 Файли (база знань)' },
   report: { command: 'report', description: '🔄 Звіт зараз' },
   prompt: { command: 'prompt', description: '🧠 Промпт аналізу' },
+  rubric: { command: 'rubric', description: '⭐ Рубрика оцінки' },
   roles: { command: 'roles', description: '👥 Ролі' },
   settings: { command: 'settings', description: '⚙️ Налаштування' },
   myreport: { command: 'myreport', description: '📊 Моя статистика' },
 };
 
 function commandsForRole(role) {
-  if (isAdmin(role)) return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings];
+  if (isAdmin(role)) return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.rubric, CMD.roles, CMD.settings];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
   return [CMD.menu, CMD.ask]; // mechanic
 }
@@ -186,6 +189,7 @@ bot.command('archive', openArchive);
 bot.command('ask', openAsk);
 bot.command('files', openFilesMenu);
 bot.command('prompt', openPromptMenu);
+bot.command('rubric', openRubricMenu);
 bot.command('report', runReport);
 bot.command('roles', openRolesMenu);
 bot.command('settings', openSettings);
@@ -208,6 +212,7 @@ registerStats(bot);
 registerArchive(bot);
 registerKnowledgeBase(bot, kbState);
 registerPrompt(bot);
+registerRubric(bot);
 registerRoles(bot);
 registerSettings(bot);
 
@@ -267,6 +272,13 @@ bot.on('message:text', async (ctx) => {
     await setAnalyzePrompt(ctx.message.text);
     ctx.session.awaiting = null;
     await ctx.reply('✅ Промпт оновлено — застосується до наступних аналізів і звітів.', { reply_markup: mainMenu(ctx.role) });
+    return;
+  }
+
+  if (st?.type === 'rubric') {
+    await setScoreRubric(ctx.message.text);
+    ctx.session.awaiting = null;
+    await ctx.reply('✅ Рубрику оцінки оновлено — застосується до наступних дзвінків.', { reply_markup: mainMenu(ctx.role) });
     return;
   }
 

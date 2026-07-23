@@ -1,5 +1,6 @@
 import { withRetry } from '../core/retry.js';
 import { findQuote } from '../core/quoteMatch.js';
+import { SALES_STAGES } from '../core/stages.js';
 import {
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
@@ -137,7 +138,10 @@ function buildCandidates(calls) {
         startTime: c.startTime,
         segments: c.segments || null,
         type: it.type === 'strength' ? 'strength' : 'error',
-        stage: it.stage || 'інше',
+        // stage is internal hint metadata for the reduce; keep any stored value, but never emit a
+        // non-taxonomy fallback (shared 4 stages — core/stages.js). Old cached rows may still carry
+        // a legacy stage string; that's harmless (model input only, not shown in the finding).
+        stage: it.stage || SALES_STAGES[0],
         label: it.label || '',
         quote: it.quote,
         start: it.start ?? null,

@@ -45,6 +45,7 @@ function featureOf(ctx) {
     if (cq.startsWith('arch:')) return 'archive';
     if (cq.startsWith('report')) return 'report';
     if (cq.startsWith('prompt')) return 'prompt';
+    if (cq.startsWith('rubric')) return 'rubric';
     if (cq.startsWith('roles')) return 'roles';
     if (cq === 'set' || cq.startsWith('set:')) return 'settings';
     if (cq.startsWith('me:')) return 'stats_self';
@@ -62,6 +63,7 @@ function featureOf(ctx) {
       files: 'kb_edit',
       report: 'report',
       prompt: 'prompt',
+      rubric: 'rubric',
       roles: 'roles',
       settings: 'settings',
       myreport: 'stats_self',

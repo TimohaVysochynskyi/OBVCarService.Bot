@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
 import { findQuote } from './quoteMatch.js';
+import { SALES_STAGES } from './stages.js';
 
 // Per-call "MAP" step of the evidence-first report pipeline. Runs ONCE per call at ingest (cheap
 // model) and the result is cached in calls.behaviors, so per-period reports only aggregate stored
@@ -14,15 +15,9 @@ const ANALYSIS_VERSION = 2;
 const MAX_ITEMS = 8; // bound noise/cost; the reduce only needs recurring patterns, not everything
 const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
 
-const BEHAVIOR_STAGES = [
-  'встановлення контакту',
-  'виявлення потреби',
-  'консультація / презентація',
-  'робота із запереченнями',
-  'допродаж',
-  'закриття (фіксація запису)',
-  'інше',
-];
+// Stage taxonomy is shared with classifyCall (core/stages.js) — one vocabulary everywhere. item.stage
+// is INTERNAL metadata (a hint for the report reduce's clustering); it is NOT shown in the delivered
+// finding, so constraining it to the 4 sales stages costs nothing user-visible.
 
 // Purpose of the call, decided first. Only 'sales' calls feed the sales-effectiveness report;
 // 'info'/'other' calls contribute NO behaviours (so a routine status update never becomes a
@@ -45,7 +40,7 @@ const SYSTEM_PROMPT = `Контекст: менеджер автосервісу
 - Аналізуй ЛИШЕ репліки менеджера (не клієнта).
 - "quote" = рівно один рядок МЕНЕДЖЕРА, СКОПІЙОВАНИЙ ДОСЛІВНО (той самий текст, без переказу/перекладу/виправлень).
 - Цитата має САМА ПО СОБІ демонструвати цю поведінку. Якщо рядок нейтральний, загальний або лише побічно стосується — НЕ додавай його. Краще 0 поведінок, ніж притягнута за вуха.
-- type: "strength" або "error". label: коротка назва (3-6 слів). stage: етап зі списку.
+- type: "strength" або "error". label: коротка назва (3-6 слів). stage: найближчий етап продажу зі списку: ${SALES_STAGES.join(' / ')}.
 - Не вигадуй. Не більше 8 поведінок. Для короткого/тривіального дзвінка їх може бути 0.`;
 
 const SCHEMA = {
@@ -61,7 +56,7 @@ const SCHEMA = {
           type: 'object',
           properties: {
             type: { type: 'string', enum: ['strength', 'error'] },
-            stage: { type: 'string', enum: BEHAVIOR_STAGES },
+            stage: { type: 'string', enum: SALES_STAGES },
             label: { type: 'string' },
             quote: { type: 'string' },
           },
@@ -135,7 +130,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
     if (!hit) continue;
     items.push({
       type: it.type === 'strength' ? 'strength' : 'error',
-      stage: it.stage || 'інше',
+      stage: SALES_STAGES.includes(it.stage) ? it.stage : SALES_STAGES[0],
       label: String(it.label || '').trim(),
       quote: it.quote.trim(),
       start: hit.start,
@@ -146,4 +141,4 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
   return { version: ANALYSIS_VERSION, callPurpose, items };
 }
 
-export { analyzeCallBehaviors, ANALYSIS_VERSION, BEHAVIOR_STAGES, CALL_PURPOSES };
+export { analyzeCallBehaviors, ANALYSIS_VERSION, CALL_PURPOSES };
