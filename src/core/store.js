@@ -472,6 +472,29 @@ async function getDailyTrend(name, start, end) {
   return rows;
 }
 
+// Growth trajectory: the manager's numbers bucketed by Kyiv week or month, most recent `limit`
+// buckets (chronological order restored by the caller). Live SQL (retroactive over ALL history in
+// calls — the growth view works immediately, before report_segments accumulates). bucket ∈
+// 'week'|'month' (validated by the caller before it reaches date_trunc). topWeakStage per bucket
+// shows how the weakest sales stage evolves over time.
+async function getBucketedTrend(name, bucket, limit = 8) {
+  const unit = bucket === 'month' ? 'month' : 'week';
+  const { rows } = await pool.query(
+    `SELECT to_char(date_trunc($2, start_time AT TIME ZONE 'Europe/Kyiv'), 'YYYY-MM-DD') AS "bucketStart",
+       COUNT(*)::int AS "callCount",
+       COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
+       COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
+       COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
+       ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
+       MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER}) AS "topWeakStage"
+     FROM calls
+     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> ''
+     GROUP BY 1 ORDER BY 1 DESC LIMIT $3`,
+    [name, unit, limit]
+  );
+  return rows.reverse(); // chronological (oldest → newest)
+}
+
 async function countOperatorCalls(name, start, end) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS count FROM calls
@@ -944,6 +967,7 @@ export {
   getOperators,
   getOperatorStats,
   getDailyTrend,
+  getBucketedTrend,
   getCallsForReport,
   getRecentCalls,
   getRecentCallsForOperator,

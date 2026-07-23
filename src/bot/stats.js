@@ -1,8 +1,9 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
-import { getOperators, getOperatorStats, listOperatorNotes } from '../core/store.js';
+import { getOperators, getOperatorStats, getBucketedTrend, listOperatorNotes } from '../core/store.js';
 import { operatorListKeyboard, periodKeyboard, operatorLabel } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
 import { deliverManagerReport } from './report.js';
+import { buildDynamicsText } from './dynamics.js';
 import { periodRange, formatKyiv } from './time.js';
 import { sendLong, showScreen, withProgress } from './ui.js';
 
@@ -16,6 +17,28 @@ async function statsPicker() {
   return { text: '📊 Оберіть менеджера:', kb: operatorListKeyboard(operators, 'stat') };
 }
 
+// Growth dashboard for a manager — the primary screen. Numeric trajectory + weak-stage evolution +
+// growth verdict across the last buckets (weeks or months). Text-only, no LLM (getBucketedTrend is
+// one live SQL query), so it's instant. The classic per-period evidence report is a drill-down.
+async function showDynamics(ctx, name, bucket) {
+  const limit = bucket === 'month' ? 6 : 8;
+  const buckets = await getBucketedTrend(name, bucket, limit);
+  const text = buildDynamicsText(name, bucket, buckets);
+  const tick = (b) => (b === bucket ? ' ✓' : '');
+  const kb = new InlineKeyboard()
+    .text(`📅 Тижні${tick('week')}`, `stat:dyn:week:${name}`)
+    .text(`🗓 Місяці${tick('month')}`, `stat:dyn:month:${name}`)
+    .row()
+    .text('📊 Звіт за період →', `stat:rep:${name}`)
+    .row()
+    .text('📝 Нотатка', `note:add:${name}`)
+    .text('🗒 Нотатки', `note:list:${name}`)
+    .row()
+    .text('« Менеджери', 'stat:pick')
+    .text('« Меню', 'menu');
+  await showScreen(ctx, text, kb);
+}
+
 function registerStats(bot) {
   bot.callbackQuery('stat:pick', async (ctx) => {
     const { text, kb } = await statsPicker();
@@ -23,10 +46,24 @@ function registerStats(bot) {
     await showScreen(ctx, text, kb);
   });
 
+  // Manager landing = the GROWTH dashboard (numeric trajectory + weak-stage evolution + verdict),
+  // not a one-off effectiveness report. The per-period evidence report is one tap away (stat:rep).
   bot.callbackQuery(/^stat:op:(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showDynamics(ctx, ctx.match[1], 'week');
+  });
+
+  // Toggle bucket granularity (weeks ⇄ months).
+  bot.callbackQuery(/^stat:dyn:(week|month):(.+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await showDynamics(ctx, ctx.match[2], ctx.match[1]);
+  });
+
+  // Drill-down: the classic per-period evidence report.
+  bot.callbackQuery(/^stat:rep:(.+)$/, async (ctx) => {
     const name = ctx.match[1];
     await ctx.answerCallbackQuery();
-    await showScreen(ctx, `${operatorLabel(name)} — оберіть період:`, periodKeyboard((p) => `stat:go:${p}:${name}`, 'stat:pick'));
+    await showScreen(ctx, `${operatorLabel(name)} — звіт за період:`, periodKeyboard((p) => `stat:go:${p}:${name}`, `stat:op:${name}`));
   });
 
   bot.callbackQuery(/^stat:go:(day|week|month|quarter):(.+)$/, async (ctx) => {
@@ -35,13 +72,15 @@ function registerStats(bot) {
     const { start, end } = periodRange(period);
     await ctx.answerCallbackQuery();
     const kb = new InlineKeyboard()
-      .text('📝 Додати нотатку', `note:add:${name}`)
+      .text('📝 Нотатка', `note:add:${name}`)
       .text('🗒 Нотатки', `note:list:${name}`)
       .row()
-      .text('« Періоди', `stat:op:${name}`)
+      .text('« Періоди', `stat:rep:${name}`)
+      .text('📈 Динаміка', `stat:op:${name}`)
+      .row()
       .text('« Меню', 'menu');
     // The full evidence report (numeric header + findings + audio clips) is admin-only. It's built
-    // from the cached per-call analysis (analyze.reduceFindings) and cuts audio for negatives.
+    // from the cached per-segment analysis (report.js) and cuts audio for negatives.
     const res = await withProgress(
       ctx.api,
       ctx.chat.id,
