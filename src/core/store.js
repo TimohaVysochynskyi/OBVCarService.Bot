@@ -452,6 +452,26 @@ async function getOperatorStats(name, start, end) {
   return rows[0];
 }
 
+// Per-Kyiv-day numeric breakdown for a manager over [start, end) — the growth TREND shown in
+// multi-day reports (week/month/quarter). Live SQL (cheap, exact, deterministic); no LLM. Sales
+// metrics use SALES_FILTER so info/other calls don't distort conversion. Only days with calls.
+async function getDailyTrend(name, start, end) {
+  const { rows } = await pool.query(
+    `SELECT (date_trunc('day', start_time AT TIME ZONE 'Europe/Kyiv'))::date AS "day",
+       COUNT(*)::int AS "callCount",
+       COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
+       COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
+       COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
+       ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore"
+     FROM calls
+     WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
+       AND transcript IS NOT NULL AND transcript <> ''
+     GROUP BY 1 ORDER BY 1`,
+    [name, start, end]
+  );
+  return rows;
+}
+
 async function countOperatorCalls(name, start, end) {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS count FROM calls
@@ -923,6 +943,7 @@ export {
   getOperatorRoster,
   getOperators,
   getOperatorStats,
+  getDailyTrend,
   getCallsForReport,
   getRecentCalls,
   getRecentCallsForOperator,

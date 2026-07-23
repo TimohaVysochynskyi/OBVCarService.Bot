@@ -69,7 +69,9 @@
 - **Дедуп/цілісність** — подвійний клік: `manual_tail` з тим самим `call_ids` віддається без аналізу. Grace: слот віддається через `SEGMENT_GRACE_MIN`(10) хв. Self-heal: недавній (≤24 год) заморожений відрізок зі зміненим `call_ids` перераховується.
 - **Готові фрази** — `recommended_phrases` від моделі (об'єднання по прогонах, дедуп, ≤7).
 
-Блок finding: `{type, claim, why, action, evidence:[{callId, startTime, quote, start, end}]}`. ⚠️ Тиждень/місяць/квартал у «Статистиці менеджера» поки на живому single-reduce (`buildManagerEvidenceReport`, один блок); Фаза 2 → список відрізків + тренд.
+Блок finding: `{type, claim, why, action, evidence:[{callId, startTime, quote, start, end}]}`.
+
+**Мульти-денні періоди (Фаза 2)** — тиждень/місяць/квартал у «Статистиці менеджера» = `buildTrendReport` (`report.js`, `deliverManagerReport({mode:'trend'})`): числовий **тренд по днях** (`store.getDailyTrend`, live SQL, `date_trunc` у Києві) + findings з **уже заморожених** scheduled-відрізків (`getScheduledSegmentsInRange`, **REUSE-ONLY** — історичні відрізки НЕ рахуються на льоту, щоб місяць не тягнув 60-90 сегментів × self-consistency; показуються останні ≤3 з findings). Дні без замороженого аналізу все одно є в тренді (live). `mode`: `daily` (сегментна збірка + хвіст) / `trend` (мульти-день) / `live` (легасі single-reduce). ⚠️ Окремий екран «Еволюція» — майбутня задача (дані вже копляться).
 
 ---
 

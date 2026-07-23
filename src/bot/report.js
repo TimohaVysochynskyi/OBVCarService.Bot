@@ -1,6 +1,8 @@
 import {
   getOperatorStats,
   getCallsForReport,
+  getDailyTrend,
+  getScheduledSegmentsInRange,
   getActiveOperatorsInRange,
   getRecipients,
   getReportTimes,
@@ -13,7 +15,7 @@ import { assembleReport } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
 import { withProgress, sendLong } from './ui.js';
 import { displayName } from './operators.js';
-import { kyivParts, kyivDaySegments, startOfDay, formatKyiv } from './time.js';
+import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from './time.js';
 
 // Evidence-first report delivery (Telegram text + audio clips). A report is a set of BLOCKS — each
 // block is one analysed time segment (a frozen 'scheduled' segment reused from report_segments, or a
@@ -34,11 +36,58 @@ async function buildManagerEvidenceReport(name, start, end) {
   return { name, stats, blocks: [{ start, end, kind: 'live', findings, phrases }], phrases, start, end };
 }
 
+// Multi-day report (week/month/quarter): a live per-day numeric TREND (growth signal) + the findings
+// of the already-frozen scheduled segments in the period — REUSE ONLY, no on-demand compute (a month
+// could be 60-90 segments × self-consistency = a cost blow-up). Findings are capped to the most
+// recent analysed segments; older days still appear in the trend even without a stored analysis.
+async function buildTrendReport(name, start, end) {
+  const stats = await getOperatorStats(name, start, end);
+  if (!stats.callCount) return null;
+  const trend = await getDailyTrend(name, start, end);
+  const stored = await getScheduledSegmentsInRange(name, start, end);
+  const withFindings = stored.filter((s) => (s.findings || []).length);
+  const latest = withFindings.slice(-3).map((s) => ({
+    start: new Date(s.periodStart),
+    end: new Date(s.periodEnd),
+    kind: 'scheduled',
+    findings: s.findings || [],
+    phrases: s.phrases || [],
+  }));
+  const seen = new Set();
+  const phrases = [];
+  for (const b of latest) {
+    for (const p of b.phrases) {
+      const t = String(p || '').trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      phrases.push(t);
+      if (phrases.length >= 7) break;
+    }
+    if (phrases.length >= 7) break;
+  }
+  return {
+    name, stats, trend, blocks: latest, phrases, start, end,
+    analyzedSegments: stored.length,
+  };
+}
+
 const hm = (date) => {
   const p = kyivParts(new Date(date));
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(p.hour)}:${pad(p.minute)}`;
 };
+
+// Per-day growth trend (sales-relevant numbers). Days without calls are omitted by getDailyTrend.
+function trendText(report) {
+  const lines = ['📈 *Динаміка по днях* (продажні дзвінки):'];
+  for (const d of report.trend) {
+    const conv = d.salesCount ? Math.round((d.successCount / d.salesCount) * 100) : 0;
+    lines.push(
+      `${shortDate(d.day)}: ${d.callCount} дзв (${d.salesCount} прод), конв ${conv}%, бал ${d.avgScore ?? '—'}`
+    );
+  }
+  return lines.join('\n');
+}
 
 // Numeric header. Conversion / score / weakest stage are over SALES-relevant calls; the breakdown
 // line shows how many of the total were sales vs informational so the numbers are honest.
@@ -62,7 +111,7 @@ function headerText(report) {
 function blockHeader(b) {
   const range = `${hm(b.start)}–${hm(b.end)}`;
   if (b.kind === 'manual_tail') return `🕒 Поточний відрізок ${range} (свіжий аналіз)`;
-  return `🗓 Відрізок ${range}`;
+  return `🗓 Відрізок ${shortDate(b.start)} ${range}`;
 }
 
 // Plain text (no markdown) so arbitrary quote characters (_ * [ …) never break rendering.
@@ -94,18 +143,31 @@ async function sendPhrases(api, chatId, phrases) {
 async function deliverReport(api, chatId, report, { clips } = {}) {
   await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown' });
 
+  // Multi-day: growth trend first (per-day numbers), then the findings of the analysed segments.
+  const isTrend = Array.isArray(report.trend);
+  if (isTrend && report.trend.length) await sendLong(api, chatId, trendText(report), { parseMode: 'Markdown' });
+
   const blocks = (report.blocks || []).filter((b) => (b.findings || []).length);
   if (!blocks.length) {
     const sales = report.stats.salesCount ?? 0;
-    const msg =
-      sales === 0
-        ? '📄 За цей період продажних дзвінків не було — оцінювати продажні навички нема на чому. Вище — числові показники.'
-        : '✅ За цей період не знайдено повторюваних патернів (з ≥3 підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.';
+    let msg;
+    if (isTrend) {
+      msg =
+        report.analyzedSegments === 0
+          ? '📄 За цей період ще немає заморожених відрізків аналізу — патерни зʼявляться, коли відрізки будуть проаналізовані (авто-звіти / «Звіт зараз»). Вище — числова динаміка.'
+          : '✅ У проаналізованих відрізках періоду не зафіксовано повторюваних патернів (з ≥3 прикладами). Вище — числова динаміка.';
+    } else {
+      msg =
+        sales === 0
+          ? '📄 За цей період продажних дзвінків не було — оцінювати продажні навички нема на чому. Вище — числові показники.'
+          : '✅ За цей період не знайдено повторюваних патернів (з ≥3 підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.';
+    }
     await sendLong(api, chatId, msg);
     await sendPhrases(api, chatId, report.phrases);
     return;
   }
 
+  if (isTrend) await sendLong(api, chatId, '🔎 Патерни за останні проаналізовані відрізки:');
   const multi = blocks.length > 1;
   for (const b of blocks) {
     if (multi) await sendLong(api, chatId, blockHeader(b));
@@ -127,13 +189,16 @@ async function deliverReport(api, chatId, report, { clips } = {}) {
   await sendPhrases(api, chatId, report.phrases);
 }
 
-// Build + deliver one manager's report to one chat. segmented=true assembles from the frozen
-// per-segment cache + a live tail (the daily flow); false = the legacy single live reduce
-// (multi-day stats). audio=true cuts and attaches the clips.
-async function deliverManagerReport(api, chatId, name, start, end, { audio = false, segmented = false } = {}) {
-  const report = segmented
-    ? await assembleReport(name, start, end)
-    : await buildManagerEvidenceReport(name, start, end);
+// Build + deliver one manager's report to one chat. mode:
+//   'daily' — assemble from the frozen per-segment cache + a live tail (today's flow);
+//   'trend' — multi-day: per-day trend + findings of already-frozen segments (reuse only);
+//   'live'  — legacy single live reduce over the whole period (fallback).
+// audio=true cuts and attaches the clips.
+async function deliverManagerReport(api, chatId, name, start, end, { audio = false, mode = 'daily' } = {}) {
+  let report;
+  if (mode === 'trend') report = await buildTrendReport(name, start, end);
+  else if (mode === 'live') report = await buildManagerEvidenceReport(name, start, end);
+  else report = await assembleReport(name, start, end);
   if (!report) return { empty: true };
   const clips = audio ? await prepareClips(report) : null;
   await deliverReport(api, chatId, report, { clips });
@@ -154,7 +219,7 @@ async function sendManualReport(api, chatId) {
       const managers = await getActiveOperatorsInRange(start, end);
       if (!managers.length) return { empty: true };
       for (const m of managers) {
-        await deliverManagerReport(api, chatId, m.name, start, end, { audio: true, segmented: true });
+        await deliverManagerReport(api, chatId, m.name, start, end, { audio: true, mode: 'daily' });
       }
       return { sent: true };
     },
