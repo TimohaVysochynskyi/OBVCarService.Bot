@@ -44,25 +44,43 @@ async function resolveManagerName(call, transcript, roster) {
   return call.employeeName;
 }
 
-// Transcribes, classifies (success / weakest stage / score), resolves the operator name, and
-// saves. Shared by the fresh-call path and the pending-retry path so all of this happens
-// exactly once, right when the transcript first becomes available.
+// Determines the call PURPOSE first, scores effectiveness ONLY for sales calls, resolves the
+// operator name, and saves. Shared by the fresh-call path and the pending-retry path so all of
+// this happens exactly once, right when the transcript first becomes available.
+//
+// Purpose-first is deliberate: a non-sales call (info/other — a routine "your car is ready", a
+// booking confirmation, a status query) must not spend any resource on sales effectiveness
+// evaluation. So the per-call MAP (which decides callPurpose) runs BEFORE classifyCall, and
+// classifyCall runs only when the call is a sales call.
 async function transcribeClassifyAndSave(call, roster) {
   const recordUrl = await getCallRecordUrl(call.generalCallId);
   // employeeName (Binotel, personal extensions) anchors speaker-role detection on our actual
   // employee. Null for shared handsets — role detection falls back to operator-role heuristics.
   // segments = timecoded diarized turns (null on the OpenAI fallback / single-speaker calls).
   const { transcript, segments } = await transcribeAudio(recordUrl, { managerName: call.employeeName });
-  const classification = await classifyCall(transcript);
   const managerName = await resolveManagerName(call, transcript, roster);
 
-  // Per-call "map": tag manager behaviours + verbatim quotes, cached for the report reduce. Never
-  // fatal — if it fails, save the call without behaviors so ingest still succeeds (backfill later).
+  // Per-call "map": decides callPurpose (sales/info/other) and, for sales calls, tags manager
+  // behaviours + verbatim quotes (cached for the report reduce). Never fatal — if it fails we save
+  // the call without behaviors (backfill later) and, since the purpose is then unknown, fall back
+  // to treating it as a sales call below so a transient error never silently drops the scoring.
   let behaviors = null;
   try {
     behaviors = await analyzeCallBehaviors(transcript, segments, managerName);
   } catch (err) {
     console.error(`[processCalls]   behavior analysis failed for ${call.generalCallId}: ${err.message}`);
+  }
+
+  // Score success / weakest stage / communication ONLY for sales calls. Non-sales calls get NULL
+  // classification and NO classifyCall request at all (zero resources spent evaluating them). A
+  // null/unknown purpose (behaviors failed) is treated as sales so we don't lose scoring on errors.
+  const purpose = behaviors?.callPurpose ?? null;
+  const isSalesCall = purpose === null || purpose === 'sales';
+  let classification = { isSuccess: null, weakestStage: null, communicationScore: null };
+  if (isSalesCall) {
+    classification = await classifyCall(transcript);
+  } else {
+    console.log(`[processCalls]   ${call.generalCallId} purpose=${purpose} → non-sales, skipping effectiveness scoring`);
   }
 
   await saveCall({

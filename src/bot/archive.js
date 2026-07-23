@@ -13,6 +13,12 @@ const PAGE = 8;
 // instantly. Only the older/plain (OpenAI-fallback) transcripts need on-demand formatting.
 const looksDiarized = (t) => /(^|\n)\s*(Менеджер|Клієнт)\s*:/.test(t || '');
 
+// Non-sales calls (info/other) carry no effectiveness score — the ingest deliberately skips
+// scoring them. Show a neutral purpose tag instead of a misleading 👎/бал. Sales calls (and
+// legacy rows with a NULL purpose, treated as sales) keep the success/score display.
+const isNonSales = (p) => p === 'info' || p === 'other';
+const purposeLabel = (p) => (p === 'other' ? 'службовий' : 'інформаційний');
+
 function shortKyiv(date) {
   const p = kyivParts(new Date(date));
   const pad = (n) => String(n).padStart(2, '0');
@@ -59,7 +65,9 @@ function registerArchive(bot) {
     const calls = await listOperatorCalls(name, start, end, PAGE, offset);
     const kb = new InlineKeyboard();
     for (const c of calls) {
-      const btn = `${shortKyiv(c.startTime)} ${c.isSuccess ? '👍' : '👎'} бал ${c.communicationScore ?? '—'}`;
+      const btn = isNonSales(c.callPurpose)
+        ? `${shortKyiv(c.startTime)} ℹ️ ${purposeLabel(c.callPurpose)}`
+        : `${shortKyiv(c.startTime)} ${c.isSuccess ? '👍' : '👎'} бал ${c.communicationScore ?? '—'}`;
       kb.text(btn, `arch:call:${c.generalCallId}`).row();
     }
     if (offset > 0) kb.text('◀', `arch:go:${period}:${Math.max(0, offset - PAGE)}:${name}`);
@@ -79,12 +87,15 @@ function registerArchive(bot) {
       await ctx.reply('Дзвінок не знайдено.');
       return;
     }
+    const evalLine = isNonSales(c.callPurpose)
+      ? `Тип: ${purposeLabel(c.callPurpose)} (без оцінки продажів)`
+      : `Успіх: ${c.isSuccess ? 'так' : 'ні'}, бал: ${c.communicationScore ?? '—'}, слабкий етап: ${c.weakestStage ?? '—'}`;
     const header =
       `📞 *Дзвінок* ${gid}\n` +
       `Менеджер: ${displayName(c.managerName) ?? '—'}\n` +
       `Час: ${formatKyiv(new Date(c.startTime))}\n` +
       `Тривалість: ${c.durationSec ?? '—'} с\n` +
-      `Успіх: ${c.isSuccess ? 'так' : 'ні'}, бал: ${c.communicationScore ?? '—'}, слабкий етап: ${c.weakestStage ?? '—'}`;
+      evalLine;
     // sendLong (not ctx.reply) so a manager name with markdown chars falls back to plain text.
     await sendLong(ctx.api, ctx.chat.id, header, { parseMode: 'Markdown' });
     if (looksDiarized(c.transcript)) {

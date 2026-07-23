@@ -272,6 +272,21 @@ async function updateCallAnalysis(generalCallId, { transcript, segments, behavio
   );
 }
 
+// Historical calls ingested before call_purpose existed (call_purpose IS NULL) that still have a
+// stored transcript. The cheap purpose-only backfill (src/scripts/backfillPurpose.js) re-maps these
+// over the ALREADY-STORED transcript (no re-transcription) to set call_purpose, so routine info/
+// other calls stop being counted as sales by SALES_FILTER. Returns the existing segments too so the
+// backfill can pass them back unchanged (updateCallAnalysis overwrites segments unconditionally).
+async function getCallsMissingPurpose() {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments
+     FROM calls
+     WHERE call_purpose IS NULL AND transcript IS NOT NULL AND transcript <> ''
+     ORDER BY start_time DESC`
+  );
+  return rows;
+}
+
 // ---- Operators (source of truth = Binotel names on the calls) -----------------------------
 
 // The set of named operators seen in calls - i.e. names Binotel put on personal extensions
@@ -333,7 +348,8 @@ async function countOperatorCalls(name, start, end) {
 async function listOperatorCalls(name, start, end, limit, offset) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
-            is_success AS "isSuccess", communication_score AS "communicationScore"
+            is_success AS "isSuccess", communication_score AS "communicationScore",
+            call_purpose AS "callPurpose"
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
        AND transcript IS NOT NULL AND transcript <> ''
@@ -396,7 +412,8 @@ async function getCallByGeneralId(generalCallId) {
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
             internal_number AS "internalNumber", start_time AS "startTime",
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
-            weakest_stage AS "weakestStage", communication_score AS "communicationScore"
+            weakest_stage AS "weakestStage", communication_score AS "communicationScore",
+            call_purpose AS "callPurpose"
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -759,6 +776,7 @@ export {
   getRecentCallsForOperator,
   updateCallTranscript,
   updateCallAnalysis,
+  getCallsMissingPurpose,
   countOperatorCalls,
   listOperatorCalls,
   getCallByGeneralId,
