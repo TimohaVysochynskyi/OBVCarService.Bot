@@ -4,10 +4,10 @@ import { getCallRecordUrl } from '../core/binotel.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { displayName, hasAlias } from '../bot/operators.js';
 
-// One-off: re-transcribe the last N calls of each "person" operator (named managers + the aliased
-// director number, e.g. Богдан 0674738200) via ElevenLabs, so the diarized "Менеджер:/Клієнт:"
-// dialogue can be reviewed in the archive. Bare shared extensions (901/902) are skipped. Only the
-// transcript is updated — classification/stats are left as-is. Run on the VPS (needs DB + Binotel +
+// One-off: re-transcribe the last N calls of each "person" operator (named managers + any number
+// aliased via OPERATOR_ALIASES) via ElevenLabs, so the diarized "Менеджер:/Клієнт:" dialogue can
+// be reviewed in the archive. Bare shared extensions (901/902) are skipped. Only the transcript is
+// updated — classification/stats are left as-is. Run on the VPS (needs DB + Binotel +
 // ELEVENLABS_API_KEY in .env):  npm run retranscribe:recent
 const PER_OPERATOR = Number(process.env.RETRANSCRIBE_LIMIT || 5);
 

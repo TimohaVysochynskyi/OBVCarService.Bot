@@ -9,7 +9,7 @@ import {
   getOperators,
 } from '../core/store.js';
 import { ROLES, ROLE_LABELS, invalidateRole } from './access.js';
-import { operatorLabel } from './keyboards.js';
+import { operatorLabels } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
 import { showScreen } from './ui.js';
 
@@ -74,7 +74,8 @@ async function memberScreen(id) {
 async function operatorPickScreen(memberId) {
   const operators = await getOperators();
   const kb = new InlineKeyboard();
-  for (const o of operators) kb.text(`${operatorLabel(o.name)} (${o.n})`, `roles:setop:${memberId}:${o.name}`).row();
+  const labels = operatorLabels(operators);
+  operators.forEach((o, i) => kb.text(labels[i], `roles:setop:${memberId}:${o.name}`).row());
   kb.text('« Пропустити', `roles:u:${memberId}`);
   return {
     text: 'Оберіть, ЯКИЙ оператор (за даними Binotel) — це ця людина, щоб вона бачила статистику по собі:',

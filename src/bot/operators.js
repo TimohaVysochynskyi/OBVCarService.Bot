@@ -6,8 +6,10 @@
 // queries and attribution are untouched and the mapping is fully reversible. Add more via the
 // OPERATOR_ALIASES env var ("num=Name" pairs, comma-separated), which merges over the defaults.
 //
-// Default: the director's mobile 0674738200 shows as "Богдан" instead of a bare number.
-const DEFAULT_ALIASES = { '0674738200': 'Богдан' };
+// No built-in defaults: the director's mobile (0674738200) used to alias to "Богдан" here, but
+// that number is now excluded from ingest entirely (src/jobs/processCalls.js:
+// EXCLUDED_EXTENSIONS) - it never reaches the bot's DB, so it needs no display alias.
+const DEFAULT_ALIASES = {};
 
 function parseAliases(raw) {
   const map = { ...DEFAULT_ALIASES };

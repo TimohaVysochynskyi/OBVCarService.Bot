@@ -625,6 +625,38 @@ async function updateManagerName(generalCallId, managerName) {
   await pool.query('UPDATE calls SET manager_name = $2 WHERE general_call_id = $1', [generalCallId, managerName]);
 }
 
+// ---- One-off operator-identity migration (src/scripts/normalizeOperators.js) --------------
+
+// Forces every call on a personal extension to the canonical name for that extension, regardless
+// of whatever manager_name it currently has (a bare number, or a mis-identified colleague).
+async function reassignCallsByExtension(internalNumber, managerName) {
+  const { rowCount } = await pool.query('UPDATE calls SET manager_name = $2 WHERE internal_number = $1', [internalNumber, managerName]);
+  return rowCount;
+}
+
+// Renames every call under an old manager_name spelling to the new one (e.g. a RU->UK rename),
+// regardless of which extension it came from - covers shared-handset calls that identifyManager
+// already matched to that person under the old spelling.
+async function renameManagerEverywhere(oldName, newName) {
+  const { rowCount } = await pool.query('UPDATE calls SET manager_name = $2 WHERE manager_name = $1', [oldName, newName]);
+  return rowCount;
+}
+
+// Permanently drops every call (and any queued retry) from an extension excluded from ingestion.
+async function deleteCallsByExtension(internalNumber) {
+  const { rowCount } = await pool.query('DELETE FROM calls WHERE internal_number = $1', [internalNumber]);
+  await pool.query('DELETE FROM pending_calls WHERE internal_number = $1', [internalNumber]);
+  return rowCount;
+}
+
+// Wipes the cached report-segment analysis entirely, so the next report for every manager
+// recomputes fresh over the corrected `calls` table instead of reusing findings/call_ids frozen
+// before an operator-identity fix. Cheap to recompute (self-consistency reduce, per manager/day).
+async function clearAllReportSegments() {
+  const { rowCount } = await pool.query('DELETE FROM report_segments');
+  return rowCount;
+}
+
 async function addOperatorNote(operatorName, author, note) {
   await pool.query(
     `INSERT INTO manager_notes (operator_name, author, note) VALUES ($1, $2, $3)`,
@@ -776,6 +808,12 @@ async function upsertPending(call, errorMessage) {
 
 async function markPendingFailed(generalCallId) {
   await pool.query(`UPDATE pending_calls SET status = 'failed', updated_at = now() WHERE general_call_id = $1`, [generalCallId]);
+}
+
+// Drops a pending entry outright (no retry, no 'failed' record) - used for calls from an excluded
+// extension that should never have been queued at all.
+async function removePendingCall(generalCallId) {
+  await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [generalCallId]);
 }
 
 async function getPendingCalls() {
@@ -987,6 +1025,10 @@ export {
   getActiveOperatorsInRange,
   getNumericManagerCalls,
   updateManagerName,
+  reassignCallsByExtension,
+  renameManagerEverywhere,
+  deleteCallsByExtension,
+  clearAllReportSegments,
   addOperatorNote,
   listOperatorNotes,
   migrateKb,
@@ -1000,6 +1042,7 @@ export {
   deleteKbDoc,
   upsertPending,
   markPendingFailed,
+  removePendingCall,
   getPendingCalls,
   getCheckpoint,
   setCheckpoint,

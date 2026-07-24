@@ -48,19 +48,42 @@ function operatorLabel(name) {
   return `📱 ${name}`;
 }
 
-// operators: [{ name, n, firstCall? }]. prefix is 'stat' or 'arch'; the operator name is the
-// trailing segment of the callback data so it can contain anything except a colon (first names
-// don't). With { showDates: true } (Archive) each label gains the operator's active period —
-// from their first processed call (proxy for when Binotel first saw the name) to today, e.g.
-// "📱 Роман (175) — 01.02.25-01.02.26".
-function operatorListKeyboard(operators, prefix, { showDates = false } = {}) {
-  const kb = new InlineKeyboard();
+// Telegram doesn't expose a text-align property for inline buttons - the client always centers
+// the caption, and there's no way around that from the Bot API. As a best-effort approximation of
+// left alignment, every label in the same list is padded to a common width with BRAILLE PATTERN
+// BLANK (U+2800) - a printable "blank" character, not real whitespace, so it survives any trailing
+// whitespace trimming the way a plain space wouldn't. The client then centers "text + padding" as
+// one block, which visually shifts the real text toward the left edge instead of true center.
+// Not pixel-perfect (proportional font; only relative to the longest label in THIS list, not the
+// true screen edge), but reads much more like a left-aligned table than independently-centered rows.
+const PAD_CHAR = '⠀';
+function leftAlignLabels(labels) {
+  const lengths = labels.map((l) => [...l].length);
+  const maxLen = Math.max(0, ...lengths);
+  return labels.map((l, i) => l + PAD_CHAR.repeat(Math.max(0, maxLen - lengths[i])));
+}
+
+// operators: [{ name, n, firstCall? }]. With { showDates: true } (Archive) each label gains the
+// operator's active period — from their first processed call (proxy for when Binotel first saw
+// the name) to today, e.g. "📱 Роман (175) — 01.02.25-01.02.26". Shared by every screen that lists
+// operators (stats/archive/roles) so formatting - including the left-align approximation - stays
+// in one place.
+function operatorLabels(operators, { showDates = false } = {}) {
   const today = new Date();
-  for (const o of operators) {
+  const raw = operators.map((o) => {
     let label = `${operatorLabel(o.name)} (${o.n})`;
     if (showDates && o.firstCall) label += ` — ${shortDate(o.firstCall)}-${shortDate(today)}`;
-    kb.text(label, `${prefix}:op:${o.name}`).row();
-  }
+    return label;
+  });
+  return leftAlignLabels(raw);
+}
+
+// prefix is 'stat' or 'arch'; the operator name is the trailing segment of the callback data so
+// it can contain anything except a colon (first names don't).
+function operatorListKeyboard(operators, prefix, { showDates = false } = {}) {
+  const kb = new InlineKeyboard();
+  const labels = operatorLabels(operators, { showDates });
+  operators.forEach((o, i) => kb.text(labels[i], `${prefix}:op:${o.name}`).row());
   kb.text("« Меню", "menu");
   return kb;
 }
@@ -73,4 +96,4 @@ function periodKeyboard(makeData, backData) {
   return kb;
 }
 
-export { mainMenu, operatorListKeyboard, periodKeyboard, operatorLabel, PERIODS };
+export { mainMenu, operatorListKeyboard, operatorLabels, periodKeyboard, operatorLabel, PERIODS };

@@ -1,4 +1,4 @@
-import { callExists, saveCall, upsertPending, markPendingFailed, getPendingCalls, getOperatorRoster } from '../core/store.js';
+import { callExists, saveCall, upsertPending, markPendingFailed, removePendingCall, getPendingCalls, getOperatorRoster } from '../core/store.js';
 import { listCallsForPeriod, getCallRecordUrl } from '../core/binotel.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { classifyCall } from '../core/classifyCall.js';
@@ -17,6 +17,39 @@ const SHARED_EXTENSIONS = (process.env.SHARED_EXTENSIONS || '901,902')
   .map((s) => s.trim())
   .filter(Boolean);
 
+// Personal extensions are identified by NUMBER, not by whatever name Binotel's employeeData
+// currently reports for them. Binotel's employeeData.name has been observed to (a) go briefly
+// empty for a personal extension (which used to fall through to content-based identification and
+// sometimes misattribute the call to a DIFFERENT manager), and (b) change spelling (e.g. a RU->UK
+// rename in the Binotel dashboard), which would otherwise split one person's history into two
+// manager_name buckets. The extension number is the stable identifier Binotel gives us, so it's
+// the source of truth for which of OUR canonical names a personal-extension call belongs to;
+// employeeName/identifyManager are never consulted for these extensions once mapped here.
+// Format: "ext=Name,ext=Name" via env, merged over the default.
+const DEFAULT_PERSONAL_OPERATORS = { '903': 'Роман', '904': 'Андрій', '905': 'Володимир' };
+function parsePersonalOperators(raw) {
+  const map = { ...DEFAULT_PERSONAL_OPERATORS };
+  for (const pair of (raw || '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).trim();
+    const val = pair.slice(eq + 1).trim();
+    if (key && val) map[key] = val;
+  }
+  return map;
+}
+const PERSONAL_OPERATORS = parsePersonalOperators(process.env.PERSONAL_OPERATORS);
+
+// Extensions to skip entirely - never transcribed, analyzed or saved. For a number that isn't a
+// salesperson's line (e.g. the director's personal mobile), Binotel carries no employeeData for
+// it, so it used to fall through to content-based identification and could misattribute calls to
+// a real manager by voice match alone, polluting their stats. Comma-separated via env, merged
+// over the default (the director's mobile, ends in -200).
+const EXCLUDED_EXTENSIONS = (process.env.EXCLUDED_EXTENSIONS || '0674738200')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 function splitIntoChunks(start, end) {
   const chunks = [];
   let chunkStart = start;
@@ -28,13 +61,20 @@ function splitIntoChunks(start, end) {
   return chunks;
 }
 
-// Binotel is the source of truth for operators. Personal extensions carry the name directly
-// (employeeData.name). Shared handsets (SHARED_EXTENSIONS) don't, so we ask the model who
-// introduced themselves, constrained to the known operator names (roster, derived from Binotel
-// names on other calls). No match / no name -> keep the bare extension as the label so the call
-// still shows up, just unattributed to a person.
+// Binotel is the source of truth for WHICH extension took the call, but not for spelling/name
+// stability - see PERSONAL_OPERATORS above. A known personal extension (903/904/905) is resolved
+// straight from that map, no matter what (or whether) Binotel's employeeData says, and never goes
+// through content-based identification. Shared handsets (SHARED_EXTENSIONS) - and any OTHER
+// extension Binotel doesn't carry a name for - fall back to asking the model who introduced
+// themselves, constrained to the known operator names (roster, derived from Binotel names on
+// other calls). No match / no name -> keep the bare extension as the label so the call still
+// shows up, just unattributed to a person.
 async function resolveManagerName(call, transcript, roster) {
   const ext = String(call.internalNumber);
+
+  if (PERSONAL_OPERATORS[ext]) {
+    return PERSONAL_OPERATORS[ext];
+  }
 
   if (SHARED_EXTENSIONS.includes(ext) || !call.employeeName) {
     const identified = await identifyManager(transcript, roster);
@@ -106,6 +146,11 @@ async function transcribeClassifyAndSave(call, roster) {
 async function processOneCall(call, roster) {
   const pendingLabel = call.employeeName || String(call.internalNumber);
 
+  if (EXCLUDED_EXTENSIONS.includes(String(call.internalNumber))) {
+    console.log(`[processCalls]   skipping ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion`);
+    return;
+  }
+
   if (call.durationSec <= 0) {
     console.log(`[processCalls]   skipping ${call.generalCallId} - no duration (missed/unanswered)`);
     return;
@@ -160,6 +205,12 @@ async function retryPendingCalls() {
   const roster = await getOperatorRoster();
   console.log(`[processCalls] retrying ${pending.length} pending call(s)`);
   for (const call of pending) {
+    if (EXCLUDED_EXTENSIONS.includes(String(call.internalNumber))) {
+      console.log(`[processCalls]   dropping pending ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion`);
+      await removePendingCall(call.generalCallId);
+      continue;
+    }
+
     if (call.attempts >= MAX_PENDING_ATTEMPTS) {
       console.error(`[processCalls] giving up on ${call.generalCallId} after ${call.attempts} attempts`);
       await markPendingFailed(call.generalCallId);
