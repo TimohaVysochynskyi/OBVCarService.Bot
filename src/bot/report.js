@@ -22,6 +22,11 @@ import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from '.
 // block is one analysed time segment (a frozen 'scheduled' segment reused from report_segments, or a
 // live 'manual_tail'/'live' block). The costly reduce is cached per segment (src/bot/segments.js), so
 // repeated / incremental reports reuse it instead of re-analysing from scratch.
+//
+// EVERY delivery path (manual "Звіт зараз", the stats.js per-manager drill-down, scheduled auto-
+// reports) sends the SAME shape: just the numeric header(+trend), with "🔽 Розгорнути" (findings +
+// audio) and "💬 Рекомендації" (phrases) buttons — never the full wall of text+audio inline. One
+// consistent UX everywhere a report appears (2026-07-24, by request).
 
 const ERROR_ICON = '❌';
 const STRENGTH_ICON = '✅';
@@ -72,6 +77,16 @@ async function buildTrendReport(name, start, end) {
   };
 }
 
+// Build a report for one manager without delivering it. mode:
+//   'daily' — assemble from the frozen per-segment cache + a live tail (today's flow);
+//   'trend' — multi-day: per-day trend + findings of already-frozen segments (reuse only);
+//   'live'  — legacy single live reduce over the whole period (fallback, no current caller).
+function buildReportByMode(mode, name, start, end) {
+  if (mode === 'trend') return buildTrendReport(name, start, end);
+  if (mode === 'live') return buildManagerEvidenceReport(name, start, end);
+  return assembleReport(name, start, end);
+}
+
 const hm = (date) => {
   const p = kyivParts(new Date(date));
   const pad = (n) => String(n).padStart(2, '0');
@@ -90,20 +105,20 @@ function trendText(report) {
   return lines.join('\n');
 }
 
-// Numeric header. Conversion / score / weakest stage are over SALES-relevant calls; the breakdown
-// line shows how many of the total were sales vs informational so the numbers are honest.
+// Numeric header. Conversion / score / weakest stage are over SALES-relevant calls. Deliberately
+// compact (client's request, 2026-07-24): no info-call count, no "з N продажних" on Записів, no
+// "(продажні)" qualifiers - the reader already knows these numbers are sales-scoped.
 function headerText(report) {
   const { name, stats, start, end } = report;
   const sales = stats.salesCount ?? 0;
-  const info = stats.infoCount ?? 0;
   const rate = sales ? Math.round((stats.successCount / sales) * 100) : 0;
   return (
     `📊 *Доказовий звіт* — ${displayName(name)}\n` +
-    `_${formatKyiv(start)} – ${formatKyiv(end)}_\n\n` +
-    `Дзвінків: *${stats.callCount}* (продажних: ${sales}, інформаційних: ${info})\n` +
-    `Записів: *${stats.successCount}* з ${sales} продажних (${rate}%)\n` +
-    `Середній бал (продажні): *${stats.avgScore ?? '—'}*\n` +
-    `Найслабший етап (продажні): *${stats.topWeakStage ?? '—'}*`
+    `${formatKyiv(start)} – ${formatKyiv(end)}\n\n` +
+    `Дзвінків: *${stats.callCount}* (продажних: ${sales})\n` +
+    `Записів: *${stats.successCount}* (${rate}%)\n` +
+    `Середній бал: *${stats.avgScore ?? '—'}*\n` +
+    `Найслабший етап: *${stats.topWeakStage ?? '—'}*`
   );
 }
 
@@ -129,17 +144,18 @@ function findingText(f, idx) {
   return lines.join('\n');
 }
 
-async function sendPhrases(api, chatId, phrases) {
+async function sendPhrases(api, chatId, phrases, { replyToMessageId } = {}) {
   if (!phrases?.length) return;
   await sendLong(
     api,
     chatId,
-    '💬 Готові формулювання (зразки, НЕ цитати):\n\n' + phrases.map((p, i) => `${i + 1}. ${p}`).join('\n')
+    '💬 Готові формулювання (зразки, НЕ цитати):\n\n' + phrases.map((p, i) => `${i + 1}. ${p}`).join('\n'),
+    { replyToMessageId }
   );
 }
 
-// Header (+ multi-day trend) as one logical unit. replyMarkup (optional) is attached to the LAST
-// piece sent — used for the collapsed report's "🔽 Розгорнути"/"💬 Рекомендації" buttons.
+// Header (+ multi-day trend) as one logical unit. replyMarkup is attached to the LAST piece sent —
+// the "🔽 Розгорнути"/"💬 Рекомендації" buttons every report is delivered with.
 async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
   const isTrend = Array.isArray(report.trend);
   if (isTrend && report.trend.length) {
@@ -151,9 +167,10 @@ async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
 }
 
 // Findings (blocks) + audio clips, or the "nothing found" fallback - the part hidden behind
-// "🔽 Розгорнути" in a collapsed report. clips (optional Map from prepareClips) carries pre-cut
-// audio Buffers keyed by clipKey; each negative finding's quotes are followed by their clip.
-async function sendReportFindings(api, chatId, report, { clips } = {}) {
+// "🔽 Розгорнути". clips (optional Map from prepareClips) carries pre-cut audio Buffers keyed by
+// clipKey; each negative finding's quotes are followed by their clip. replyToMessageId threads every
+// message sent here back to the report message the button was clicked on (see registerReportActions).
+async function sendReportFindings(api, chatId, report, { clips, replyToMessageId } = {}) {
   const isTrend = Array.isArray(report.trend);
   const blocks = (report.blocks || []).filter((b) => (b.findings || []).length);
   if (!blocks.length) {
@@ -170,24 +187,24 @@ async function sendReportFindings(api, chatId, report, { clips } = {}) {
           ? '📄 За цей період продажних дзвінків не було — оцінювати продажні навички нема на чому. Вище — числові показники.'
           : '✅ За цей період не знайдено повторюваних патернів (з ≥3 підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.';
     }
-    await sendLong(api, chatId, msg);
+    await sendLong(api, chatId, msg, { replyToMessageId });
     return;
   }
 
-  if (isTrend) await sendLong(api, chatId, '🔎 Патерни за останні проаналізовані відрізки:');
+  if (isTrend) await sendLong(api, chatId, '🔎 Патерни за останні проаналізовані відрізки:', { replyToMessageId });
   const multi = blocks.length > 1;
   for (const b of blocks) {
-    if (multi) await sendLong(api, chatId, blockHeader(b));
+    if (multi) await sendLong(api, chatId, blockHeader(b), { replyToMessageId });
     let idx = 0;
     for (const f of b.findings) {
       idx += 1;
-      await sendLong(api, chatId, findingText(f, idx));
+      await sendLong(api, chatId, findingText(f, idx), { replyToMessageId });
       // Audio only for negative findings (client's choice), and only for quotes that have a timecode.
       if (clips && f.type === 'error') {
         for (const ev of f.evidence) {
           if (ev.start == null) continue;
           const buf = clips.get(clipKey(ev.callId, ev.start, ev.end));
-          if (buf) await sendClip(api, chatId, buf, ev);
+          if (buf) await sendClip(api, chatId, buf, ev, { replyToMessageId });
         }
       }
     }
@@ -195,50 +212,32 @@ async function sendReportFindings(api, chatId, report, { clips } = {}) {
 }
 
 // expandKey encodes exactly what a later "🔽 Розгорнути"/"💬 Рекомендації" click needs to re-derive
-// this SAME report (assembleReport reads from the report_segments cache, so this is cheap - see
-// registerReportActions). Scoped to the 'daily' mode only (the only mode sendManualReport uses).
-const expandKeyOf = (name, start, end) => `${Math.floor(start.getTime() / 1000)}:${Math.floor(end.getTime() / 1000)}:${name}`;
+// this SAME report via buildReportByMode - cheap for 'daily'/'trend' (reads the frozen
+// report_segments cache rather than re-running the LLM reduce; see registerReportActions).
+const expandKeyOf = (name, start, end, mode) =>
+  `${mode}:${Math.floor(start.getTime() / 1000)}:${Math.floor(end.getTime() / 1000)}:${name}`;
 
-// Send a fully-built report to ONE chat.
-//   collapsed:false (default) — full detail inline: header/trend, then findings+audio, then phrases.
-//   collapsed:true — ONLY the header/trend, with "🔽 Розгорнути" (findings+audio) and
-//     "💬 Рекомендації" (phrases) buttons attached instead. Used by the manual "Звіт зараз" report,
-//     which otherwise fans out a wall of text+audio for every active manager at once.
-async function deliverReport(api, chatId, report, { clips, collapsed = false, expandKey } = {}) {
-  if (collapsed) {
-    const kb = new InlineKeyboard()
-      .text('🔽 Розгорнути', `report:exp:${expandKey}`)
-      .text('💬 Рекомендації', `report:phr:${expandKey}`);
-    await sendReportSummary(api, chatId, report, { replyMarkup: kb });
-    return;
-  }
-  await sendReportSummary(api, chatId, report);
-  await sendReportFindings(api, chatId, report, { clips });
-  await sendPhrases(api, chatId, report.phrases);
+// Send a fully-built report to ONE chat: ONLY the header/trend, with "🔽 Розгорнути" and
+// "💬 Рекомендації" buttons attached - never the findings/audio/phrases inline.
+async function deliverReport(api, chatId, report, { expandKey }) {
+  const kb = new InlineKeyboard()
+    .text('🔽 Розгорнути', `report:exp:${expandKey}`)
+    .text('💬 Рекомендації', `report:phr:${expandKey}`);
+  await sendReportSummary(api, chatId, report, { replyMarkup: kb });
 }
 
-// Build + deliver one manager's report to one chat. mode:
-//   'daily' — assemble from the frozen per-segment cache + a live tail (today's flow);
-//   'trend' — multi-day: per-day trend + findings of already-frozen segments (reuse only);
-//   'live'  — legacy single live reduce over the whole period (fallback).
-// audio=true cuts and attaches the clips (skipped when collapsed - deferred to the "Розгорнути" click,
-// so nothing is cut/downloaded until someone actually asks to see it).
-async function deliverManagerReport(api, chatId, name, start, end, { audio = false, mode = 'daily', collapsed = false } = {}) {
-  let report;
-  if (mode === 'trend') report = await buildTrendReport(name, start, end);
-  else if (mode === 'live') report = await buildManagerEvidenceReport(name, start, end);
-  else report = await assembleReport(name, start, end);
+// Build + deliver one manager's report to one chat. Audio is never cut here - deferred entirely to
+// the "🔽 Розгорнути" click, so nothing is downloaded/cut until someone actually asks to see it.
+async function deliverManagerReport(api, chatId, name, start, end, { mode = 'daily' } = {}) {
+  const report = await buildReportByMode(mode, name, start, end);
   if (!report) return { empty: true };
-  const clips = audio && !collapsed ? await prepareClips(report) : null;
-  await deliverReport(api, chatId, report, { clips, collapsed, expandKey: collapsed ? expandKeyOf(name, start, end) : undefined });
+  await deliverReport(api, chatId, report, { expandKey: expandKeyOf(name, start, end, mode) });
   return { sent: true };
 }
 
 // Manual "Звіт зараз": today so far, every active manager, delivered to the requester. Uses the
 // segmented path → reuses today's frozen scheduled segments + a deduped live tail, so a repeated
-// click costs (almost) nothing. Does NOT touch the scheduler state. Delivered COLLAPSED (header
-// only + "Розгорнути"/"Рекомендації" buttons) - with several managers this used to dump a long wall
-// of findings/audio/phrases regardless of whether anyone wanted to read all of it.
+// click costs (almost) nothing. Does NOT touch the scheduler state.
 async function sendManualReport(api, chatId) {
   const end = new Date();
   const start = startOfDay(end);
@@ -250,9 +249,7 @@ async function sendManualReport(api, chatId) {
       const managers = await getActiveOperatorsInRange(start, end);
       if (!managers.length) return { empty: true };
       for (const m of managers) {
-        // audio is intentionally omitted - collapsed mode never cuts clips up front (see
-        // deliverManagerReport); "🔽 Розгорнути" cuts them on demand instead.
-        await deliverManagerReport(api, chatId, m.name, start, end, { mode: 'daily', collapsed: true });
+        await deliverManagerReport(api, chatId, m.name, start, end, { mode: 'daily' });
       }
       return { sent: true };
     },
@@ -262,21 +259,28 @@ async function sendManualReport(api, chatId) {
   return res;
 }
 
-// expandKey = "<startUnix>:<endUnix>:<name>" (name is the trailing segment - can't contain ':').
+// expandKey = "<mode>:<startUnix>:<endUnix>:<name>" (name is the trailing segment - can't contain ':').
 function parseExpandKey(raw) {
-  const m = /^(\d+):(\d+):(.+)$/.exec(raw || '');
+  const m = /^(daily|trend|live):(\d+):(\d+):(.+)$/.exec(raw || '');
   if (!m) return null;
-  return { start: new Date(Number(m[1]) * 1000), end: new Date(Number(m[2]) * 1000), name: m[3] };
+  return { mode: m[1], start: new Date(Number(m[2]) * 1000), end: new Date(Number(m[3]) * 1000), name: m[4] };
 }
 
-// Handlers for the collapsed manual report's "🔽 Розгорнути"/"💬 Рекомендації" buttons. Both
-// re-derive the report from expandKey via assembleReport - cheap, since it reads the frozen
-// report_segments cache rather than re-running the LLM reduce (see segments.js). Audio clips are
-// NOT persisted anywhere (see audioClip.js), so "Розгорнути" re-cuts them at click time - the same
-// re-fetch-on-click pattern archive.js already uses for "🎧 Прослухати запис".
+// Handlers for every report's "🔽 Розгорнути"/"💬 Рекомендації" buttons. Both re-derive the report
+// from expandKey via buildReportByMode - cheap for 'daily'/'trend' (reads the frozen report_segments
+// cache rather than re-running the LLM reduce). Audio clips are NOT persisted anywhere (see
+// audioClip.js), so "Розгорнути" re-cuts them at click time - the same re-fetch-on-click pattern
+// archive.js already uses for "🎧 Прослухати запис".
+//
+// Content is sent as a Telegram REPLY to the exact message the clicked button lives on
+// (ctx.callbackQuery.message.message_id) so it visually threads under THAT report, not just at the
+// bottom of the chat - several managers'/several reports' messages can be interleaved in the same
+// chat by the time someone clicks, so "just append at the end" would land under the wrong report.
 function registerReportActions(bot) {
   bot.callbackQuery(/^report:exp:(.+)$/, async (ctx) => {
     const parsed = parseExpandKey(ctx.match[1]);
+    const replyToMessageId = ctx.callbackQuery.message?.message_id;
+    const replyParameters = { message_id: replyToMessageId, allow_sending_without_reply: true };
     await ctx.answerCallbackQuery();
     if (!parsed) return;
     await withProgress(
@@ -284,13 +288,13 @@ function registerReportActions(bot) {
       ctx.chat.id,
       'upload_voice',
       async () => {
-        const report = await assembleReport(parsed.name, parsed.start, parsed.end);
+        const report = await buildReportByMode(parsed.mode, parsed.name, parsed.start, parsed.end);
         if (!report) {
-          await ctx.reply('Дані звіту вже недоступні.');
+          await ctx.reply('Дані звіту вже недоступні.', { reply_parameters: replyParameters });
           return;
         }
         const clips = await prepareClips(report);
-        await sendReportFindings(ctx.api, ctx.chat.id, report, { clips });
+        await sendReportFindings(ctx.api, ctx.chat.id, report, { clips, replyToMessageId });
       },
       { notice: '⏳ Готую деталі та аудіо-докази…' }
     );
@@ -298,24 +302,34 @@ function registerReportActions(bot) {
 
   bot.callbackQuery(/^report:phr:(.+)$/, async (ctx) => {
     const parsed = parseExpandKey(ctx.match[1]);
+    const replyToMessageId = ctx.callbackQuery.message?.message_id;
+    const replyParameters = { message_id: replyToMessageId, allow_sending_without_reply: true };
     await ctx.answerCallbackQuery();
     if (!parsed) return;
-    const report = await assembleReport(parsed.name, parsed.start, parsed.end);
+    const report = await buildReportByMode(parsed.mode, parsed.name, parsed.start, parsed.end);
     if (!report) {
-      await ctx.reply('Дані звіту вже недоступні.');
+      await ctx.reply('Дані звіту вже недоступні.', { reply_parameters: replyParameters });
       return;
     }
     if (!report.phrases?.length) {
-      await ctx.reply('Для цього звіту немає готових формулювань.');
+      // Phrases are a side-product of the SAME reduce call that produces findings (see
+      // analyze.js: reduceFindingsConsistent) - if there weren't enough tagged sales-call
+      // behaviours to cluster into findings (MIN_EVIDENCE=3), there are none here either. Not a
+      // bug: expect this whenever "Розгорнути" also shows "нічого не знайдено" for the period.
+      await ctx.reply(
+        'Для цього періоду немає готових формулювань — замало продажних дзвінків із зафіксованою поведінкою (той самий поріг, що й для знахідок).',
+        { reply_parameters: replyParameters }
+      );
       return;
     }
-    await sendPhrases(ctx.api, ctx.chat.id, report.phrases);
+    await sendPhrases(ctx.api, ctx.chat.id, report.phrases, { replyToMessageId });
   });
 }
 
 // Deliver one completed day-bounded segment [start, end] to every recipient. Builds the report
 // (which computes+freezes the 'scheduled' segment via assembleReport) ONCE per manager, then fans
-// out. A failed send to one recipient doesn't block others.
+// out - collapsed, same as every other delivery path. A failed send to one recipient doesn't block
+// others.
 async function sendScheduledSlot(api, start, end) {
   const recipients = await getRecipients('report');
   if (recipients.length === 0) {
@@ -326,10 +340,10 @@ async function sendScheduledSlot(api, start, end) {
   for (const m of managers) {
     const report = await assembleReport(m.name, start, end);
     if (!report) continue;
-    const clips = await prepareClips(report);
+    const expandKey = expandKeyOf(m.name, start, end, 'daily');
     for (const r of recipients) {
       try {
-        await deliverReport(api, r.id, report, { clips });
+        await deliverReport(api, r.id, report, { expandKey });
       } catch (err) {
         console.error(`[bot] scheduled report to ${r.id} failed: ${err.message}`);
       }

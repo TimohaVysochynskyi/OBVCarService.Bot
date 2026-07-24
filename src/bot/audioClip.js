@@ -127,10 +127,13 @@ async function downloadRecording(callId, dir) {
 }
 
 // Send one prepared clip as a Telegram audio message with a short caption (the quote + time).
-async function sendClip(api, chatId, buf, ev) {
+// replyToMessageId (optional) threads it back to the report message it was revealed from.
+async function sendClip(api, chatId, buf, ev, { replyToMessageId } = {}) {
   const quote = ev.quote.length > CAPTION_QUOTE_MAX ? `${ev.quote.slice(0, CAPTION_QUOTE_MAX)}…` : ev.quote;
   const caption = `🎧 «${quote}»`;
-  await api.sendAudio(chatId, new InputFile(buf, `evidence-${ev.callId}.mp3`), { caption });
+  const extra = { caption };
+  if (replyToMessageId) extra.reply_parameters = { message_id: replyToMessageId, allow_sending_without_reply: true };
+  await api.sendAudio(chatId, new InputFile(buf, `evidence-${ev.callId}.mp3`), extra);
 }
 
 export { prepareClips, clipKey, sendClip, ffmpegAvailable };

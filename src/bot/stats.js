@@ -73,16 +73,17 @@ function registerStats(bot) {
       .text('📈 Динаміка', `stat:op:${name}`)
       .row()
       .text('« Меню', 'menu');
-    // The full evidence report (numeric header + findings + audio clips) is admin-only. It's built
-    // from the cached per-segment analysis (report.js) and cuts audio for negatives.
+    // The evidence report (admin-only) is delivered COLLAPSED - header/trend + "Розгорнути"/
+    // "Рекомендації" buttons, same as every other report delivery path. Audio isn't cut until
+    // "Розгорнути" is clicked, so this is fast now (no ffmpeg/download up front).
     const res = await withProgress(
       ctx.api,
       ctx.chat.id,
-      'upload_voice',
+      'typing',
       // 'day' → segmented cache (frozen segments + live tail); longer periods → per-day trend +
       // findings of already-frozen segments (reuse only, no costly on-demand recompute of history).
-      () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { audio: true, mode: period === 'day' ? 'daily' : 'trend' }),
-      { notice: '⏳ Формую доказовий звіт (аналіз + аудіо), це може зайняти деякий час…' }
+      () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { mode: period === 'day' ? 'daily' : 'trend' }),
+      { notice: '⏳ Формую доказовий звіт (аналіз), це може зайняти деякий час…' }
     );
     if (res.empty) {
       await showScreen(ctx, `${operatorLabel(name)}\n\nНемає оброблених дзвінків за період.`, kb);

@@ -20,18 +20,29 @@ function splitMessage(text) {
 // Send arbitrarily long text, splitting into <=4096-char messages. When parseMode is set and
 // Telegram rejects the entity markup, resend that chunk as plain text so nothing is lost.
 // replyMarkup (optional) is attached to the LAST chunk only (a keyboard makes sense on one message).
-async function sendLong(api, chatId, text, { parseMode, replyMarkup } = {}) {
+// replyToMessageId (optional) makes EVERY chunk a Telegram reply to that message, so content a
+// button reveals visually threads back to the message the button is on instead of just landing at
+// the bottom of the chat (allow_sending_without_reply: the original may since be gone/too old).
+async function sendLong(api, chatId, text, { parseMode, replyMarkup, replyToMessageId } = {}) {
   const chunks = splitMessage(text);
+  const replyParameters = replyToMessageId ? { message_id: replyToMessageId, allow_sending_without_reply: true } : undefined;
   for (const [i, chunk] of chunks.entries()) {
     const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length})\n` : '';
     const body = prefix + chunk;
     const isLast = i === chunks.length - 1;
-    const extra = { ...(parseMode ? { parse_mode: parseMode } : {}), ...(isLast && replyMarkup ? { reply_markup: replyMarkup } : {}) };
+    const extra = {
+      ...(parseMode ? { parse_mode: parseMode } : {}),
+      ...(isLast && replyMarkup ? { reply_markup: replyMarkup } : {}),
+      ...(replyParameters ? { reply_parameters: replyParameters } : {}),
+    };
     try {
       await api.sendMessage(chatId, body, extra);
     } catch (err) {
       if (parseMode) {
-        await api.sendMessage(chatId, body, isLast && replyMarkup ? { reply_markup: replyMarkup } : {});
+        await api.sendMessage(chatId, body, {
+          ...(isLast && replyMarkup ? { reply_markup: replyMarkup } : {}),
+          ...(replyParameters ? { reply_parameters: replyParameters } : {}),
+        });
       } else {
         throw err;
       }
