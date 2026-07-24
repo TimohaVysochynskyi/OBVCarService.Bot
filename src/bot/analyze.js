@@ -27,6 +27,9 @@ import {
 // ============================================================================================
 
 const MIN_EVIDENCE = 3;
+// Cap on "Готові формулювання" (recommended_phrases) shown in a report - kept low by request
+// (reduced from 7 to 5, 2026-07-24: too many phrases were being dumped on the reader at once).
+const MAX_PHRASES = 5;
 const reduceModel = () => process.env.OPENAI_REPORT_MODEL || 'gpt-4o';
 
 // The tunable GUIDANCE (owner edits it via /prompt). It shapes tone/wording of claim/why/action and
@@ -43,7 +46,7 @@ const DEFAULT_REPORT_GUIDANCE = `Ти — вимогливий аналітик 
 - action: рівно одна конкретна дія, що змінити (для помилок) або що масштабувати (для сильних сторін).
 Групуй лише ПОВТОРЮВАНІ патерни (щонайменше 3 різні приклади). Разові випадки не включай.
 
-recommended_phrases: 5-7 готових ІДЕАЛЬНИХ формулювань для типових ситуацій цього менеджера (заперечення «дорого»/«подумаю»/«зроблю в іншому місці», момент закриття та фіксації дати запису, уточнення проблеми авто). Це ЗРАЗКИ від тебе — НЕ цитати з транскриптів.`;
+recommended_phrases: 5 готових ІДЕАЛЬНИХ формулювань для типових ситуацій цього менеджера (заперечення «дорого»/«подумаю»/«зроблю в іншому місці», момент закриття та фіксації дати запису, уточнення проблеми авто). Це ЗРАЗКИ від тебе — НЕ цитати з транскриптів.`;
 
 // Effective guidance = owner's custom text (app_state) or the built-in default. (Function names are
 // kept as *AnalyzePrompt* so the existing /prompt UI wiring in prompt.js / index.js is unchanged.)
@@ -390,9 +393,9 @@ async function reduceFindingsConsistent(managerName, calls, stats, passes = 1) {
       if (!t || seen.has(t)) continue;
       seen.add(t);
       phrases.push(t);
-      if (phrases.length >= 7) break;
+      if (phrases.length >= MAX_PHRASES) break;
     }
-    if (phrases.length >= 7) break;
+    if (phrases.length >= MAX_PHRASES) break;
   }
   return { findings, phrases };
 }
@@ -410,6 +413,7 @@ export {
   assembleFindings,
   corroborate,
   MIN_EVIDENCE,
+  MAX_PHRASES,
   DEFAULT_REPORT_GUIDANCE,
   getAnalyzePrompt,
   getAnalyzePromptInfo,

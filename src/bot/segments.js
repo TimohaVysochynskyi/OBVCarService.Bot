@@ -8,7 +8,7 @@ import {
   getCallIdsForOperator,
   getReportTimes,
 } from '../core/store.js';
-import { reduceFindingsConsistent, getAnalyzePrompt } from './analyze.js';
+import { reduceFindingsConsistent, getAnalyzePrompt, MAX_PHRASES } from './analyze.js';
 import { getScoreRubric } from '../core/classifyCall.js';
 import { kyivDaySegments } from './time.js';
 
@@ -149,7 +149,7 @@ function dedupPhrases(list) {
     if (!t || seen.has(t)) continue;
     seen.add(t);
     out.push(t);
-    if (out.length >= 7) break;
+    if (out.length >= MAX_PHRASES) break;
   }
   return out;
 }

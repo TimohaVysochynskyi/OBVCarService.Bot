@@ -639,11 +639,16 @@ async function getCallsWithTranscriptsInRange(start, end) {
 
 // Distinct operators that have processed calls in [start, end) — the set the periodic/manual
 // evidence report iterates over (one report per manager).
+// Excludes bare-numeric manager_name (901/902 - a shared handset never attributed to a person, see
+// identifyManager.js/SHARED_EXTENSIONS): a report exists to evaluate a MANAGER, so an unattributed
+// line has nothing to report on and would just produce an empty "insufficient data" report every
+// run. Calls originally on 901/902 that WERE identified to a real person are unaffected - they're
+// already grouped under that person's name here, same as any other call of theirs.
 async function getActiveOperatorsInRange(start, end) {
   const { rows } = await pool.query(
     `SELECT manager_name AS name, COUNT(*)::int AS n FROM calls
      WHERE start_time >= $1 AND start_time < $2 AND transcript IS NOT NULL AND transcript <> ''
-       AND manager_name IS NOT NULL AND manager_name <> ''
+       AND manager_name IS NOT NULL AND manager_name <> '' AND manager_name !~ '^[0-9]+$'
      GROUP BY manager_name ORDER BY n DESC, manager_name`,
     [start, end]
   );

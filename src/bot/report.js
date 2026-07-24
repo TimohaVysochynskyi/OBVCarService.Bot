@@ -1,3 +1,4 @@
+import { InlineKeyboard } from 'grammy';
 import {
   getOperatorStats,
   getCallsForReport,
@@ -10,7 +11,7 @@ import {
   markSlotDelivered,
   deleteOldManualTails,
 } from '../core/store.js';
-import { reduceFindings } from './analyze.js';
+import { reduceFindings, MAX_PHRASES } from './analyze.js';
 import { assembleReport } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
 import { withProgress, sendLong } from './ui.js';
@@ -61,9 +62,9 @@ async function buildTrendReport(name, start, end) {
       if (!t || seen.has(t)) continue;
       seen.add(t);
       phrases.push(t);
-      if (phrases.length >= 7) break;
+      if (phrases.length >= MAX_PHRASES) break;
     }
-    if (phrases.length >= 7) break;
+    if (phrases.length >= MAX_PHRASES) break;
   }
   return {
     name, stats, trend, blocks: latest, phrases, start, end,
@@ -137,16 +138,23 @@ async function sendPhrases(api, chatId, phrases) {
   );
 }
 
-// Send a fully-built report to ONE chat. clips (optional Map from prepareClips) carries pre-cut
-// audio Buffers keyed by clipKey; each negative finding's quotes are followed by their clip. Reused
-// across recipients so audio is cut only once.
-async function deliverReport(api, chatId, report, { clips } = {}) {
-  await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown' });
-
-  // Multi-day: growth trend first (per-day numbers), then the findings of the analysed segments.
+// Header (+ multi-day trend) as one logical unit. replyMarkup (optional) is attached to the LAST
+// piece sent — used for the collapsed report's "🔽 Розгорнути"/"💬 Рекомендації" buttons.
+async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
   const isTrend = Array.isArray(report.trend);
-  if (isTrend && report.trend.length) await sendLong(api, chatId, trendText(report), { parseMode: 'Markdown' });
+  if (isTrend && report.trend.length) {
+    await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown' });
+    await sendLong(api, chatId, trendText(report), { parseMode: 'Markdown', replyMarkup });
+  } else {
+    await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown', replyMarkup });
+  }
+}
 
+// Findings (blocks) + audio clips, or the "nothing found" fallback - the part hidden behind
+// "🔽 Розгорнути" in a collapsed report. clips (optional Map from prepareClips) carries pre-cut
+// audio Buffers keyed by clipKey; each negative finding's quotes are followed by their clip.
+async function sendReportFindings(api, chatId, report, { clips } = {}) {
+  const isTrend = Array.isArray(report.trend);
   const blocks = (report.blocks || []).filter((b) => (b.findings || []).length);
   if (!blocks.length) {
     const sales = report.stats.salesCount ?? 0;
@@ -163,7 +171,6 @@ async function deliverReport(api, chatId, report, { clips } = {}) {
           : '✅ За цей період не знайдено повторюваних патернів (з ≥3 підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.';
     }
     await sendLong(api, chatId, msg);
-    await sendPhrases(api, chatId, report.phrases);
     return;
   }
 
@@ -185,7 +192,28 @@ async function deliverReport(api, chatId, report, { clips } = {}) {
       }
     }
   }
+}
 
+// expandKey encodes exactly what a later "🔽 Розгорнути"/"💬 Рекомендації" click needs to re-derive
+// this SAME report (assembleReport reads from the report_segments cache, so this is cheap - see
+// registerReportActions). Scoped to the 'daily' mode only (the only mode sendManualReport uses).
+const expandKeyOf = (name, start, end) => `${Math.floor(start.getTime() / 1000)}:${Math.floor(end.getTime() / 1000)}:${name}`;
+
+// Send a fully-built report to ONE chat.
+//   collapsed:false (default) — full detail inline: header/trend, then findings+audio, then phrases.
+//   collapsed:true — ONLY the header/trend, with "🔽 Розгорнути" (findings+audio) and
+//     "💬 Рекомендації" (phrases) buttons attached instead. Used by the manual "Звіт зараз" report,
+//     which otherwise fans out a wall of text+audio for every active manager at once.
+async function deliverReport(api, chatId, report, { clips, collapsed = false, expandKey } = {}) {
+  if (collapsed) {
+    const kb = new InlineKeyboard()
+      .text('🔽 Розгорнути', `report:exp:${expandKey}`)
+      .text('💬 Рекомендації', `report:phr:${expandKey}`);
+    await sendReportSummary(api, chatId, report, { replyMarkup: kb });
+    return;
+  }
+  await sendReportSummary(api, chatId, report);
+  await sendReportFindings(api, chatId, report, { clips });
   await sendPhrases(api, chatId, report.phrases);
 }
 
@@ -193,40 +221,96 @@ async function deliverReport(api, chatId, report, { clips } = {}) {
 //   'daily' — assemble from the frozen per-segment cache + a live tail (today's flow);
 //   'trend' — multi-day: per-day trend + findings of already-frozen segments (reuse only);
 //   'live'  — legacy single live reduce over the whole period (fallback).
-// audio=true cuts and attaches the clips.
-async function deliverManagerReport(api, chatId, name, start, end, { audio = false, mode = 'daily' } = {}) {
+// audio=true cuts and attaches the clips (skipped when collapsed - deferred to the "Розгорнути" click,
+// so nothing is cut/downloaded until someone actually asks to see it).
+async function deliverManagerReport(api, chatId, name, start, end, { audio = false, mode = 'daily', collapsed = false } = {}) {
   let report;
   if (mode === 'trend') report = await buildTrendReport(name, start, end);
   else if (mode === 'live') report = await buildManagerEvidenceReport(name, start, end);
   else report = await assembleReport(name, start, end);
   if (!report) return { empty: true };
-  const clips = audio ? await prepareClips(report) : null;
-  await deliverReport(api, chatId, report, { clips });
+  const clips = audio && !collapsed ? await prepareClips(report) : null;
+  await deliverReport(api, chatId, report, { clips, collapsed, expandKey: collapsed ? expandKeyOf(name, start, end) : undefined });
   return { sent: true };
 }
 
-// Manual "Звіт зараз": today so far, every active manager, delivered to the requester (with audio).
-// Uses the segmented path → reuses today's frozen scheduled segments + a deduped live tail, so a
-// repeated click costs (almost) nothing. Does NOT touch the scheduler state.
+// Manual "Звіт зараз": today so far, every active manager, delivered to the requester. Uses the
+// segmented path → reuses today's frozen scheduled segments + a deduped live tail, so a repeated
+// click costs (almost) nothing. Does NOT touch the scheduler state. Delivered COLLAPSED (header
+// only + "Розгорнути"/"Рекомендації" buttons) - with several managers this used to dump a long wall
+// of findings/audio/phrases regardless of whether anyone wanted to read all of it.
 async function sendManualReport(api, chatId) {
   const end = new Date();
   const start = startOfDay(end);
   const res = await withProgress(
     api,
     chatId,
-    'upload_voice',
+    'typing',
     async () => {
       const managers = await getActiveOperatorsInRange(start, end);
       if (!managers.length) return { empty: true };
       for (const m of managers) {
-        await deliverManagerReport(api, chatId, m.name, start, end, { audio: true, mode: 'daily' });
+        // audio is intentionally omitted - collapsed mode never cuts clips up front (see
+        // deliverManagerReport); "🔽 Розгорнути" cuts them on demand instead.
+        await deliverManagerReport(api, chatId, m.name, start, end, { mode: 'daily', collapsed: true });
       }
       return { sent: true };
     },
-    { notice: '⏳ Бот формує доказовий звіт (аналіз + аудіо), це може зайняти деякий час…' }
+    { notice: '⏳ Бот формує доказовий звіт (аналіз), це може зайняти деякий час…' }
   );
   if (res.empty) await api.sendMessage(chatId, 'За сьогодні ще немає оброблених дзвінків для звіту.');
   return res;
+}
+
+// expandKey = "<startUnix>:<endUnix>:<name>" (name is the trailing segment - can't contain ':').
+function parseExpandKey(raw) {
+  const m = /^(\d+):(\d+):(.+)$/.exec(raw || '');
+  if (!m) return null;
+  return { start: new Date(Number(m[1]) * 1000), end: new Date(Number(m[2]) * 1000), name: m[3] };
+}
+
+// Handlers for the collapsed manual report's "🔽 Розгорнути"/"💬 Рекомендації" buttons. Both
+// re-derive the report from expandKey via assembleReport - cheap, since it reads the frozen
+// report_segments cache rather than re-running the LLM reduce (see segments.js). Audio clips are
+// NOT persisted anywhere (see audioClip.js), so "Розгорнути" re-cuts them at click time - the same
+// re-fetch-on-click pattern archive.js already uses for "🎧 Прослухати запис".
+function registerReportActions(bot) {
+  bot.callbackQuery(/^report:exp:(.+)$/, async (ctx) => {
+    const parsed = parseExpandKey(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    if (!parsed) return;
+    await withProgress(
+      ctx.api,
+      ctx.chat.id,
+      'upload_voice',
+      async () => {
+        const report = await assembleReport(parsed.name, parsed.start, parsed.end);
+        if (!report) {
+          await ctx.reply('Дані звіту вже недоступні.');
+          return;
+        }
+        const clips = await prepareClips(report);
+        await sendReportFindings(ctx.api, ctx.chat.id, report, { clips });
+      },
+      { notice: '⏳ Готую деталі та аудіо-докази…' }
+    );
+  });
+
+  bot.callbackQuery(/^report:phr:(.+)$/, async (ctx) => {
+    const parsed = parseExpandKey(ctx.match[1]);
+    await ctx.answerCallbackQuery();
+    if (!parsed) return;
+    const report = await assembleReport(parsed.name, parsed.start, parsed.end);
+    if (!report) {
+      await ctx.reply('Дані звіту вже недоступні.');
+      return;
+    }
+    if (!report.phrases?.length) {
+      await ctx.reply('Для цього звіту немає готових формулювань.');
+      return;
+    }
+    await sendPhrases(ctx.api, ctx.chat.id, report.phrases);
+  });
 }
 
 // Deliver one completed day-bounded segment [start, end] to every recipient. Builds the report
@@ -299,4 +383,4 @@ function startScheduler(api) {
   }, 30000);
 }
 
-export { buildManagerEvidenceReport, deliverManagerReport, sendManualReport, startScheduler };
+export { buildManagerEvidenceReport, deliverManagerReport, sendManualReport, startScheduler, registerReportActions };

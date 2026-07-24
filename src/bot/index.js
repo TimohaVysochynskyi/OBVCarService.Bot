@@ -11,7 +11,7 @@ import { mainMenu } from './keyboards.js';
 import { registerStats, statsPicker, openMyReport } from './stats.js';
 import { registerArchive, archivePicker } from './archive.js';
 import { registerKnowledgeBase, answerQuestion, promptQuestion, openFiles, openKbDocById } from './kb.js';
-import { sendManualReport, startScheduler } from './report.js';
+import { sendManualReport, startScheduler, registerReportActions } from './report.js';
 import { registerPrompt, openPromptMenu } from './prompt.js';
 import { registerRubric, openRubricMenu } from './rubric.js';
 import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
@@ -214,6 +214,7 @@ registerPrompt(bot);
 registerRubric(bot);
 registerRoles(bot);
 registerSettings(bot);
+registerReportActions(bot);
 
 // A manager saving their own phone number (request_users doesn't return a phone). Last in the
 // contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via

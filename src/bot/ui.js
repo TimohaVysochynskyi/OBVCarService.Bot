@@ -19,16 +19,19 @@ function splitMessage(text) {
 
 // Send arbitrarily long text, splitting into <=4096-char messages. When parseMode is set and
 // Telegram rejects the entity markup, resend that chunk as plain text so nothing is lost.
-async function sendLong(api, chatId, text, { parseMode } = {}) {
+// replyMarkup (optional) is attached to the LAST chunk only (a keyboard makes sense on one message).
+async function sendLong(api, chatId, text, { parseMode, replyMarkup } = {}) {
   const chunks = splitMessage(text);
   for (const [i, chunk] of chunks.entries()) {
     const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length})\n` : '';
     const body = prefix + chunk;
+    const isLast = i === chunks.length - 1;
+    const extra = { ...(parseMode ? { parse_mode: parseMode } : {}), ...(isLast && replyMarkup ? { reply_markup: replyMarkup } : {}) };
     try {
-      await api.sendMessage(chatId, body, parseMode ? { parse_mode: parseMode } : {});
+      await api.sendMessage(chatId, body, extra);
     } catch (err) {
       if (parseMode) {
-        await api.sendMessage(chatId, body);
+        await api.sendMessage(chatId, body, isLast && replyMarkup ? { reply_markup: replyMarkup } : {});
       } else {
         throw err;
       }
