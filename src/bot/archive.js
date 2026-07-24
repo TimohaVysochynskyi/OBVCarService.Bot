@@ -2,7 +2,7 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import { getOperators, countOperatorCalls, listOperatorCalls, getCallByGeneralId } from '../core/store.js';
 import { getCallRecordUrl } from '../core/binotel.js';
 import { operatorListKeyboard, operatorLabel } from './keyboards.js';
-import { displayName } from './operators.js';
+import { displayName, formatPhone } from './operators.js';
 import { formatDialogue } from './dialogue.js';
 import { kyivParts, formatKyiv } from './time.js';
 import { sendLong, withProgress, showScreen } from './ui.js';
@@ -73,7 +73,9 @@ function registerArchive(bot) {
       const btn = isNonSales(c.callPurpose)
         ? `${shortKyiv(c.startTime)} ℹ️ ${purposeLabel(c.callPurpose)}`
         : `${shortKyiv(c.startTime)} ${c.isSuccess ? '👍' : '👎'} бал ${c.communicationScore ?? '—'}`;
-      kb.text(btn, `arch:call:${c.generalCallId}`).row();
+      // offset + name are carried along so the call-detail screen's "« Список" button can return
+      // to the exact page the user was browsing, instead of always resetting to page 0.
+      kb.text(btn, `arch:call:${c.generalCallId}:${offset}:${name}`).row();
     }
     if (offset > 0) kb.text('◀', `arch:go:${Math.max(0, offset - PAGE)}:${name}`);
     kb.text(`${offset + 1}–${Math.min(offset + PAGE, total)} / ${total}`, 'noop');
@@ -83,8 +85,10 @@ function registerArchive(bot) {
     await showScreen(ctx, `${operatorLabel(name)}\nОберіть дзвінок:`, kb);
   }
 
-  bot.callbackQuery(/^arch:call:(.+)$/, async (ctx) => {
+  bot.callbackQuery(/^arch:call:(\d+):(\d+):(.+)$/, async (ctx) => {
     const gid = ctx.match[1];
+    const listOffset = Number(ctx.match[2]);
+    const listName = ctx.match[3];
     await ctx.answerCallbackQuery();
     const c = await getCallByGeneralId(gid);
     if (!c) {
@@ -96,6 +100,7 @@ function registerArchive(bot) {
       : `Успіх: ${c.isSuccess ? 'так' : 'ні'}, бал: ${c.communicationScore ?? '—'}, слабкий етап: ${c.weakestStage ?? '—'}`;
     const header =
       `📞 *Дзвінок* ${gid}\n` +
+      `Клієнт: ${c.clientNumber ? formatPhone(c.clientNumber) : '—'}\n` +
       `Менеджер: ${displayName(c.managerName) ?? '—'}\n` +
       `Час: ${formatKyiv(new Date(c.startTime))}\n` +
       `Тривалість: ${c.durationSec ?? '—'} с\n` +
@@ -124,7 +129,11 @@ function registerArchive(bot) {
       await sendLong(ctx.api, ctx.chat.id, `📝 Розмова:\n\n${dialogue}`);
     }
     await ctx.reply('Аудіо запису:', {
-      reply_markup: new InlineKeyboard().text('🎧 Прослухати запис', `arch:play:${gid}`).row().text('« Меню', 'menu'),
+      reply_markup: new InlineKeyboard()
+        .text('🎧 Прослухати запис', `arch:play:${gid}`)
+        .row()
+        .text('« Список', `arch:go:${listOffset}:${listName}`)
+        .text('« Меню', 'menu'),
     });
   });
 

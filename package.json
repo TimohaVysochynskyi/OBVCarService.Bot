@@ -17,7 +17,8 @@
     "retranscribe:last": "node src/scripts/retranscribeLast.js",
     "backfill:analysis": "node src/scripts/backfillAnalysis.js",
     "backfill:purpose": "node src/scripts/backfillPurpose.js",
-    "normalize:operators": "node src/scripts/normalizeOperators.js"
+    "normalize:operators": "node src/scripts/normalizeOperators.js",
+    "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

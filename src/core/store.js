@@ -57,6 +57,11 @@ async function migrate() {
     -- computes conversion over sales calls only. NULL for rows not yet (re)analysed → treated as
     -- sales-relevant for backward-compat until the analysis backfill fills them.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS call_purpose TEXT;
+    -- The CLIENT's raw phone number (Binotel externalNumber), NOT ours. Was never captured before
+    -- 2026-07-24 (bug: the archive call-detail screen had no client number to show at all, only the
+    -- internal call id, which reads confusingly like a phone number). NULL on rows ingested before
+    -- this - see src/scripts/backfillClientNumbers.js for the one-off historical backfill.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS client_number TEXT;
 
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
@@ -64,11 +69,13 @@ async function migrate() {
       manager_name TEXT,
       start_time TIMESTAMPTZ,
       duration_sec INTEGER,
+      client_number TEXT,
       attempts INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'pending',
       last_error TEXT,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+    ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS client_number TEXT;
 
     CREATE TABLE IF NOT EXISTS app_state (
       key TEXT PRIMARY KEY,
@@ -266,8 +273,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -283,6 +290,7 @@ async function saveCall(call) {
       jsonParam(call.behaviors),
       call.analysisVersion ?? null,
       call.callPurpose ?? null,
+      call.clientNumber ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -607,7 +615,7 @@ async function getCallByGeneralId(generalCallId) {
             internal_number AS "internalNumber", start_time AS "startTime",
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
             weakest_stage AS "weakestStage", communication_score AS "communicationScore",
-            call_purpose AS "callPurpose"
+            call_purpose AS "callPurpose", client_number AS "clientNumber"
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -689,6 +697,25 @@ async function deleteCallsByExtension(internalNumber) {
 async function clearAllReportSegments() {
   const { rowCount } = await pool.query('DELETE FROM report_segments');
   return rowCount;
+}
+
+// One-off historical backfill (src/scripts/backfillClientNumbers.js): fills client_number for a
+// row that already exists but was ingested before this field was captured. Guarded by
+// `client_number IS NULL` so it only ever fills a gap, never overwrites a value already saved by
+// a fresh ingest - safe to re-run.
+async function updateClientNumberIfMissing(generalCallId, clientNumber) {
+  const { rowCount } = await pool.query(
+    'UPDATE calls SET client_number = $2 WHERE general_call_id = $1 AND client_number IS NULL',
+    [generalCallId, clientNumber]
+  );
+  return rowCount;
+}
+
+// Earliest call currently on file - the backfill's start boundary (no point sweeping Binotel
+// further back than our own oldest row).
+async function getEarliestCallTime() {
+  const { rows } = await pool.query('SELECT MIN(start_time) AS "min" FROM calls');
+  return rows[0]?.min ?? null;
 }
 
 // ---- Knowledge base (RAG over uploaded manuals, pgvector) ---------------------------------
@@ -813,13 +840,13 @@ async function deleteKbDoc(id) {
 
 async function upsertPending(call, errorMessage) {
   await pool.query(
-    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, attempts, status, last_error, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 1, 'pending', $6, now())
+    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, attempts, status, last_error, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, 1, 'pending', $7, now())
      ON CONFLICT (general_call_id) DO UPDATE SET
        attempts = pending_calls.attempts + 1,
-       last_error = $6,
+       last_error = $7,
        updated_at = now()`,
-    [call.generalCallId, call.internalNumber, call.managerName, call.startTime, call.durationSec, errorMessage || null]
+    [call.generalCallId, call.internalNumber, call.managerName, call.startTime, call.durationSec, call.clientNumber ?? null, errorMessage || null]
   );
 }
 
@@ -836,7 +863,7 @@ async function removePendingCall(generalCallId) {
 async function getPendingCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber", manager_name AS "managerName",
-            start_time AS "startTime", duration_sec AS "durationSec", attempts
+            start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber", attempts
      FROM pending_calls
      WHERE status = 'pending'
      ORDER BY start_time`
@@ -1048,6 +1075,8 @@ export {
   renameManagerEverywhere,
   deleteCallsByExtension,
   clearAllReportSegments,
+  updateClientNumberIfMissing,
+  getEarliestCallTime,
   migrateKb,
   insertKbDoc,
   insertKbChunks,

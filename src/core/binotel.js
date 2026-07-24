@@ -48,6 +48,9 @@ async function listCallsForPeriod(startDate, endDate) {
     // for 903). Shared-handset extensions may not carry a name - callers fall back to the
     // raw internalNumber when this is empty.
     employeeName: c.employeeData?.name || null,
+    // The CLIENT's phone number (the other party on the call, not ours). Raw Binotel shape,
+    // e.g. "0971532839" - formatted to +380... on display (bot/operators.js: formatPhone).
+    clientNumber: c.externalNumber || null,
     startTime: new Date(Number(c.startTime) * 1000).toISOString(),
     durationSec: Number(c.billsec || 0),
     recordingStatus: c.recordingStatus,

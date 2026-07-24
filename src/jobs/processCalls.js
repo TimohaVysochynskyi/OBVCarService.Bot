@@ -129,6 +129,7 @@ async function transcribeClassifyAndSave(call, roster) {
     managerName,
     startTime: call.startTime,
     durationSec: call.durationSec,
+    clientNumber: call.clientNumber,
     transcript,
     segments,
     behaviors,
