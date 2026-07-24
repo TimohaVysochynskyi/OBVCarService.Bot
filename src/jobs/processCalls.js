@@ -191,8 +191,15 @@ async function processCallsForRange(start, end) {
   const roster = await getOperatorRoster();
   const chunks = splitIntoChunks(start, end);
   console.log(`[processCalls] range ${start.toISOString()} -> ${end.toISOString()}, ${chunks.length} chunk(s), roster: ${roster.join(', ') || '(empty)'}`);
-  for (const [chunkStart, chunkEnd] of chunks) {
+  for (let i = 0; i < chunks.length; i += 1) {
+    const [chunkStart, chunkEnd] = chunks[i];
     await processChunk(chunkStart, chunkEnd, roster);
+    // A near-empty chunk (e.g. a quiet historical day) processes almost instantly, back-to-back
+    // with the next chunk's own list-of-calls-for-period call - exactly the pattern that triggers
+    // Binotel's "requests are too frequent" throttling. A short pause between chunks costs nothing
+    // next to the per-call transcription/analysis work, but avoids hammering it on a multi-chunk
+    // range (backfills; a poll run after downtime).
+    if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 }
 

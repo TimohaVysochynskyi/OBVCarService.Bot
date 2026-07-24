@@ -23,9 +23,19 @@ async function callBinotel(path, body) {
       }
       const data = await res.json();
       console.log(`[binotel] response from ${path}:`, JSON.stringify(data).slice(0, 500));
+      // Binotel reports API-level failures (e.g. rate limiting: "Requests are too frequent") with
+      // HTTP 200 + {status:"error",...} - res.ok alone misses this entirely. Left unchecked, a
+      // rate-limited list-of-calls-for-period silently looked like "zero calls in this period" to
+      // every caller (no exception, no retry, no log), which is exactly the kind of silent data
+      // loss this project's checkpoint/pending_calls design exists to prevent. Throwing here makes
+      // withRetry actually retry it, and - for the poller - means the checkpoint isn't advanced
+      // past a period Binotel never really confirmed, so the next poll retries the same window.
+      if (data.status === 'error') {
+        throw new Error(`Binotel ${path} returned an error: ${data.code} ${data.message}`);
+      }
       return data;
     },
-    { attempts: 3, delayMs: 1500, label: `binotel ${path}` }
+    { attempts: 3, delayMs: 2000, label: `binotel ${path}` }
   );
 }
 

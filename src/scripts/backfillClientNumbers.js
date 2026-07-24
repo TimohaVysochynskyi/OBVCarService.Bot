@@ -37,18 +37,29 @@ async function main() {
 
   let filled = 0;
   let seen = 0;
-  for (const [chunkStart, chunkEnd] of chunks) {
-    const calls = await listCallsForPeriod(chunkStart, chunkEnd);
-    for (const c of calls) {
-      seen += 1;
-      if (!c.clientNumber) continue;
-      const n = await updateClientNumberIfMissing(c.generalCallId, c.clientNumber);
-      if (n > 0) filled += 1;
+  let failedChunks = 0;
+  for (let i = 0; i < chunks.length; i += 1) {
+    const [chunkStart, chunkEnd] = chunks[i];
+    try {
+      const calls = await listCallsForPeriod(chunkStart, chunkEnd);
+      for (const c of calls) {
+        seen += 1;
+        if (!c.clientNumber) continue;
+        const n = await updateClientNumberIfMissing(c.generalCallId, c.clientNumber);
+        if (n > 0) filled += 1;
+      }
+      console.log(`[backfillClientNumbers]   chunk ${chunkStart.toISOString()} -> ${chunkEnd.toISOString()}: ${calls.length} call(s) from Binotel, ${filled} filled so far`);
+    } catch (err) {
+      failedChunks += 1;
+      console.error(`[backfillClientNumbers]   chunk ${chunkStart.toISOString()} -> ${chunkEnd.toISOString()} FAILED: ${err.message}`);
     }
-    console.log(`[backfillClientNumbers]   chunk ${chunkStart.toISOString()} -> ${chunkEnd.toISOString()}: ${calls.length} call(s) from Binotel, ${filled} filled so far`);
+    // This loop fires nothing but list-of-calls-for-period back to back (no per-call work to pace
+    // it, unlike the main ingest) - a short pause keeps it under Binotel's rate limit instead of
+    // relying entirely on withRetry's backoff.
+    if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 
-  console.log(`\n[backfillClientNumbers] done: ${seen} call(s) seen from Binotel, ${filled} row(s) filled.`);
+  console.log(`\n[backfillClientNumbers] done: ${seen} call(s) seen from Binotel, ${filled} row(s) filled, ${failedChunks} chunk(s) failed (re-run to retry them).`);
   process.exit(0);
 }
 
