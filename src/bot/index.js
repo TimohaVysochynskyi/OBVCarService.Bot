@@ -278,15 +278,16 @@ bot.on('message:text', async (ctx) => {
     // Stay in question mode so follow-up questions keep working. The user leaves by opening the
     // menu (/menu or « Меню).
     try {
-      const answer = await withProgress(
+      const { text, keyboard } = await withProgress(
         ctx.api,
         ctx.chat.id,
         'typing',
-        () => answerQuestion(ctx.message.text, ctx.role, ctx.me?.username),
+        () => answerQuestion(ctx.message.text, ctx.role),
         { notice: '⏳ Бот обробляє запит, це може зайняти деякий час…' }
       );
-      // HTML so the source filenames render as clickable deep-links (Markdown breaks on "_" in names).
-      await sendLong(ctx.api, ctx.chat.id, answer, { parseMode: 'HTML' });
+      // HTML so the cited fragments render as collapsible quotes (Markdown breaks on "_" in names).
+      // The keyboard sends the CUT-OUT pages of each source (never the whole file automatically).
+      await sendLong(ctx.api, ctx.chat.id, text, { parseMode: 'HTML', replyMarkup: keyboard || undefined });
     } catch (err) {
       console.error(`[bot] KB answer failed: ${err.message}`);
       await ctx.reply(`❌ Не вдалося відповісти: ${err.message}`);

@@ -764,6 +764,14 @@ async function migrateKb() {
     -- answer cite the exact page(s). Chunks ingested before this column stay NULL (no page shown).
     ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS page_start INTEGER;
     ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS page_end INTEGER;
+
+    -- Lexical half of the hybrid search. Vector search alone misses exact technical terms (a part
+    -- name, a spec number) because the embedding smears them into the surrounding topic; FTS nails
+    -- them. Config is 'simple' (no Ukrainian stemmer ships with Postgres) — morphology is handled by
+    -- turning query words into prefix terms (двигун:*), see searchKbChunksLexical.
+    ALTER TABLE kb_chunks ADD COLUMN IF NOT EXISTS tsv tsvector
+      GENERATED ALWAYS AS (to_tsvector('simple', content)) STORED;
+    CREATE INDEX IF NOT EXISTS kb_chunks_tsv_idx ON kb_chunks USING gin (tsv);
   `);
 }
 
@@ -777,15 +785,61 @@ async function insertKbDoc(filename, uploadedBy, fileId, mime, audience = 'mecha
   return rows[0].id;
 }
 
-// chunks: [{ ord, content, embedding: number[], pageStart?: number|null, pageEnd?: number|null }]
-async function insertKbChunks(docId, chunks) {
-  for (const c of chunks) {
-    await pool.query(
-      'INSERT INTO kb_chunks (doc_id, ord, content, embedding, page_start, page_end) VALUES ($1, $2, $3, $4::vector, $5, $6)',
-      [docId, c.ord, c.content, vecToStr(c.embedding), c.pageStart ?? null, c.pageEnd ?? null]
+// Multi-row INSERT of chunk batches on an existing client. Batched (not one-by-one) to keep the
+// parameter count per statement sane on a 300+ chunk textbook.
+const CHUNK_INSERT_BATCH = 100;
+
+async function insertChunkRows(client, docId, chunks) {
+  for (let i = 0; i < chunks.length; i += CHUNK_INSERT_BATCH) {
+    const batch = chunks.slice(i, i + CHUNK_INSERT_BATCH);
+    const values = [];
+    const params = [];
+    for (const c of batch) {
+      const n = params.length;
+      values.push(`($${n + 1}, $${n + 2}, $${n + 3}, $${n + 4}::vector, $${n + 5}, $${n + 6})`);
+      params.push(docId, c.ord, c.content, vecToStr(c.embedding), c.pageStart ?? null, c.pageEnd ?? null);
+    }
+    await client.query(
+      `INSERT INTO kb_chunks (doc_id, ord, content, embedding, page_start, page_end) VALUES ${values.join(', ')}`,
+      params
     );
   }
-  await pool.query('UPDATE kb_docs SET chunk_count = $2 WHERE id = $1', [docId, chunks.length]);
+  await client.query('UPDATE kb_docs SET chunk_count = $2 WHERE id = $1', [docId, chunks.length]);
+}
+
+// chunks: [{ ord, content, embedding: number[], pageStart?: number|null, pageEnd?: number|null }]
+// Transactional: a failure mid-way used to leave a half-indexed document with a chunk_count that
+// lied about it. Either every chunk lands or none does.
+async function insertKbChunks(docId, chunks) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await insertChunkRows(client, docId, chunks);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// Re-index an existing document in place (npm run kb:reindex): swap its chunks for freshly built
+// ones in ONE transaction, so the doc is never searchable in a half-rebuilt state. Keeps the
+// kb_docs row (id/filename/audience/file_id) untouched, so deep-links and roles survive.
+async function replaceKbDocChunks(docId, chunks) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM kb_chunks WHERE doc_id = $1', [docId]);
+    await insertChunkRows(client, docId, chunks);
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // audiences: null/undefined => search everything (director/marketer); an array (e.g.
@@ -805,6 +859,29 @@ async function searchKbChunks(queryEmbedding, k = 6, audiences = null) {
      FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id
      ${filter}
      ORDER BY c.embedding <=> $1::vector
+     LIMIT $2`,
+    params
+  );
+  return rows;
+}
+
+// Lexical half of the hybrid search. tsQuery is a ready to_tsquery('simple') string built by the
+// caller (kb.js: toPrefixTsQuery) — prefix terms OR'ed together, e.g. 'двигун:* | клапан:*', so
+// Ukrainian/Russian suffix morphology still matches without a stemmer. Same shape of rows as
+// searchKbChunks, so the two result sets can be fused rank-wise.
+async function searchKbChunksLexical(tsQuery, k = 12, audiences = null) {
+  const params = [tsQuery, k];
+  let filter = '';
+  if (audiences && audiences.length) {
+    params.push(audiences);
+    filter = 'AND d.audience = ANY($3)';
+  }
+  const { rows } = await pool.query(
+    `SELECT c.id AS "chunkId", c.content, c.page_start AS "pageStart", c.page_end AS "pageEnd",
+            d.filename, d.id AS "docId", ts_rank_cd(c.tsv, q) AS score
+     FROM kb_chunks c JOIN kb_docs d ON d.id = c.doc_id, to_tsquery('simple', $1) q
+     WHERE c.tsv @@ q ${filter}
+     ORDER BY score DESC
      LIMIT $2`,
     params
   );
@@ -831,6 +908,16 @@ async function getKbDoc(id) {
     [id]
   );
   return rows[0] || null;
+}
+
+// Docs whose original is still fetchable from Telegram (file_id present) — the input for
+// npm run kb:reindex, which rebuilds chunks with the current chunking/embedding pipeline.
+async function getKbDocsWithFile() {
+  const { rows } = await pool.query(
+    `SELECT id, filename, file_id AS "fileId", mime, audience, chunk_count AS "chunkCount"
+     FROM kb_docs WHERE file_id IS NOT NULL ORDER BY id`
+  );
+  return rows;
 }
 
 async function setKbDocAudience(id, audience) {
@@ -1085,10 +1172,13 @@ export {
   migrateKb,
   insertKbDoc,
   insertKbChunks,
+  replaceKbDocChunks,
   searchKbChunks,
+  searchKbChunksLexical,
   listKbDocs,
   countKbChunks,
   getKbDoc,
+  getKbDocsWithFile,
   setKbDocAudience,
   deleteKbDoc,
   upsertPending,
