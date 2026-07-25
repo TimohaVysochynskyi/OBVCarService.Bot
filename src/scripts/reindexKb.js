@@ -57,10 +57,13 @@ async function main() {
     }
   }
   console.log(`[kb:reindex] готово: ${ok}/${docs.length}`);
+  // Non-zero on a partial run so a shell can retry it (`until npm run kb:reindex; do sleep …; done`)
+  // — embeddings outages are the realistic failure here, and a half-reindexed base is not "done".
+  return ok === docs.length;
 }
 
 main()
-  .then(() => process.exit(0))
+  .then((allOk) => process.exit(allOk ? 0 : 1))
   .catch((err) => {
     console.error(err);
     process.exit(1);
