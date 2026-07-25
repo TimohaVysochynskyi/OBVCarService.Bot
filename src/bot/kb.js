@@ -540,8 +540,8 @@ async function sendAnswerSources(api, chatId, sources, { replyToMessageId } = {}
       const isPdf = /pdf/i.test(doc.mime || '') || /\.pdf$/i.test(doc.filename);
       if (!isPdf || !s.ranges.length) {
         // No pages to cut (DOCX/TXT, or citations without page info): the original is the evidence.
+        // No caption — the document name is already visible on the file.
         await api.sendDocument(chatId, doc.fileId, {
-          caption: `📄 ${doc.filename}`,
           ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {}),
         });
         sent += 1;

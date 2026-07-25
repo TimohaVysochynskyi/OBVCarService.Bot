@@ -83,13 +83,14 @@ async function cutPages(buffer, from, to) {
   return { buffer: Buffer.from(await out.save()), from: a, to: b };
 }
 
-const pageSuffix = (a, b) => (a === b ? `стор.${a}` : `стор.${a}-${b}`);
+// Spelled out, never abbreviated (owner's call): "сторінки 26-29" / "сторінка 26".
+const pagesPhrase = (a, b) => (a === b ? `сторінка ${a}` : `сторінки ${a}-${b}`);
 
 // Filename for the excerpt: the original name (without extension, trimmed) + the page range, so a
 // mechanic who saves it still knows what book it came from.
 function excerptFilename(filename, a, b) {
   const base = (filename || 'документ').replace(/\.pdf$/i, '').slice(0, 60);
-  return `${base} ${pageSuffix(a, b)}.pdf`;
+  return `${base} ${pagesPhrase(a, b)}.pdf`;
 }
 
 // Send the cited pages of a doc as a small PDF. doc is a kb_docs row ({ id, filename, fileId }).
@@ -109,8 +110,10 @@ async function sendDocExcerpt(api, chatId, doc, pageStart, pageEnd, { replyToMes
   const cut = await cutPages(original, pageStart, pageEnd);
   if (!cut) return false;
   const name = excerptFilename(doc.filename, cut.from, cut.to);
+  // Caption is JUST the page range: the document name is already visible on the file itself, so
+  // repeating it in the message is noise.
   const sent = await api.sendDocument(chatId, new InputFile(cut.buffer, name), {
-    caption: `📄 ${doc.filename}\n${pageSuffix(cut.from, cut.to)}`,
+    caption: `📄 ${pagesPhrase(cut.from, cut.to)}`,
     ...(replyParameters ? { reply_parameters: replyParameters } : {}),
   });
   const fid = sent?.document?.file_id;
@@ -118,4 +121,4 @@ async function sendDocExcerpt(api, chatId, doc, pageStart, pageEnd, { replyToMes
   return true;
 }
 
-export { downloadOriginal, cutPages, sendDocExcerpt, excerptFilename };
+export { downloadOriginal, cutPages, sendDocExcerpt, excerptFilename, pagesPhrase };
