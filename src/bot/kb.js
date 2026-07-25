@@ -367,19 +367,37 @@ const RERANK_CANDIDATES = 24;
 const RERANK_KEEP = 8;
 const RERANK_MIN_SCORE = 4; // of 10 — below this a chunk is "related topic, not an answer"
 
+// Returns { candidates, degraded }. The two halves fail INDEPENDENTLY on purpose: OpenAI's
+// embeddings endpoint went fully down on 2026-07-25 (500 on every embedding model while chat kept
+// answering), which under a vector-only design takes the whole knowledge base down with it. The
+// lexical half needs nothing but Postgres, so a question still gets answered — degraded, and the
+// answer says so. Only losing BOTH is a real failure.
 async function retrieve(question, audiences) {
-  const queries = await expandQueries(question);
-  const embeddings = await embedTexts(queries);
   const lists = [];
-  for (const emb of embeddings) lists.push(await searchKbChunks(emb, RETRIEVE_PER_QUERY, audiences));
+  let vectorOk = false;
+  let lexicalOk = false;
+
+  try {
+    const queries = await expandQueries(question);
+    const embeddings = await embedTexts(queries);
+    for (const emb of embeddings) lists.push(await searchKbChunks(emb, RETRIEVE_PER_QUERY, audiences));
+    vectorOk = true;
+  } catch (err) {
+    console.error(`[kb] vector search unavailable, falling back to lexical: ${err.message}`);
+  }
 
   const tsq = toPrefixTsQuery(question);
   if (tsq) {
     try {
       lists.push(await searchKbChunksLexical(tsq, LEXICAL_LIMIT, audiences));
+      lexicalOk = true;
     } catch (err) {
-      console.error(`[kb] lexical search failed, vector only: ${err.message}`);
+      console.error(`[kb] lexical search failed: ${err.message}`);
     }
+  }
+
+  if (!vectorOk && !lexicalOk) {
+    throw new Error('пошук у базі знань недоступний (ні семантичний, ні текстовий) — спробуйте пізніше');
   }
 
   const fused = new Map();
@@ -391,7 +409,10 @@ async function retrieve(question, audiences) {
       else fused.set(h.chunkId, { ...h, rrf: add });
     });
   }
-  return [...fused.values()].sort((a, b) => b.rrf - a.rrf).slice(0, RERANK_CANDIDATES);
+  return {
+    candidates: [...fused.values()].sort((a, b) => b.rrf - a.rrf).slice(0, RERANK_CANDIDATES),
+    degraded: !vectorOk,
+  };
 }
 
 const pageNote = (h) =>
@@ -531,7 +552,7 @@ async function answerStructured(question, hits) {
 // cut-out pages of each source. role limits which docs are searched (a mechanic never gets a
 // manager's manual and vice versa; admins search everything).
 async function answerQuestion(question, role) {
-  const candidates = await retrieve(question, audiencesForRole(role));
+  const { candidates, degraded } = await retrieve(question, audiencesForRole(role));
   const hits = await rerankChunks(question, candidates);
   const { answer, usedSources, usedGeneralKnowledge } = await answerStructured(question, hits);
 
@@ -542,6 +563,9 @@ async function answerQuestion(question, role) {
     text += used.length
       ? '\n\nℹ️ Частину відповіді доповнено із загальних знань (не з посібників).'
       : '\n\nℹ️ Відповідь ґрунтується на загальних знаннях — прямої відповіді в посібниках не знайдено.';
+  }
+  if (degraded) {
+    text += '\n\n⚠️ Семантичний пошук тимчасово недоступний — шукав лише за словами з питання, тож міг знайти не все. Спробуйте переформулювати або повторити пізніше.';
   }
   return { text, keyboard: used.length ? evidenceKeyboard(used) : null };
 }
