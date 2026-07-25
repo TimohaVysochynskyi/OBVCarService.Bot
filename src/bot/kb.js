@@ -894,4 +894,6 @@ export {
   toPrefixTsQuery,
   trimQuote,
   pagesLabel,
+  evidenceBlock,
+  evidenceKeyboard,
 };
