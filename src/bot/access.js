@@ -40,10 +40,6 @@ function featureOf(ctx) {
   if (cq) {
     if (cq === 'menu' || cq === 'noop') return 'menu';
     if (cq === 'kb:ask') return 'kb_ask';
-    // Buttons under an ANSWER (cut-out pages / whole source file) belong to asking, not to file
-    // management — a mechanic must be able to open the pages their answer came from. The per-doc
-    // audience check still runs inside the handler (kb.js: docForRole).
-    if (cq.startsWith('kb:frag:') || cq.startsWith('kb:full:')) return 'kb_ask';
     if (cq.startsWith('kb:')) return 'kb_edit'; // menu/add/doc/open/del/delok/aud/audset/audput = file mgmt
     if (cq.startsWith('stat:')) return 'stats_all';
     if (cq.startsWith('arch:')) return 'archive';

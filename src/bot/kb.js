@@ -14,7 +14,7 @@ import {
   deleteKbDoc,
 } from '../core/store.js';
 import { ROLES } from './access.js';
-import { sendLong, withProgress, showScreen } from './ui.js';
+import { withProgress, showScreen } from './ui.js';
 import { sendDocExcerpt, downloadOriginal } from './kbClip.js';
 
 const EMBED_MODEL = () => process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
@@ -297,9 +297,6 @@ const RERANK_SCHEMA = {
   },
 };
 
-const htmlEscape = (s) =>
-  String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
 async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 } = {}) {
   return withRetry(
     async () => {
@@ -453,14 +450,13 @@ async function rerankChunks(question, candidates) {
   }
 }
 
-// --- Evidence block: the cited fragments themselves, not the whole file ----------------------
-// The owner's requirement: a user must get the CUT-OUT parts where the answer lives, from every
-// file involved — never the full 300-page manual. So the answer carries the quotes inline, plus a
-// button per file that sends a mini-PDF of just those pages (kbClip.js).
+// --- Evidence: PDF cut-outs, sent automatically ----------------------------------------------
+// The owner's requirement: an answer is followed by the CUT-OUT pages where that answer lives —
+// one mini-PDF per source file — and nothing else. No inline text quotes, no "whole file" button:
+// the excerpt IS the proof, so it is delivered, not offered.
 
-const MAX_EVIDENCE = 4;
-const QUOTE_CHARS = 700;
 const MAX_EVIDENCE_DOCS = 3;
+const MAX_RANGES_PER_DOC = 2;
 
 function mergeRanges(ranges) {
   const sorted = ranges.map(([a, b]) => [Math.min(a, b), Math.max(a, b)]).sort((x, y) => x[0] - y[0]);
@@ -474,67 +470,21 @@ function mergeRanges(ranges) {
   return merged;
 }
 
-function pagesLabel(ranges) {
-  const merged = mergeRanges(ranges);
-  if (!merged.length) return '';
-  return `стор. ${merged.map(([a, b]) => (a === b ? `${a}` : `${a}–${b}`)).join(', ')}`;
-}
-
-// Trim a quote to a readable length, preferring a sentence boundary over a hard cut.
-function trimQuote(text, n = QUOTE_CHARS) {
-  const t = String(text || '').replace(/\s+/g, ' ').trim();
-  if (t.length <= n) return t;
-  const cut = t.slice(0, n);
-  const at = Math.max(cut.lastIndexOf('. '), cut.lastIndexOf('! '), cut.lastIndexOf('? '));
-  return `${(at > n * 0.5 ? cut.slice(0, at + 1) : cut).trim()}…`;
-}
-
-// Group the used hits per document, preserving the order the answer relied on them.
-function groupByDoc(hits) {
+// The fragments the answer actually used, collapsed into what has to be sent: per source document,
+// the merged page ranges to cut out. Adjacent/overlapping citations become one excerpt instead of
+// several near-identical files. A document with no page info (DOCX/TXT) yields an empty range list
+// — pages cannot be cut out of it, so the original is sent instead (the only evidence available).
+function answerSources(hits) {
   const byDoc = new Map();
   for (const h of hits) {
     if (!byDoc.has(h.docId)) byDoc.set(h.docId, { docId: h.docId, filename: h.filename, ranges: [] });
     if (h.pageStart != null) byDoc.get(h.docId).ranges.push([h.pageStart, h.pageEnd ?? h.pageStart]);
   }
-  return [...byDoc.values()].slice(0, MAX_EVIDENCE_DOCS);
-}
-
-// HTML (blockquote) so long fragments collapse in Telegram instead of burying the answer.
-function evidenceBlock(hits) {
-  const lines = ['📎 <b>Де це в посібниках:</b>'];
-  hits.slice(0, MAX_EVIDENCE).forEach((h, i) => {
-    const pg = h.pageStart != null ? ` — ${pagesLabel([[h.pageStart, h.pageEnd ?? h.pageStart]])}` : '';
-    lines.push(
-      `\n<b>${i + 1}. «${htmlEscape(h.filename)}»</b>${pg}\n<blockquote expandable>${htmlEscape(trimQuote(h.content))}</blockquote>`
-    );
-  });
-  return lines.join('\n');
-}
-
-const shortName = (filename) => {
-  const base = String(filename || '').replace(/\.(pdf|docx|txt|md)$/i, '');
-  return base.length > 26 ? `${base.slice(0, 25)}…` : base;
-};
-
-// One row per source document: the page cut-out (mini-PDF) plus a small "whole file" escape hatch
-// for when someone needs the wider chapter. Docs without pages (DOCX/TXT) only get the latter.
-function evidenceKeyboard(hits) {
-  const kb = new InlineKeyboard();
-  let rows = 0;
-  for (const d of groupByDoc(hits)) {
-    const name = shortName(d.filename);
-    const merged = mergeRanges(d.ranges).slice(0, 2);
-    for (const [a, b] of merged) {
-      kb.text(`📄 ${name} · ${a === b ? `стор. ${a}` : `стор. ${a}–${b}`}`, `kb:frag:${d.docId}:${a}:${b}`).row();
-      rows += 1;
-    }
-    kb.text(merged.length ? `📚 весь файл: ${name}` : `📚 ${name} — весь файл`, `kb:full:${d.docId}`).row();
-    rows += 1;
-  }
-  if (!rows) return null;
-  // Trailing .row() leaves an empty row behind, which Telegram can reject outright.
-  kb.inline_keyboard = kb.inline_keyboard.filter((r) => r.length);
-  return kb;
+  return [...byDoc.values()].slice(0, MAX_EVIDENCE_DOCS).map((d) => ({
+    docId: d.docId,
+    filename: d.filename,
+    ranges: mergeRanges(d.ranges).slice(0, MAX_RANGES_PER_DOC),
+  }));
 }
 
 async function answerStructured(question, hits) {
@@ -559,18 +509,52 @@ async function answerQuestion(question, role) {
   const hits = await rerankChunks(question, candidates);
   const { answer, usedSources, usedGeneralKnowledge } = await answerStructured(question, hits);
 
+  // Plain text on purpose: the answer carries no markup of its own, and the evidence now ships as
+  // separate PDF documents — so there is nothing to format and no parse_mode to break on a
+  // filename full of underscores.
   const used = (usedSources || []).map((i) => hits[i - 1]).filter(Boolean);
-  let text = htmlEscape(answer);
-  if (used.length) text += `\n\n${evidenceBlock(used)}`;
+  let text = String(answer || '').trim();
   if (usedGeneralKnowledge) {
     text += used.length
       ? '\n\nℹ️ Частину відповіді доповнено із загальних знань (не з посібників).'
       : '\n\nℹ️ Відповідь ґрунтується на загальних знаннях — прямої відповіді в посібниках не знайдено.';
   }
   if (degraded) {
-    text += '\n\n⚠️ Семантичний пошук тимчасово недоступний — шукав лише за словами з питання, тож міг знайти не все. Спробуйте переформулювати або повторити пізніше.';
+    text +=
+      '\n\n⚠️ Семантичний пошук тимчасово недоступний — пошук виконано лише за словами з питання, тому результат може бути неповним. Можливо, варто переформулювати запит або повторити пізніше.';
   }
-  return { text, keyboard: used.length ? evidenceKeyboard(used) : null };
+  return { text, sources: answerSources(used) };
+}
+
+// Deliver the evidence for an answer: one mini-PDF of the cited pages per source document, sent
+// right after the answer text. api-based (not ctx-based) so the same path serves any caller.
+// Returns how many excerpts went out; failures are logged and skipped, never thrown — a missing
+// excerpt must not take down an answer that is already correct.
+async function sendAnswerSources(api, chatId, sources, { replyToMessageId } = {}) {
+  let sent = 0;
+  for (const s of sources) {
+    let doc;
+    try {
+      doc = await getKbDoc(s.docId);
+      if (!doc?.fileId) continue;
+      const isPdf = /pdf/i.test(doc.mime || '') || /\.pdf$/i.test(doc.filename);
+      if (!isPdf || !s.ranges.length) {
+        // No pages to cut (DOCX/TXT, or citations without page info): the original is the evidence.
+        await api.sendDocument(chatId, doc.fileId, {
+          caption: `📄 ${doc.filename}`,
+          ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {}),
+        });
+        sent += 1;
+        continue;
+      }
+      for (const [from, to] of s.ranges) {
+        if (await sendDocExcerpt(api, chatId, doc, from, to, { replyToMessageId })) sent += 1;
+      }
+    } catch (err) {
+      console.error(`[kb] sending excerpt of doc ${s.docId} failed: ${err.message}`);
+    }
+  }
+  return sent;
 }
 
 // --- Upload ingestion ----------------------------------------------------------------------
@@ -613,7 +597,7 @@ async function askAudienceForUpload(ctx) {
 // Step 2 of upload: run the ingestion for the stashed document with the chosen audience.
 async function ingestPendingDoc(ctx, pending, audience) {
   const { fileId, name, mime } = pending;
-  await ctx.reply(`⏳ Обробляю «${name}» (${AUDIENCE_LABEL[audience]})… Для великих файлів це може зайняти до хвилини.`);
+  await ctx.reply(`⏳ Файл «${name}» (${AUDIENCE_LABEL[audience]}) обробляється… Для великих файлів це може зайняти до хвилини.`);
   try {
     // Download + text extraction + chunking + embeddings can take ~30s; keep a "typing"
     // indicator alive for the whole time so the chat doesn't look frozen.
@@ -627,7 +611,7 @@ async function ingestPendingDoc(ctx, pending, audience) {
       return { chunkCount, textLength };
     });
     if (!result) {
-      await ctx.reply(`⚠️ З "${name}" не вдалося витягти текст. Якщо це сканований PDF/зображення — потрібне розпізнавання (OCR), скажіть.`);
+      await ctx.reply(`⚠️ З «${name}» не вдалося витягти текст. Якщо це сканований PDF/зображення — потрібне розпізнавання (OCR).`);
       return;
     }
     await ctx.reply(`✅ Додано «${name}» для ${AUDIENCE_LABEL[audience]} — ${result.chunkCount} фрагм. (~${result.textLength} симв.). Тепер можна ставити питання.`);
@@ -694,7 +678,7 @@ async function promptQuestion(ctx, kbState) {
     return;
   }
   if ((await countKbChunks()) === 0) {
-    await ctx.reply('База знань порожня. Надішліть файл(и) посібника боту (PDF/DOCX/TXT), і я їх проіндексую.');
+    await ctx.reply('База знань порожня. Надішліть файл(и) посібника боту (PDF/DOCX/TXT) — вони будуть проіндексовані.');
     return;
   }
   ctx.session.awaiting = { type: 'kb_question' };
@@ -768,37 +752,7 @@ function registerKnowledgeBase(bot, kbState) {
 
   bot.callbackQuery('kb:add', async (ctx) => {
     await ctx.answerCallbackQuery();
-    await ctx.reply('📎 Надішліть документ (PDF, DOCX або TXT) — я витягну текст і додам у базу знань. Можна кілька файлів поспіль.');
-  });
-
-  // Cut-out pages of a source, from under an answer. Available to EVERY role (see access.js:
-  // kb:frag / kb:full are gated as kb_ask, not as file management) — audience is checked per doc.
-  bot.callbackQuery(/^kb:frag:(\d+):(\d+):(\d+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery({ text: 'Готую сторінки…' });
-    const [, idStr, a, b] = ctx.match;
-    const d = await docForRole(ctx, Number(idStr), ctx.role);
-    if (!d) return;
-    const replyToMessageId = ctx.callbackQuery.message?.message_id;
-    if (!/pdf/i.test(d.mime || '') && !/\.pdf$/i.test(d.filename)) {
-      await openKbDocById(ctx, d.id, ctx.role, { replyToMessageId });
-      return;
-    }
-    try {
-      const sent = await withProgress(ctx.api, ctx.chat.id, 'upload_document', () =>
-        sendDocExcerpt(ctx.api, ctx.chat.id, d, Number(a), Number(b), { replyToMessageId })
-      );
-      if (!sent) await ctx.reply('Не вдалося вирізати ці сторінки — надсилаю файл повністю кнопкою «весь файл».');
-    } catch (err) {
-      console.error(`[kb] excerpt ${d.id} ${a}-${b} failed: ${err.message}`);
-      await ctx.reply(`Не вдалося вирізати сторінки: ${err.message}`);
-    }
-  });
-
-  bot.callbackQuery(/^kb:full:(\d+)$/, async (ctx) => {
-    await ctx.answerCallbackQuery({ text: 'Надсилаю файл…' });
-    await withProgress(ctx.api, ctx.chat.id, 'upload_document', () =>
-      openKbDocById(ctx, Number(ctx.match[1]), ctx.role, { replyToMessageId: ctx.callbackQuery.message?.message_id })
-    );
+    await ctx.reply('📎 Надішліть документ (PDF, DOCX або TXT) — текст буде витягнуто й додано до бази знань. Можна кілька файлів поспіль.');
   });
 
   bot.callbackQuery(/^kb:doc:(\d+)$/, async (ctx) => {
@@ -892,8 +846,6 @@ export {
   embedTexts,
   embedInput,
   toPrefixTsQuery,
-  trimQuote,
-  pagesLabel,
-  evidenceBlock,
-  evidenceKeyboard,
+  answerSources,
+  sendAnswerSources,
 };

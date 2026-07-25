@@ -23,9 +23,12 @@ function splitMessage(text) {
 // replyToMessageId (optional) makes EVERY chunk a Telegram reply to that message, so content a
 // button reveals visually threads back to the message the button is on instead of just landing at
 // the bottom of the chat (allow_sending_without_reply: the original may since be gone/too old).
+// Returns the ids of the messages it sent, so a caller can thread follow-up content (e.g. the KB
+// answer's PDF excerpts) as replies to the first one.
 async function sendLong(api, chatId, text, { parseMode, replyMarkup, replyToMessageId } = {}) {
   const chunks = splitMessage(text);
   const replyParameters = replyToMessageId ? { message_id: replyToMessageId, allow_sending_without_reply: true } : undefined;
+  const ids = [];
   for (const [i, chunk] of chunks.entries()) {
     const prefix = chunks.length > 1 ? `(${i + 1}/${chunks.length})\n` : '';
     const body = prefix + chunk;
@@ -36,18 +39,21 @@ async function sendLong(api, chatId, text, { parseMode, replyMarkup, replyToMess
       ...(replyParameters ? { reply_parameters: replyParameters } : {}),
     };
     try {
-      await api.sendMessage(chatId, body, extra);
+      const m = await api.sendMessage(chatId, body, extra);
+      if (m?.message_id) ids.push(m.message_id);
     } catch (err) {
       if (parseMode) {
-        await api.sendMessage(chatId, body, {
+        const m = await api.sendMessage(chatId, body, {
           ...(isLast && replyMarkup ? { reply_markup: replyMarkup } : {}),
           ...(replyParameters ? { reply_parameters: replyParameters } : {}),
         });
+        if (m?.message_id) ids.push(m.message_id);
       } else {
         throw err;
       }
     }
   }
+  return ids;
 }
 
 // Telegram chat actions ('typing', 'upload_voice', 'upload_document', …) auto-expire after ~5s.
