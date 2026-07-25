@@ -531,7 +531,10 @@ function evidenceKeyboard(hits) {
     kb.text(merged.length ? `📚 весь файл: ${name}` : `📚 ${name} — весь файл`, `kb:full:${d.docId}`).row();
     rows += 1;
   }
-  return rows ? kb : null;
+  if (!rows) return null;
+  // Trailing .row() leaves an empty row behind, which Telegram can reject outright.
+  kb.inline_keyboard = kb.inline_keyboard.filter((r) => r.length);
+  return kb;
 }
 
 async function answerStructured(question, hits) {
