@@ -746,12 +746,15 @@ async function clearAllReportSegments() {
 // is guarded by its own `IS NULL`, so it only ever fills a gap and never overwrites a value a fresh
 // ingest already saved - safe to re-run. Returns rowCount (0 = nothing was missing).
 async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName) {
+  // The ::text casts are required, not cosmetic: $2/$3 appear only inside COALESCE and `IS NOT NULL`,
+  // neither of which tells Postgres the parameter type, so without them the statement fails outright
+  // with "could not determine data type of parameter $2".
   const { rowCount } = await pool.query(
     `UPDATE calls SET
-       client_number = COALESCE(client_number, $2),
-       client_name = COALESCE(client_name, $3)
+       client_number = COALESCE(client_number, $2::text),
+       client_name = COALESCE(client_name, $3::text)
      WHERE general_call_id = $1
-       AND ((client_number IS NULL AND $2 IS NOT NULL) OR (client_name IS NULL AND $3 IS NOT NULL))`,
+       AND ((client_number IS NULL AND $2::text IS NOT NULL) OR (client_name IS NULL AND $3::text IS NOT NULL))`,
     [generalCallId, clientNumber ?? null, clientName ?? null]
   );
   return rowCount;
