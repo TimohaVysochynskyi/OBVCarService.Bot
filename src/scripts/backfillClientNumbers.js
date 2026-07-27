@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrate, updateClientNumberIfMissing, getEarliestCallTime } from '../core/store.js';
+import { migrate, updateClientInfoIfMissing, getEarliestCallTime } from '../core/store.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 
 // One-off: the CLIENT's phone number (Binotel's externalNumber) was never captured before
@@ -44,8 +44,8 @@ async function main() {
       const calls = await listCallsForPeriod(chunkStart, chunkEnd);
       for (const c of calls) {
         seen += 1;
-        if (!c.clientNumber) continue;
-        const n = await updateClientNumberIfMissing(c.generalCallId, c.clientNumber);
+        if (!c.clientNumber && !c.clientName) continue;
+        const n = await updateClientInfoIfMissing(c.generalCallId, c.clientNumber, c.clientName);
         if (n > 0) filled += 1;
       }
       console.log(`[backfillClientNumbers]   chunk ${chunkStart.toISOString()} -> ${chunkEnd.toISOString()}: ${calls.length} call(s) from Binotel, ${filled} filled so far`);

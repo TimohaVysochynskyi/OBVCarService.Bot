@@ -11,12 +11,17 @@ import {
   markSlotDelivered,
   deleteOldManualTails,
 } from '../core/store.js';
-import { reduceFindings, MAX_PHRASES } from './analyze.js';
+import { reduceFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
 import { assembleReport } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
 import { withProgress, sendLong } from './ui.js';
 import { displayName } from './operators.js';
 import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from './time.js';
+
+// Shown (verbatim, owner's wording) when a period yielded no findings because the manager made no
+// sales calls in it — the numeric header above it still carries the volume of work they did.
+const NO_SALES_TEXT =
+  'За цей період менеджер не здійснював продажних дзвінків, тому оцінка продажних навичок наразі неможлива. Вище наведені кількісні показники роботи.';
 
 // Evidence-first report delivery (Telegram text + audio clips). A report is a set of BLOCKS — each
 // block is one analysed time segment (a frozen 'scheduled' segment reused from report_segments, or a
@@ -176,16 +181,18 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
   if (!blocks.length) {
     const sales = report.stats.salesCount ?? 0;
     let msg;
-    if (isTrend) {
+    if (sales === 0) {
+      // Owner-specified wording for the common case: nothing to judge because there were no sales
+      // calls at all. Kept separate from the "there WERE sales calls, just no repeated pattern" case
+      // below — claiming "no sales calls" when there were some would simply be false.
+      msg = NO_SALES_TEXT;
+    } else if (isTrend) {
       msg =
         report.analyzedSegments === 0
           ? '📄 За цей період ще немає заморожених відрізків аналізу — патерни зʼявляться, коли відрізки будуть проаналізовані (авто-звіти / «Звіт зараз»). Вище — числова динаміка.'
-          : '✅ У проаналізованих відрізках періоду не зафіксовано повторюваних патернів (з ≥3 прикладами). Вище — числова динаміка.';
+          : `✅ У проаналізованих відрізках періоду не зафіксовано повторюваних патернів (з ≥${MIN_EVIDENCE} прикладами). Вище — числова динаміка.`;
     } else {
-      msg =
-        sales === 0
-          ? '📄 За цей період продажних дзвінків не було — оцінювати продажні навички нема на чому. Вище — числові показники.'
-          : '✅ За цей період не знайдено повторюваних патернів (з ≥3 підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.';
+      msg = `✅ За цей період не знайдено повторюваних патернів (з ≥${MIN_EVIDENCE} підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.`;
     }
     await sendLong(api, chatId, msg, { replyToMessageId });
     return;
@@ -314,7 +321,7 @@ function registerReportActions(bot) {
     if (!report.phrases?.length) {
       // Phrases are a side-product of the SAME reduce call that produces findings (see
       // analyze.js: reduceFindingsConsistent) - if there weren't enough tagged sales-call
-      // behaviours to cluster into findings (MIN_EVIDENCE=3), there are none here either. Not a
+      // behaviours to cluster into findings (MIN_EVIDENCE), there are none here either. Not a
       // bug: expect this whenever "Розгорнути" also shows "нічого не знайдено" for the period.
       await ctx.reply(
         'Для цього періоду немає готових формулювань — замало продажних дзвінків із зафіксованою поведінкою (той самий поріг, що й для знахідок).',

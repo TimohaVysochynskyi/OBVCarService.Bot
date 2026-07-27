@@ -32,7 +32,7 @@ async function showDynamics(ctx, name, bucket) {
     .text('📊 Звіт за період →', `stat:rep:${name}`)
     .row()
     .text('« Менеджери', 'stat:pick')
-    .text('« Меню', 'menu');
+    .text('« Повернутися назад', 'menu');
   await showScreen(ctx, text, kb);
 }
 

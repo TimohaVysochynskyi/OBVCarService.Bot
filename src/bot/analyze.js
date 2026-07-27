@@ -26,7 +26,11 @@ import {
 // (so ASR/surzhyk artefacts can't leak in).
 // ============================================================================================
 
-const MIN_EVIDENCE = 3;
+// How many verified, distinct quotes a finding must have to survive. Lowered 3 -> 2 (2026-07-27,
+// owner's call): at ~1-3 sales calls a day, requiring three examples of the SAME behaviour meant
+// most reports had nothing to show. Every text that mentions the threshold interpolates this
+// constant, so the number can never drift out of sync with the code again.
+const MIN_EVIDENCE = 2;
 // Cap on "Готові формулювання" (recommended_phrases) shown in a report - kept low by request
 // (reduced from 7 to 5, 2026-07-24: too many phrases were being dumped on the reader at once).
 const MAX_PHRASES = 5;
@@ -44,7 +48,7 @@ const DEFAULT_REPORT_GUIDANCE = `Ти — вимогливий аналітик 
 - claim: одне конкретне твердження про повторювану поведінку (що САМЕ менеджер робить/не робить).
 - why_hurts_booking: чому це коштує записів клієнтів (для помилок) або чому це допомагає записувати (для сильних сторін) — коротко, по суті.
 - action: рівно одна конкретна дія, що змінити (для помилок) або що масштабувати (для сильних сторін).
-Групуй лише ПОВТОРЮВАНІ патерни (щонайменше 3 різні приклади). Разові випадки не включай.
+Групуй лише ПОВТОРЮВАНІ патерни (щонайменше ${MIN_EVIDENCE} різні приклади). Разові випадки не включай.
 
 recommended_phrases: 5 готових ІДЕАЛЬНИХ формулювань для типових ситуацій цього менеджера (заперечення «дорого»/«подумаю»/«зроблю в іншому місці», момент закриття та фіксації дати запису, уточнення проблеми авто). Це ЗРАЗКИ від тебе — НЕ цитати з транскриптів.`;
 

@@ -67,7 +67,9 @@ function operatorListKeyboard(operators, prefix, { showDates = false } = {}) {
   const kb = new InlineKeyboard();
   const labels = operatorLabels(operators, { showDates });
   operators.forEach((o, i) => kb.text(labels[i], `${prefix}:op:${o.name}`).row());
-  kb.text("« Меню", "menu");
+  // The operator list is the first screen of Stats/Archive, so leaving it IS going back (owner's
+  // wording) — even though the destination is the main menu.
+  kb.text("« Повернутися назад", "menu");
   return kb;
 }
 

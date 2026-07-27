@@ -63,6 +63,12 @@ async function migrate() {
     -- this - see src/scripts/backfillClientNumbers.js for the one-off historical backfill.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS client_number TEXT;
 
+    -- Whoever the client is labelled as, per Binotel's CRM integration (customerDataFromOutside.name;
+    -- Binotel's own customerData is empty on this account). NULL = unlabelled caller, shown as
+    -- "Невідомо". CRM placeholders ("New client 0973127982") are normalised to NULL at ingest, see
+    -- core/binotel.js: extractClientName. Backfilled by src/scripts/backfillClientNumbers.js.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS client_name TEXT;
+
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
       internal_number TEXT,
@@ -76,6 +82,7 @@ async function migrate() {
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
     ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS client_number TEXT;
+    ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS client_name TEXT;
 
     CREATE TABLE IF NOT EXISTS app_state (
       key TEXT PRIMARY KEY,
@@ -273,8 +280,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -291,6 +298,7 @@ async function saveCall(call) {
       call.analysisVersion ?? null,
       call.callPurpose ?? null,
       call.clientNumber ?? null,
+      call.clientName ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -538,28 +546,56 @@ async function getBucketedTrend(name, bucket, limit = 8) {
 }
 
 // All-time (no period filter) - the archive dropped its period-picker step in favor of paginating
-// straight through a manager's whole history.
-async function countOperatorCalls(name) {
+// straight through a manager's whole history. Since 2026-07-27 the archive first asks for a CATEGORY
+// (call_purpose), so both queries take an optional purpose: 'sales' | 'info' | 'other' | 'none'
+// ('none' = call_purpose IS NULL, i.e. ingested before purpose detection / MAP failed), or null for
+// every call.
+const PURPOSE_FILTER = { none: 'AND call_purpose IS NULL' };
+
+function purposeClause(purpose, paramIndex) {
+  if (!purpose) return { sql: '', params: [] };
+  if (PURPOSE_FILTER[purpose]) return { sql: PURPOSE_FILTER[purpose], params: [] };
+  return { sql: `AND call_purpose = $${paramIndex}`, params: [purpose] };
+}
+
+async function countOperatorCalls(name, purpose = null) {
+  const { sql, params } = purposeClause(purpose, 2);
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS count FROM calls
-     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> ''`,
-    [name]
+     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> '' ${sql}`,
+    [name, ...params]
   );
   return rows[0].count;
 }
 
-async function listOperatorCalls(name, limit, offset) {
+async function listOperatorCalls(name, limit, offset, purpose = null) {
+  const { sql, params } = purposeClause(purpose, 4);
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
             is_success AS "isSuccess", communication_score AS "communicationScore",
             call_purpose AS "callPurpose"
      FROM calls
-     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> ''
+     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> '' ${sql}
      ORDER BY start_time DESC
      LIMIT $2 OFFSET $3`,
-    [name, limit, offset]
+    [name, limit, offset, ...params]
   );
   return rows;
+}
+
+// How many calls an operator has in each category — drives the archive's category picker (empty
+// categories aren't shown at all). Returns { sales, info, other, none }.
+async function getOperatorPurposeCounts(name) {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(call_purpose, 'none') AS purpose, COUNT(*)::int AS count
+     FROM calls
+     WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> ''
+     GROUP BY 1`,
+    [name]
+  );
+  const out = { sales: 0, info: 0, other: 0, none: 0 };
+  for (const r of rows) if (r.purpose in out) out[r.purpose] = r.count;
+  return out;
 }
 
 // The N most recent calls of an operator (any period). Used by the one-off re-transcription script
@@ -615,7 +651,8 @@ async function getCallByGeneralId(generalCallId) {
             internal_number AS "internalNumber", start_time AS "startTime",
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
             weakest_stage AS "weakestStage", communication_score AS "communicationScore",
-            call_purpose AS "callPurpose", client_number AS "clientNumber"
+            call_purpose AS "callPurpose", client_number AS "clientNumber",
+            client_name AS "clientName"
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -704,14 +741,18 @@ async function clearAllReportSegments() {
   return rowCount;
 }
 
-// One-off historical backfill (src/scripts/backfillClientNumbers.js): fills client_number for a
-// row that already exists but was ingested before this field was captured. Guarded by
-// `client_number IS NULL` so it only ever fills a gap, never overwrites a value already saved by
-// a fresh ingest - safe to re-run.
-async function updateClientNumberIfMissing(generalCallId, clientNumber) {
+// One-off historical backfill (src/scripts/backfillClientNumbers.js): fills the client's number and
+// name for a row that already exists but was ingested before those fields were captured. Each column
+// is guarded by its own `IS NULL`, so it only ever fills a gap and never overwrites a value a fresh
+// ingest already saved - safe to re-run. Returns rowCount (0 = nothing was missing).
+async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName) {
   const { rowCount } = await pool.query(
-    'UPDATE calls SET client_number = $2 WHERE general_call_id = $1 AND client_number IS NULL',
-    [generalCallId, clientNumber]
+    `UPDATE calls SET
+       client_number = COALESCE(client_number, $2),
+       client_name = COALESCE(client_name, $3)
+     WHERE general_call_id = $1
+       AND ((client_number IS NULL AND $2 IS NOT NULL) OR (client_name IS NULL AND $3 IS NOT NULL))`,
+    [generalCallId, clientNumber ?? null, clientName ?? null]
   );
   return rowCount;
 }
@@ -932,13 +973,22 @@ async function deleteKbDoc(id) {
 
 async function upsertPending(call, errorMessage) {
   await pool.query(
-    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, attempts, status, last_error, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, 1, 'pending', $7, now())
+    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, client_name, attempts, status, last_error, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 'pending', $8, now())
      ON CONFLICT (general_call_id) DO UPDATE SET
        attempts = pending_calls.attempts + 1,
-       last_error = $7,
+       last_error = $8,
        updated_at = now()`,
-    [call.generalCallId, call.internalNumber, call.managerName, call.startTime, call.durationSec, call.clientNumber ?? null, errorMessage || null]
+    [
+      call.generalCallId,
+      call.internalNumber,
+      call.managerName,
+      call.startTime,
+      call.durationSec,
+      call.clientNumber ?? null,
+      call.clientName ?? null,
+      errorMessage || null,
+    ]
   );
 }
 
@@ -955,7 +1005,8 @@ async function removePendingCall(generalCallId) {
 async function getPendingCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber", manager_name AS "managerName",
-            start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber", attempts
+            start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber",
+            client_name AS "clientName", attempts
      FROM pending_calls
      WHERE status = 'pending'
      ORDER BY start_time`
@@ -1158,6 +1209,7 @@ export {
   deleteOldManualTails,
   countOperatorCalls,
   listOperatorCalls,
+  getOperatorPurposeCounts,
   getCallByGeneralId,
   getCallsWithTranscriptsInRange,
   getActiveOperatorsInRange,
@@ -1167,7 +1219,7 @@ export {
   renameManagerEverywhere,
   deleteCallsByExtension,
   clearAllReportSegments,
-  updateClientNumberIfMissing,
+  updateClientInfoIfMissing,
   getEarliestCallTime,
   migrateKb,
   insertKbDoc,

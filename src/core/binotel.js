@@ -43,6 +43,23 @@ function toUnixSeconds(date) {
   return Math.floor(date.getTime() / 1000);
 }
 
+// The CLIENT's name, if anyone ever labelled them. Verified against the live account on 2026-07-27:
+// Binotel's own address book (`customerData`) is EMPTY here, and the name actually arrives in
+// `customerDataFromOutside` — the CRM integration (CarBook) — so both are checked, native first.
+// Two shapes must NOT be treated as a name:
+//   • "New client 0973127982" — the CRM's auto-generated placeholder for an unrecognised caller;
+//   • a "name" that is just the phone number again.
+// Names also come padded/double-spaced ("Сергій  ", "Костянтин  Борисовський Євгенович"), hence the
+// whitespace collapse. Returns null when the client is genuinely unlabelled.
+function extractClientName(call) {
+  const raw = call.customerData?.name || call.customerDataFromOutside?.name || '';
+  const name = String(raw).replace(/\s+/g, ' ').trim();
+  if (!name) return null;
+  if (/^new client\b/i.test(name)) return null;
+  if (/^\+?[\d\s\-()]+$/.test(name)) return null;
+  return name;
+}
+
 // Confirmed against a real account on 2026-07-06: callDetails is an OBJECT keyed by
 // generalCallID, not an array. Binotel caps this method at a 24h window.
 async function listCallsForPeriod(startDate, endDate) {
@@ -61,6 +78,8 @@ async function listCallsForPeriod(startDate, endDate) {
     // The CLIENT's phone number (the other party on the call, not ours). Raw Binotel shape,
     // e.g. "0971532839" - formatted to +380... on display (bot/operators.js: formatPhone).
     clientNumber: c.externalNumber || null,
+    // Whoever the client is called in the CRM (null when unlabelled) - shown in the archive.
+    clientName: extractClientName(c),
     startTime: new Date(Number(c.startTime) * 1000).toISOString(),
     durationSec: Number(c.billsec || 0),
     recordingStatus: c.recordingStatus,
@@ -77,4 +96,4 @@ async function getCallRecordUrl(generalCallId) {
   return data.url || data.response?.record || data.record;
 }
 
-export { listCallsForPeriod, getCallRecordUrl };
+export { listCallsForPeriod, getCallRecordUrl, extractClientName };
