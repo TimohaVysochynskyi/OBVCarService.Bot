@@ -80,6 +80,15 @@ async function listCallsForPeriod(startDate, endDate) {
     clientNumber: c.externalNumber || null,
     // Whoever the client is called in the CRM (null when unlabelled) - shown in the archive.
     clientName: extractClientName(c),
+    // WHO ENDED THE CALL. Binotel documents whoHungUp as part of the apiCallCompleted WEBHOOK, and
+    // the field is present in the REST response schema too — but it is EMPTY on this account: 458
+    // calls over 30 days (345 of them answered, both directions), via both
+    // list-of-calls-for-period and call-details, returned "" every single time (checked 2026-07-28).
+    // So it is captured here but nothing is built on it: the moment Binotel starts populating it (a
+    // support request / the webhook), real values begin accumulating and the check can be wired up.
+    // Deliberately NOT guessed from the transcript — the owner rejected a heuristic, and rightly so:
+    // "the manager spoke last" is not the same as "the manager hung up".
+    hangupBy: c.whoHungUp || null,
     startTime: new Date(Number(c.startTime) * 1000).toISOString(),
     durationSec: Number(c.billsec || 0),
     recordingStatus: c.recordingStatus,

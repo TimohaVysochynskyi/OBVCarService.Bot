@@ -131,6 +131,7 @@ async function transcribeClassifyAndSave(call, roster) {
     durationSec: call.durationSec,
     clientNumber: call.clientNumber,
     clientName: call.clientName,
+    hangupBy: call.hangupBy,
     transcript,
     segments,
     behaviors,

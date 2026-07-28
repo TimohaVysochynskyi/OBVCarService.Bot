@@ -201,8 +201,25 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
 // expandKey encodes exactly what a later "🔽 Розгорнути"/"💬 Рекомендації" click needs to re-derive
 // this SAME report via buildReportByMode - cheap for 'daily'/'range' (reads the cached
 // report_segments cache rather than re-running the LLM reduce; see registerReportActions).
-const expandKeyOf = (name, start, end, mode) =>
-  `${mode}:${Math.floor(start.getTime() / 1000)}:${Math.floor(end.getTime() / 1000)}:${name}`;
+// callback_data is capped at 64 BYTES, and a Cyrillic manager name costs 2 bytes per character — so
+// everything except the name is kept as short as possible: a ONE-CHAR mode code and base36 unix
+// seconds (6 chars instead of 10, exact, no precision lost). That leaves ~37 bytes ≈ 18 Cyrillic
+// characters for the name. Spelled-out modes and decimal timestamps hit 73 bytes on a long name,
+// which makes Telegram reject the entire keyboard — the same trap that already bit arch:call.
+const MODE_CODE = { daily: 'd', range: 'r', range_reuse: 'q', live: 'l' };
+const MODE_BY_CODE = Object.fromEntries(Object.entries(MODE_CODE).map(([k, v]) => [v, k]));
+const b36 = (date) => Math.floor(date.getTime() / 1000).toString(36);
+const CALLBACK_LIMIT = 64;
+
+function expandKeyOf(name, start, end, mode) {
+  const key = `${MODE_CODE[mode] || 'd'}:${b36(start)}:${b36(end)}:${name}`;
+  // Surfaces in the log instead of silently producing a keyboard Telegram refuses to render.
+  const longest = Buffer.byteLength(`report:exp:${key}`);
+  if (longest > CALLBACK_LIMIT) {
+    console.error(`[report] expandKey for "${name}" is ${longest} bytes (>${CALLBACK_LIMIT}) — buttons will not render`);
+  }
+  return key;
+}
 
 // Send a fully-built report to ONE chat: ONLY the header/trend, with "🔽 Розгорнути" and
 // "💬 Рекомендації" buttons attached - never the findings/audio/phrases inline.
@@ -248,9 +265,14 @@ async function sendManualReport(api, chatId) {
 
 // expandKey = "<mode>:<startUnix>:<endUnix>:<name>" (name is the trailing segment - can't contain ':').
 function parseExpandKey(raw) {
-  const m = /^(daily|range|range_reuse|live):(\d+):(\d+):(.+)$/.exec(raw || '');
+  const m = /^([drql]):([0-9a-z]+):([0-9a-z]+):(.+)$/.exec(raw || '');
   if (!m) return null;
-  return { mode: m[1], start: new Date(Number(m[2]) * 1000), end: new Date(Number(m[3]) * 1000), name: m[4] };
+  return {
+    mode: MODE_BY_CODE[m[1]],
+    start: new Date(parseInt(m[2], 36) * 1000),
+    end: new Date(parseInt(m[3], 36) * 1000),
+    name: m[4],
+  };
 }
 
 // Handlers for every report's "🔽 Розгорнути"/"💬 Рекомендації" buttons. Both re-derive the report

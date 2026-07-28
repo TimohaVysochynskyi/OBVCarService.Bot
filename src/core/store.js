@@ -69,6 +69,11 @@ async function migrate() {
     -- core/binotel.js: extractClientName. Backfilled by src/scripts/backfillClientNumbers.js.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS client_name TEXT;
 
+    -- Who ended the call (Binotel whoHungUp). Captured but UNUSED: verified empty on 458 calls over
+    -- 30 days on this account (see core/binotel.js), so nothing is judged on it yet. The column
+    -- exists so that real values start accumulating the moment Binotel populates the field.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS hangup_by TEXT;
+
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
       internal_number TEXT,
@@ -280,8 +285,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -299,6 +304,7 @@ async function saveCall(call) {
       call.callPurpose ?? null,
       call.clientNumber ?? null,
       call.clientName ?? null,
+      call.hangupBy ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
