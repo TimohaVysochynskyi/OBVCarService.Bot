@@ -19,7 +19,8 @@
     "backfill:purpose": "node src/scripts/backfillPurpose.js",
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
-    "kb:reindex": "node src/scripts/reindexKb.js"
+    "kb:reindex": "node src/scripts/reindexKb.js",
+    "rescore:sales": "node src/scripts/rescoreSales.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

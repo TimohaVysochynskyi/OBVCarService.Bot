@@ -10,6 +10,7 @@ import { getCallRecordUrl } from "../core/binotel.js";
 import { operatorListKeyboard, operatorLabel } from "./keyboards.js";
 import { displayName, formatPhone } from "./operators.js";
 import { formatDialogue } from "./dialogue.js";
+import { timecodedDialogue } from "../core/dialogueMetrics.js";
 import { kyivParts, formatKyiv } from "./time.js";
 import { sendLong, withProgress, showScreen } from "./ui.js";
 
@@ -177,8 +178,14 @@ function registerArchive(bot) {
     // Plain text: the header carries no markup of its own any more, and client/manager names
     // routinely contain characters (_ * [) that would break Markdown parsing.
     await sendLong(ctx.api, ctx.chat.id, header);
-    if (looksDiarized(c.transcript)) {
-      // Already a dialogue (ElevenLabs diarization at ingest) — show instantly, no extra request.
+    if (Array.isArray(c.segments) && c.segments.length) {
+      // Timecoded turns ("00:12 Менеджер: …") rendered from calls.segments on the fly. The stored
+      // transcript is deliberately left untouched — quote matching for the evidence report
+      // (core/quoteMatch.js) runs against it, and prefixing every line would break that. Timecodes
+      // let the director see how fast the manager reacts to each question.
+      await sendLong(ctx.api, ctx.chat.id, `📝 Розмова:\n\n${timecodedDialogue(c.segments)}`);
+    } else if (looksDiarized(c.transcript)) {
+      // Diarized text without timecodes (older rows) — show instantly, no extra request.
       await sendLong(ctx.api, ctx.chat.id, `📝 Розмова:\n\n${c.transcript}`);
     } else {
       // Older/plain transcript (pre-ElevenLabs or OpenAI fallback): format on-demand (~10-20s).

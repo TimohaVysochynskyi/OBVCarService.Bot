@@ -652,7 +652,7 @@ async function getCallByGeneralId(generalCallId) {
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
             weakest_stage AS "weakestStage", communication_score AS "communicationScore",
             call_purpose AS "callPurpose", client_number AS "clientNumber",
-            client_name AS "clientName"
+            client_name AS "clientName", segments
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -758,6 +758,26 @@ async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName
     [generalCallId, clientNumber ?? null, clientName ?? null]
   );
   return rowCount;
+}
+
+// Sales calls that have timecoded segments — the input for npm run rescore:sales (re-scoring under
+// the dialogue-mechanics rubric). Only these can be judged on interruptions/latency at all.
+async function getSalesCallsWithSegments() {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments,
+            communication_score AS "communicationScore"
+     FROM calls
+     WHERE call_purpose = 'sales' AND segments IS NOT NULL
+       AND transcript IS NOT NULL AND transcript <> ''
+     ORDER BY start_time`
+  );
+  return rows;
+}
+
+// Updates ONLY the communication score, leaving is_success / weakest_stage alone (see
+// src/scripts/rescoreSales.js: a rubric change must not rewrite conversion history).
+async function updateCallScore(generalCallId, score) {
+  await pool.query('UPDATE calls SET communication_score = $2 WHERE general_call_id = $1', [generalCallId, score]);
 }
 
 // Earliest call currently on file - the backfill's start boundary (no point sweeping Binotel
@@ -1223,6 +1243,8 @@ export {
   deleteCallsByExtension,
   clearAllReportSegments,
   updateClientInfoIfMissing,
+  getSalesCallsWithSegments,
+  updateCallScore,
   getEarliestCallTime,
   migrateKb,
   insertKbDoc,

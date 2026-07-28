@@ -1,6 +1,7 @@
 import { withRetry } from '../core/retry.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
+import { dialogueMetrics } from '../core/dialogueMetrics.js';
 import {
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
@@ -130,12 +131,53 @@ const RELEVANCE_SCHEMA = {
 // the source call + timecode so verification/audio can resolve back to the exact spot. Non-sales
 // calls (call_purpose 'info'/'other') are skipped entirely so a routine status update never becomes
 // a "sales mistake" finding. (NULL purpose = not yet analysed → included for backward-compat.)
+// Dialogue-mechanics candidates are detected in CODE from the call's timecoded segments
+// (core/dialogueMetrics.js), not by the per-call MAP. Two consequences, both deliberate:
+//   • they are retroactive and free — segments are already stored, so historical calls contribute
+//     these candidates without any re-ingest or extra LLM cost;
+//   • the count is verifiable rather than a model's impression.
+// The reduce model still decides whether a given one is worth reporting (a pause right after
+// "секунду, зараз перевірю" is not a mistake) — code measures, the model judges.
+function dialogueCandidates(call) {
+  const segs = Array.isArray(call.segments) ? call.segments : null;
+  if (!segs?.length) return [];
+  const { interruptions, longPauses, thresholdSec } = dialogueMetrics(segs);
+  const out = [];
+  for (const it of interruptions) {
+    if (!it.quote) continue;
+    out.push({
+      type: 'error',
+      stage: SALES_STAGES[0], // internal clustering hint only; both signals concern hearing the client
+      label: 'перебив клієнта на півслові',
+      quote: it.quote,
+      start: it.start,
+      end: it.end,
+      segIndex: it.segIndex,
+      note: `клієнт не договорив: «${it.clientText}»`,
+    });
+  }
+  for (const p of longPauses) {
+    if (!p.quote) continue;
+    out.push({
+      type: 'error',
+      stage: SALES_STAGES[0],
+      label: `пауза ${p.pauseSec}с перед відповіддю (поріг ${thresholdSec}с)`,
+      quote: p.quote,
+      start: p.start,
+      end: p.end,
+      segIndex: p.segIndex,
+      note: `клієнт сказав: «${p.clientText}», менеджер відповів лише через ${p.pauseSec}с`,
+    });
+  }
+  return out;
+}
+
 function buildCandidates(calls) {
   const candidates = [];
   const byId = new Map();
   calls.forEach((c) => {
     if (c.callPurpose === 'info' || c.callPurpose === 'other') return;
-    const items = c.behaviors?.items || [];
+    const items = [...(c.behaviors?.items || []), ...dialogueCandidates(c)];
     items.forEach((it) => {
       if (!it?.quote) return;
       const id = `e${candidates.length}`;
@@ -154,6 +196,9 @@ function buildCandidates(calls) {
         start: it.start ?? null,
         end: it.end ?? null,
         segIndex: it.segIndex ?? null,
+        // Extra context for the reduce model (dialogue-mechanics candidates only) — what the client
+        // was saying, so the model can tell a rude interruption from a justified pause.
+        note: it.note || null,
       };
       candidates.push(cand);
       byId.set(id, cand);
@@ -164,7 +209,7 @@ function buildCandidates(calls) {
 
 // One candidate rendered for the model: [e3] (error/закриття) label | "quote"
 function renderCandidate(c) {
-  return `[${c.id}] (${c.type}/${c.stage}) ${c.label} | "${c.quote}"`;
+  return `[${c.id}] (${c.type}/${c.stage}) ${c.label} | "${c.quote}"${c.note ? ` | ${c.note}` : ''}`;
 }
 
 // Re-verify a candidate's quote against its own call's segments (defensive; also refreshes the
@@ -193,6 +238,12 @@ function verifyCandidate(c) {
 function assembleFindings(rawFindings, calls) {
   const { byId } = buildCandidates(calls);
   const usedIds = new Set();
+  // Dedup by the QUOTE ITSELF, not just by candidate id: since dialogue-mechanics candidates are
+  // generated in code alongside the MAP's behaviours, the SAME manager line can now legitimately
+  // arrive as two different candidates (e.g. tagged as a behaviour and measured as an interruption).
+  // Without this, one line could end up "proving" two separate findings — which is exactly what the
+  // one-quote-one-finding rule exists to prevent.
+  const usedQuotes = new Set();
   const findings = [];
   for (const f of rawFindings || []) {
     const type = f.type === 'strength' ? 'strength' : 'error';
@@ -201,9 +252,12 @@ function assembleFindings(rawFindings, calls) {
       if (usedIds.has(id)) continue;
       const cand = byId.get(id);
       if (!cand || cand.type !== type) continue;
+      const quoteKey = `${cand.callId}|${normalize(cand.quote)}`;
+      if (usedQuotes.has(quoteKey)) continue;
       const ev = verifyCandidate(cand);
       if (!ev) continue;
       usedIds.add(id);
+      usedQuotes.add(quoteKey);
       evidence.push(ev);
     }
     if (evidence.length < MIN_EVIDENCE) continue;
@@ -296,7 +350,11 @@ async function runReducePass(managerName, candidates, stats) {
     `Тобі дано МЕТРИКИ за період і СПИСОК КАНДИДАТІВ — це вже витягнуті з реальних дзвінків поведінки менеджера з дослівними цитатами, кожна має id.\n` +
     `Згрупуй кандидатів у findings. У кожному finding поле evidence_ids — це id кандидатів (мінімум ${MIN_EVIDENCE}), що підтверджують саме це твердження. Усі докази в одному finding мають бути одного type, що й finding.\n` +
     `Використовуй ТІЛЬКИ id зі списку. НЕ вигадуй цитат і НЕ пиши цитати в тексті — цитати підставить система за id.\n` +
-    `Не додавай finding, якщо для нього немає щонайменше ${MIN_EVIDENCE} доказів. Один id не використовуй у двох findings.`;
+    `Не додавай finding, якщо для нього немає щонайменше ${MIN_EVIDENCE} доказів. Один id не використовуй у двох findings.\n\n` +
+    `ОКРЕМО про КУЛЬТУРУ ДІАЛОГУ. Частина кандидатів — це не оцінки моделі, а ЗАМІРИ КОДУ з аудіо:\n` +
+    `- «перебив клієнта на півслові» — клієнт не договорив (репліка обірвана), і менеджер почав говорити. Це реальний факт; якщо таких кандидатів кілька, зроби з них окремий finding про те, що менеджер не дослуховує клієнта.\n` +
+    `- «пауза Nс перед відповіддю» — скільки клієнт чекав на відповідь. Це помилка ЛИШЕ тоді, коли пауза не виправдана. НЕ вважай помилкою й НЕ включай у finding, якщо з цитати видно, що менеджер попередив про перевірку («секунду», «хвилинку», «зараз уточню/подивлюсь») або якщо клієнт сам замовк/думав.\n` +
+    `У claim таких findings пиши саме про поведінку (перебиває / довго не відповідає), а не про цифри.`;
 
   const user = `${metricsLine}\n\nКАНДИДАТИ:\n` + candidates.map(renderCandidate).join('\n');
 

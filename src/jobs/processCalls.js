@@ -118,7 +118,7 @@ async function transcribeClassifyAndSave(call, roster) {
   const isSalesCall = purpose === null || purpose === 'sales';
   let classification = { isSuccess: null, weakestStage: null, communicationScore: null };
   if (isSalesCall) {
-    classification = await classifyCall(transcript);
+    classification = await classifyCall(transcript, segments);
   } else {
     console.log(`[processCalls]   ${call.generalCallId} purpose=${purpose} → non-sales, skipping effectiveness scoring`);
   }

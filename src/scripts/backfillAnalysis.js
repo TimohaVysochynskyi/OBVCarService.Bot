@@ -59,7 +59,7 @@ async function main() {
       const isSalesCall = purpose === null || purpose === 'sales';
       let classification = { isSuccess: null, weakestStage: null, communicationScore: null };
       if (isSalesCall) {
-        classification = await classifyCall(transcript);
+        classification = await classifyCall(transcript, segments);
       }
 
       await updateCallFullAnalysis(c.generalCallId, {

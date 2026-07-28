@@ -1,5 +1,6 @@
 import { withRetry } from "./retry.js";
 import { SALES_STAGES } from "./stages.js";
+import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
 import {
   getStoredScoreRubric,
   setStoredScoreRubric,
@@ -22,7 +23,11 @@ const DEFAULT_SCORE_RUBRIC = `Оцінюй цілісне враження ві�
 • 3-4 — слабко: пасивний, не веде клієнта до рішення, не намагається записати, відповідає лише формально.
 • 1-2 — погано: грубість, некомпетентність, дезінформація або втрата клієнта з вини менеджера.
 
-Що враховувати: привітність і тон; виявлення потреби (уточнюючі питання); чіткість і корисність консультації; роботу із запереченнями («дорого», «подумаю», «зроблю в іншому місці»); ініціативу закриття та фіксацію дати запису. Не знижуй бал за те, що не залежало від менеджера (клієнт сам не готовий записуватись зараз), якщо менеджер зробив усе правильно.`;
+Що враховувати: привітність і тон; виявлення потреби (уточнюючі питання); чіткість і корисність консультації; роботу із запереченнями («дорого», «подумаю», «зроблю в іншому місці»); ініціативу закриття та фіксацію дати запису. Не знижуй бал за те, що не залежало від менеджера (клієнт сам не готовий записуватись зараз), якщо менеджер зробив усе правильно.
+
+Окремо враховуй КУЛЬТУРУ ДІАЛОГУ (у транскрипті перед кожною реплікою стоїть її час, а заміри перебивань і пауз наведені окремо):
+• Перебивання клієнта — менеджер починає говорити, коли клієнт не договорив. Одне перебивання — мінус до балу; систематичні перебивання (3 і більше) не дають поставити вище 6, бо менеджер не чує потреби клієнта.
+• Швидкість реакції — довга тиша перед відповіддю на питання клієнта псує враження. Але це НЕ помилка, якщо менеджер попередив («секунду, зараз перевірю», «хвилинку, уточню») або якщо замовк сам клієнт — у такому разі бал не знижуй.`;
 
 // Effective rubric = owner's custom text (app_state.score_rubric) or the built-in default.
 async function getScoreRubric() {
@@ -73,9 +78,17 @@ const SCHEMA = {
   },
 };
 
-async function classifyCall(transcript) {
+// segments (calls.segments, when the call went through ElevenLabs) let us show the model the dialogue
+// WITH timecodes and hand it the code-measured dialogue mechanics (interruptions / long pauses, see
+// core/dialogueMetrics.js). Those measurements are injected as FACTS outside the rubric on purpose:
+// the rubric is owner-editable, so if it is ever rewritten the model must still receive the numbers —
+// code supplies the facts, the rubric only decides how much they weigh.
+async function classifyCall(transcript, segments = null) {
   // Read the (possibly owner-edited) rubric once, outside the retry loop.
   const system = buildSystemPrompt(await getScoreRubric());
+  const timecoded = timecodedDialogue(segments);
+  const facts = metricsPromptBlock(dialogueMetrics(segments));
+  const userContent = [timecoded || transcript, facts].filter(Boolean).join('\n\n');
   return withRetry(
     async () => {
       const res = await fetch("https://api.openai.com/v1/chat/completions", {
@@ -88,7 +101,7 @@ async function classifyCall(transcript) {
           model: process.env.OPENAI_ANALYZE_MODEL || "gpt-4o-mini",
           messages: [
             { role: "system", content: system },
-            { role: "user", content: transcript },
+            { role: "user", content: userContent },
           ],
           response_format: { type: "json_schema", json_schema: SCHEMA },
         }),
