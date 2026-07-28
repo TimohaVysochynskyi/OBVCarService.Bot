@@ -69,8 +69,17 @@ function detectInterruptions(segments) {
   return out;
 }
 
+const TAIL = 160;
+const tail = (t) => (t.length > TAIL ? `…${t.slice(-TAIL)}` : t);
+
 // Client finished speaking, the manager answered only after >= threshold seconds. The quote is the
 // manager's late answer, so the report can cut audio around it.
+//
+// prevManagerText carries the manager's PREVIOUS line, because that is where the justification lives
+// ("секунду, зараз перевірю", "побудь на линії" before a transfer). Verified on live data: the very
+// first long pause found was 17.1s that followed the manager saying "буквально дві хвилинки, побудь
+// на линии" — a legitimate hold, not a mistake. Without this field the judging model sees only the
+// late answer and cannot tell the difference, so it must be part of the candidate context.
 function detectLongPauses(segments, thresholdSec = longPauseSec()) {
   const segs = Array.isArray(segments) ? segments : [];
   const out = [];
@@ -81,11 +90,19 @@ function detectLongPauses(segments, thresholdSec = longPauseSec()) {
     if (cur.end == null || next.start == null) continue;
     const pause = Number(next.start) - Number(cur.end);
     if (!Number.isFinite(pause) || pause < thresholdSec) continue;
+    let prevManagerText = '';
+    for (let j = i - 1; j >= 0; j -= 1) {
+      if (isManager(segs[j])) {
+        prevManagerText = clean(segs[j].text);
+        break;
+      }
+    }
     out.push({
       clientIndex: i,
       segIndex: i + 1,
       pauseSec: Math.round(pause * 10) / 10,
       clientText: clean(cur.text),
+      prevManagerText,
       quote: clean(next.text),
       start: next.start ?? null,
       end: next.end ?? null,
@@ -121,7 +138,8 @@ function metricsPromptBlock(metrics) {
   if (longPauses.length) {
     lines.push(`- Пауз довших за ${thresholdSec}с перед відповіддю менеджера: ${longPauses.length}:`);
     for (const p of longPauses.slice(0, 5)) {
-      lines.push(`  · ${mmss(p.at)} пауза ${p.pauseSec}с після «${p.clientText}» → «${p.quote}»`);
+      const before = p.prevManagerText ? ` (перед тим менеджер сказав: «${tail(p.prevManagerText)}»)` : '';
+      lines.push(`  · ${mmss(p.at)} пауза ${p.pauseSec}с після «${tail(p.clientText)}»${before} → «${p.quote}»`);
     }
   }
   lines.push(

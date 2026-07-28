@@ -166,7 +166,12 @@ function dialogueCandidates(call) {
       start: p.start,
       end: p.end,
       segIndex: p.segIndex,
-      note: `клієнт сказав: «${p.clientText}», менеджер відповів лише через ${p.pauseSec}с`,
+      // The manager's previous line is included on purpose: that is where a justification like
+      // "секунду, зараз перевірю" / "побудь на линії" sits, and the model needs it to tell a
+      // legitimate hold from real dead air.
+      note:
+        `клієнт сказав: «${p.clientText}», менеджер відповів лише через ${p.pauseSec}с` +
+        (p.prevManagerText ? `; попередня репліка менеджера: «${p.prevManagerText}»` : ''),
     });
   }
   return out;
