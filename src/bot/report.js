@@ -2,8 +2,6 @@ import { InlineKeyboard } from 'grammy';
 import {
   getOperatorStats,
   getCallsForReport,
-  getDailyTrend,
-  getScheduledSegmentsInRange,
   getActiveOperatorsInRange,
   getRecipients,
   getReportTimes,
@@ -11,8 +9,8 @@ import {
   markSlotDelivered,
   deleteOldManualTails,
 } from '../core/store.js';
-import { reduceFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
-import { assembleReport } from './segments.js';
+import { reduceFindings, mergeFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
+import { assembleReport, collectRangeFindings } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
 import { withProgress, sendLong } from './ui.js';
 import { displayName } from './operators.js';
@@ -29,7 +27,7 @@ const NO_SALES_TEXT =
 // repeated / incremental reports reuse it instead of re-analysing from scratch.
 //
 // EVERY delivery path (manual "Звіт зараз", the stats.js per-manager drill-down, scheduled auto-
-// reports) sends the SAME shape: just the numeric header(+trend), with "🔽 Розгорнути" (findings +
+// reports) sends the SAME shape: just the numeric header, with "🔽 Розгорнути" (findings +
 // audio) and "💬 Рекомендації" (phrases) buttons — never the full wall of text+audio inline. One
 // consistent UX everywhere a report appears (2026-07-24, by request).
 
@@ -47,47 +45,41 @@ async function buildManagerEvidenceReport(name, start, end) {
   return { name, stats, blocks: [{ start, end, kind: 'live', findings, phrases }], phrases, start, end };
 }
 
-// Multi-day report (week/month/quarter): a live per-day numeric TREND (growth signal) + the findings
-// of the already-frozen scheduled segments in the period — REUSE ONLY, no on-demand compute (a month
-// could be 60-90 segments × self-consistency = a cost blow-up). Findings are capped to the most
-// recent analysed segments; older days still appear in the trend even without a stored analysis.
-async function buildTrendReport(name, start, end) {
-  const stats = await getOperatorStats(name, start, end);
-  if (!stats.callCount) return null;
-  const trend = await getDailyTrend(name, start, end);
-  const stored = await getScheduledSegmentsInRange(name, start, end);
-  const withFindings = stored.filter((s) => (s.findings || []).length);
-  const latest = withFindings.slice(-3).map((s) => ({
-    start: new Date(s.periodStart),
-    end: new Date(s.periodEnd),
-    kind: 'scheduled',
-    findings: s.findings || [],
-    phrases: s.phrases || [],
-  }));
-  const seen = new Set();
-  const phrases = [];
-  for (const b of latest) {
-    for (const p of b.phrases) {
-      const t = String(p || '').trim();
-      if (!t || seen.has(t)) continue;
-      seen.add(t);
-      phrases.push(t);
-      if (phrases.length >= MAX_PHRASES) break;
-    }
-    if (phrases.length >= MAX_PHRASES) break;
-  }
+// Multi-day period (week / month / quarter). Every DAY of the range is analysed and cached
+// (src/bot/segments.js: collectRangeFindings), then the per-day findings are MERGED into one
+// coherent list for the whole period (analyze.js: mergeFindings) — one list, not one block per day.
+//
+// This replaced the old 'trend' mode, which printed a per-day numeric list and only reused
+// already-frozen segments, so a period nobody had reported on yet produced "ще немає заморожених
+// відрізків аналізу" instead of an analysis. Weeks/months of NUMBERS live on the "Динаміка" screen;
+// this report is about patterns.
+//
+// analyze:false (quarter only) keeps it reuse-only — a quarter can span ~90 days, which is too much
+// to analyse on a button press — and reports honestly how much of it is covered.
+async function buildRangeReport(name, start, end, { analyze = true } = {}) {
+  const collected = await collectRangeFindings(name, start, end, { analyze });
+  if (!collected) return null;
+  const findings = await mergeFindings(name, collected.findings);
   return {
-    name, stats, trend, blocks: latest, phrases, start, end,
-    analyzedSegments: stored.length,
+    name,
+    stats: collected.stats,
+    blocks: [{ start, end, kind: 'range', findings, phrases: collected.phrases }],
+    phrases: collected.phrases,
+    start,
+    end,
+    coverage: { days: collected.days, analysed: collected.analysedDays, missing: collected.missingDays },
+    reuseOnly: !analyze,
   };
 }
 
 // Build a report for one manager without delivering it. mode:
-//   'daily' — assemble from the frozen per-segment cache + a live tail (today's flow);
-//   'trend' — multi-day: per-day trend + findings of already-frozen segments (reuse only);
-//   'live'  — legacy single live reduce over the whole period (fallback, no current caller).
+//   'daily'       — assemble from the frozen per-segment cache + a live tail (today's flow);
+//   'range'       — multi-day (week/month): analyse every day that isn't cached yet, merge into one list;
+//   'range_reuse' — same, but reuse-ONLY (quarter: too many days to analyse on a button press);
+//   'live'        — legacy single live reduce over the whole period (fallback, no current caller).
 function buildReportByMode(mode, name, start, end) {
-  if (mode === 'trend') return buildTrendReport(name, start, end);
+  if (mode === 'range') return buildRangeReport(name, start, end, { analyze: true });
+  if (mode === 'range_reuse') return buildRangeReport(name, start, end, { analyze: false });
   if (mode === 'live') return buildManagerEvidenceReport(name, start, end);
   return assembleReport(name, start, end);
 }
@@ -98,18 +90,6 @@ const hm = (date) => {
   return `${pad(p.hour)}:${pad(p.minute)}`;
 };
 
-// Per-day growth trend (sales-relevant numbers). Days without calls are omitted by getDailyTrend.
-function trendText(report) {
-  const lines = ['📈 *Динаміка по днях* (продажні дзвінки):'];
-  for (const d of report.trend) {
-    const conv = d.salesCount ? Math.round((d.successCount / d.salesCount) * 100) : 0;
-    lines.push(
-      `${shortDate(d.day)}: ${d.callCount} дзв (${d.salesCount} прод), конв ${conv}%, бал ${d.avgScore ?? '—'}`
-    );
-  }
-  return lines.join('\n');
-}
-
 // Numeric header. Conversion / score / weakest stage are over SALES-relevant calls. Deliberately
 // compact (client's request, 2026-07-24): no info-call count, no "з N продажних" on Записів, no
 // "(продажні)" qualifiers - the reader already knows these numbers are sales-scoped.
@@ -117,13 +97,19 @@ function headerText(report) {
   const { name, stats, start, end } = report;
   const sales = stats.salesCount ?? 0;
   const rate = sales ? Math.round((stats.successCount / sales) * 100) : 0;
+  // Reuse-only periods (quarter) must not pretend to be complete: say how many days actually carry
+  // an analysis, so nobody reads "no patterns" as "no problems".
+  const coverage =
+    report.reuseOnly && report.coverage?.missing
+      ? `\n\n_Аналіз є за ${report.coverage.analysed} з ${report.coverage.days} днів періоду — картина може бути неповною._`
+      : '';
   return (
     `📊 *Доказовий звіт* — ${displayName(name)}\n` +
     `${formatKyiv(start)} – ${formatKyiv(end)}\n\n` +
     `Дзвінків: *${stats.callCount}* (продажних: ${sales})\n` +
     `Записів: *${stats.successCount}* (${rate}%)\n` +
     `Середній бал: *${stats.avgScore ?? '—'}*\n` +
-    `Найслабший етап: *${stats.topWeakStage ?? '—'}*`
+    `Найслабший етап: *${stats.topWeakStage ?? '—'}*${coverage}`
   );
 }
 
@@ -163,16 +149,10 @@ async function sendPhrases(api, chatId, phrases, { replyToMessageId } = {}) {
   );
 }
 
-// Header (+ multi-day trend) as one logical unit. replyMarkup is attached to the LAST piece sent —
+// The numeric header as one logical unit. replyMarkup is attached to the LAST piece sent —
 // the "🔽 Розгорнути"/"💬 Рекомендації" buttons every report is delivered with.
 async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
-  const isTrend = Array.isArray(report.trend);
-  if (isTrend && report.trend.length) {
-    await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown' });
-    await sendLong(api, chatId, trendText(report), { parseMode: 'Markdown', replyMarkup });
-  } else {
-    await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown', replyMarkup });
-  }
+  await sendLong(api, chatId, headerText(report), { parseMode: 'Markdown', replyMarkup });
 }
 
 // Findings (blocks) + audio clips, or the "nothing found" fallback - the part hidden behind
@@ -180,7 +160,6 @@ async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
 // clipKey; each negative finding's quotes are followed by their clip. replyToMessageId threads every
 // message sent here back to the report message the button was clicked on (see registerReportActions).
 async function sendReportFindings(api, chatId, report, { clips, replyToMessageId } = {}) {
-  const isTrend = Array.isArray(report.trend);
   const blocks = (report.blocks || []).filter((b) => (b.findings || []).length);
   if (!blocks.length) {
     const sales = report.stats.salesCount ?? 0;
@@ -190,11 +169,9 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
       // calls at all. Kept separate from the "there WERE sales calls, just no repeated pattern" case
       // below — claiming "no sales calls" when there were some would simply be false.
       msg = NO_SALES_TEXT;
-    } else if (isTrend) {
+    } else if (report.reuseOnly && !report.coverage?.analysed) {
       msg =
-        report.analyzedSegments === 0
-          ? '📄 За цей період ще немає заморожених відрізків аналізу — патерни зʼявляться, коли відрізки будуть проаналізовані (авто-звіти / «Звіт зараз»). Вище — числова динаміка.'
-          : `✅ У проаналізованих відрізках періоду не зафіксовано повторюваних патернів (з ≥${MIN_EVIDENCE} прикладами). Вище — числова динаміка.`;
+        '📄 За цей період ще немає готового аналізу. Відкрийте звіт за тиждень або місяць — вони аналізують період одразу, і квартал далі спиратиметься на ці результати.';
     } else {
       msg = `✅ За цей період не знайдено повторюваних патернів (з ≥${MIN_EVIDENCE} підтвердженими прикладами) — критичних системних проблем у продажах не зафіксовано. Вище — числові показники.`;
     }
@@ -202,7 +179,6 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
     return;
   }
 
-  if (isTrend) await sendLong(api, chatId, '🔎 Патерни за останні проаналізовані відрізки:', { replyToMessageId });
   const multi = blocks.length > 1;
   for (const b of blocks) {
     if (multi) await sendLong(api, chatId, blockHeader(b), { replyToMessageId });
@@ -223,7 +199,7 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
 }
 
 // expandKey encodes exactly what a later "🔽 Розгорнути"/"💬 Рекомендації" click needs to re-derive
-// this SAME report via buildReportByMode - cheap for 'daily'/'trend' (reads the frozen
+// this SAME report via buildReportByMode - cheap for 'daily'/'range' (reads the cached
 // report_segments cache rather than re-running the LLM reduce; see registerReportActions).
 const expandKeyOf = (name, start, end, mode) =>
   `${mode}:${Math.floor(start.getTime() / 1000)}:${Math.floor(end.getTime() / 1000)}:${name}`;
@@ -272,13 +248,13 @@ async function sendManualReport(api, chatId) {
 
 // expandKey = "<mode>:<startUnix>:<endUnix>:<name>" (name is the trailing segment - can't contain ':').
 function parseExpandKey(raw) {
-  const m = /^(daily|trend|live):(\d+):(\d+):(.+)$/.exec(raw || '');
+  const m = /^(daily|range|range_reuse|live):(\d+):(\d+):(.+)$/.exec(raw || '');
   if (!m) return null;
   return { mode: m[1], start: new Date(Number(m[2]) * 1000), end: new Date(Number(m[3]) * 1000), name: m[4] };
 }
 
 // Handlers for every report's "🔽 Розгорнути"/"💬 Рекомендації" buttons. Both re-derive the report
-// from expandKey via buildReportByMode - cheap for 'daily'/'trend' (reads the frozen report_segments
+// from expandKey via buildReportByMode - cheap for 'daily'/'range' (reads the cached report_segments
 // cache rather than re-running the LLM reduce). Audio clips are NOT persisted anywhere (see
 // audioClip.js), so "Розгорнути" re-cuts them at click time - the same re-fetch-on-click pattern
 // archive.js already uses for "🎧 Прослухати запис".

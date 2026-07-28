@@ -400,15 +400,17 @@ async function getLatestManualTail(managerName, start) {
   return rows[0] || null;
 }
 
-// Frozen 'scheduled' segments fully inside [rangeStart, rangeEnd], ordered — the reusable blocks
-// for assembling a period report / the growth time series.
-async function getScheduledSegmentsInRange(managerName, rangeStart, rangeEnd) {
+// Stored segments fully inside [rangeStart, rangeEnd), of the given kinds. Used by the reuse-only
+// report path (quarter), which must scrape together whatever analysis already exists — both the
+// day-level segments a week/month report cached and the slot-level 'scheduled' ones the auto-reports
+// froze. 'manual_tail' is excluded by the caller (ephemeral, and GC'd after two days).
+async function getStoredSegmentsInRange(managerName, rangeStart, rangeEnd, kinds = ['scheduled']) {
   const { rows } = await pool.query(
     `SELECT ${SEGMENT_COLS} FROM report_segments
-     WHERE manager_name = $1 AND kind = 'scheduled'
+     WHERE manager_name = $1 AND kind = ANY($4)
        AND period_start >= $2 AND period_end <= $3
      ORDER BY period_start`,
-    [managerName, rangeStart, rangeEnd]
+    [managerName, rangeStart, rangeEnd, kinds]
   );
   return rows;
 }
@@ -504,23 +506,6 @@ async function getOperatorStats(name, start, end) {
 
 // Per-Kyiv-day numeric breakdown for a manager over [start, end) — the growth TREND shown in
 // multi-day reports (week/month/quarter). Live SQL (cheap, exact, deterministic); no LLM. Sales
-// metrics use SALES_FILTER so info/other calls don't distort conversion. Only days with calls.
-async function getDailyTrend(name, start, end) {
-  const { rows } = await pool.query(
-    `SELECT (date_trunc('day', start_time AT TIME ZONE 'Europe/Kyiv'))::date AS "day",
-       COUNT(*)::int AS "callCount",
-       COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
-       COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
-       COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
-       ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore"
-     FROM calls
-     WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
-       AND transcript IS NOT NULL AND transcript <> ''
-     GROUP BY 1 ORDER BY 1`,
-    [name, start, end]
-  );
-  return rows;
-}
 
 // Growth trajectory: the manager's numbers bucketed by Kyiv week or month, most recent `limit`
 // buckets (chronological order restored by the caller). Live SQL (retroactive over ALL history in
@@ -1214,7 +1199,6 @@ export {
   getOperatorRoster,
   getOperators,
   getOperatorStats,
-  getDailyTrend,
   getBucketedTrend,
   getCallsForReport,
   getRecentCalls,
@@ -1226,7 +1210,7 @@ export {
   getCallsMissingPurpose,
   getStoredSegment,
   getLatestManualTail,
-  getScheduledSegmentsInRange,
+  getStoredSegmentsInRange,
   upsertReportSegment,
   getCallIdsForOperator,
   deleteOldManualTails,

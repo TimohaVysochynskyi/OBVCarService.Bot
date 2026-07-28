@@ -7,6 +7,12 @@ import { buildDynamicsText } from './dynamics.js';
 import { periodRange, formatKyiv } from './time.js';
 import { showScreen, withProgress } from './ui.js';
 
+// Which report mode each period uses. Day keeps the slot-segment assembly (it is also what the
+// auto-reports freeze); week and month analyse every uncached DAY of the range and merge the result
+// into one list; quarter is reuse-only on purpose — analysing ~90 days on a button press would be
+// both slow and expensive, so it aggregates whatever analysis already exists and says as much.
+const MODE_BY_PERIOD = { day: 'daily', week: 'range', month: 'range', quarter: 'range_reuse' };
+
 // Content for the "choose a manager" screen - reused by the inline button (edits the message)
 // and by the /stats command.
 async function statsPicker() {
@@ -80,10 +86,11 @@ function registerStats(bot) {
       ctx.api,
       ctx.chat.id,
       'typing',
-      // 'day' → segmented cache (frozen segments + live tail); longer periods → per-day trend +
-      // findings of already-frozen segments (reuse only, no costly on-demand recompute of history).
-      () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { mode: period === 'day' ? 'daily' : 'trend' }),
-      { notice: '⏳ Формую доказовий звіт (аналіз), це може зайняти деякий час…' }
+      // 'day' → segmented cache (frozen segments + live tail); week/month → analyse every day of the
+      // range that isn't cached yet and merge into ONE list; quarter → reuse-only (~90 days is too
+      // much to analyse on a button press) and says so in the header.
+      () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { mode: MODE_BY_PERIOD[period] }),
+      { notice: '⏳ Формую доказовий звіт: аналізую дзвінки періоду, це може зайняти до хвилини…' }
     );
     if (res.empty) {
       await showScreen(ctx, `${operatorLabel(name)}\n\nНемає оброблених дзвінків за період.`, kb);

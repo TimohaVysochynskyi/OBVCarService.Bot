@@ -3,6 +3,7 @@ import {
   getOperatorStats,
   getCallsForReport,
   getStoredSegment,
+  getStoredSegmentsInRange,
   getLatestManualTail,
   upsertReportSegment,
   getCallIdsForOperator,
@@ -183,9 +184,123 @@ async function assembleReport(name, periodStart, periodEnd) {
   return { name, stats, blocks, phrases, start: periodStart, end: periodEnd };
 }
 
+// ============================================================================================
+// MULTI-DAY periods (week / month / quarter) — analysed PER DAY and cached as kind='day'.
+//
+// Why a separate granularity from the slot-bounded 'scheduled' segments: those exist to be an
+// immutable growth time series tied to the report slots, and a month covers ~90 of them. A whole DAY
+// is the natural unit for a period report — ~20 units for a month instead of 90, each with more
+// candidates (so clustering is better), and each cached forever, so the next report over an
+// overlapping range reuses everything except the new days.
+//
+// Single pass (not PASSES): self-consistency exists for the frozen scheduled series that is never
+// recomputed. Here we trade it for wall-clock — a month must not take minutes. Days are analysed a
+// few at a time (CONCURRENCY) for the same reason.
+//
+// Cost note: a day whose sales calls yield fewer than MIN_EVIDENCE candidates costs NOTHING — the
+// reduce short-circuits before any LLM call — and the empty result is still cached, so it is never
+// retried.
+// ============================================================================================
+
+const DAY_KIND = 'day';
+const RANGE_PASSES = 1;
+const CONCURRENCY = 4;
+
+// Kyiv midnight-to-midnight days overlapping [start, end). Reuses kyivDaySegments with NO slots, so
+// each "day segment" is exactly one calendar day in Kyiv (DST-safe — see time.js).
+function enumerateDays(start, end) {
+  const out = [];
+  let cursor = new Date(start);
+  let guard = 0;
+  while (cursor.getTime() < end.getTime() && guard < 400) {
+    guard += 1;
+    const [day] = kyivDaySegments(cursor, []);
+    out.push(day);
+    cursor = day.end;
+  }
+  return out;
+}
+
+// One day's analysis: reuse the cached row when it is current, otherwise compute + store it.
+// analyze:false makes this reuse-ONLY (the quarter path) — it returns null instead of paying for an
+// analysis. Self-heals a recent day whose call set changed (a late-ingested call).
+async function getOrComputeDaySegment(name, start, end, { analyze = true } = {}) {
+  const existing = await getStoredSegment(name, start, end, DAY_KIND);
+  if (existing && (existing.analysisVersion || 0) >= SEGMENT_ANALYSIS_VERSION) {
+    const recent = Date.now() - new Date(end).getTime() < RECENT_MS;
+    if (!recent) return existing;
+    const currentIds = await getCallIdsForOperator(name, start, end);
+    if (sameSet(existing.callIds || [], currentIds)) return existing;
+  }
+  if (!analyze) return null;
+  const seg = await analyzeSegment(name, start, end, RANGE_PASSES);
+  if (!seg) return null;
+  await upsertReportSegment({
+    managerName: name, periodStart: start, periodEnd: end, kind: DAY_KIND,
+    ...seg, analysisVersion: SEGMENT_ANALYSIS_VERSION,
+  });
+  return getStoredSegment(name, start, end, DAY_KIND);
+}
+
+// Run tasks with a small concurrency cap, preserving input order in the result.
+async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next;
+      next += 1;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
+
+// Collect a multi-day period's findings: every day analysed (or reused), flattened into ONE pool.
+// Returns { stats, findings, phrases, days, analysedDays, missingDays } or null when the manager has
+// no calls in the period at all. The CALLER (report.js) merges the pooled findings into a single
+// coherent list — see analyze.js: mergeFindings.
+async function collectRangeFindings(name, periodStart, periodEnd, { analyze = true } = {}) {
+  const stats = await getOperatorStats(name, periodStart, periodEnd);
+  if (!stats.callCount) return null;
+
+  const days = enumerateDays(periodStart, periodEnd);
+  let missingDays = 0;
+
+  if (!analyze) {
+    // Reuse-only: take whatever is already stored, at ANY granularity — the day segments a previous
+    // week/month report cached AND the slot segments the auto-reports froze. Maximum reuse for free.
+    const rows = await getStoredSegmentsInRange(name, periodStart, periodEnd, [DAY_KIND, 'scheduled']);
+    const covered = new Set(rows.map((r) => new Date(r.periodStart).toISOString().slice(0, 10)));
+    for (const d of days) if (!covered.has(d.start.toISOString().slice(0, 10))) missingDays += 1;
+    return {
+      stats,
+      findings: rows.flatMap((r) => r.findings || []),
+      phrases: dedupPhrases(rows.flatMap((r) => r.phrases || [])),
+      days: days.length,
+      analysedDays: rows.length,
+      missingDays,
+    };
+  }
+
+  const rows = await mapLimit(days, CONCURRENCY, (d) => getOrComputeDaySegment(name, d.start, d.end, { analyze: true }));
+  const present = rows.filter(Boolean);
+  return {
+    stats,
+    findings: present.flatMap((r) => r.findings || []),
+    phrases: dedupPhrases(present.flatMap((r) => r.phrases || [])),
+    days: days.length,
+    analysedDays: present.length,
+    missingDays: 0,
+  };
+}
+
 export {
   assembleReport,
   getOrComputeScheduledSegment,
+  collectRangeFindings,
+  enumerateDays,
   analyzeSegment,
   enumerateSegments,
   SEGMENT_ANALYSIS_VERSION,

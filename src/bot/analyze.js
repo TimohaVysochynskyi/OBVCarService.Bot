@@ -284,6 +284,148 @@ function assembleFindings(rawFindings, calls) {
   return findings;
 }
 
+// ---- Merging a multi-day period into ONE list ----------------------------------------------
+// A week/month report analyses each DAY separately (src/bot/segments.js), so the same recurring
+// behaviour shows up as a separate finding on every day it occurred. Rendering those as 20 dated
+// blocks is exactly the wall of text the owner rejected, so they are merged into one coherent list.
+//
+// The model ONLY groups and re-words: it returns member indices, and CODE unions their evidence
+// (deduped by call+quote, capped). It therefore cannot invent, move or duplicate a single quote —
+// the same guarantee assembleFindings gives for the per-day step.
+const MAX_PERIOD_FINDINGS = 6;
+const MAX_EVIDENCE_PER_FINDING = 6;
+
+const MERGE_SCHEMA = {
+  name: 'merged_findings',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      groups: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            member_indices: { type: 'array', items: { type: 'integer' } },
+            type: { type: 'string', enum: ['strength', 'error'] },
+            claim: { type: 'string' },
+            why_hurts_booking: { type: 'string' },
+            action: { type: 'string' },
+          },
+          required: ['member_indices', 'type', 'claim', 'why_hurts_booking', 'action'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['groups'],
+    additionalProperties: false,
+  },
+};
+
+// Pure: turn model-chosen groups into merged findings. Exported for unit testing.
+function applyMergeGroups(groups, findings) {
+  const usedQuotes = new Set();
+  const out = [];
+  for (const g of groups || []) {
+    const members = (g.member_indices || []).map((i) => findings[i]).filter(Boolean);
+    if (!members.length) continue;
+    const type = g.type === 'strength' ? 'strength' : 'error';
+    const evidence = [];
+    for (const m of members) {
+      if (m.type !== type) continue; // never mix a strength's evidence into an error and vice versa
+      for (const ev of m.evidence || []) {
+        const key = `${ev.callId}|${normalize(ev.quote)}`;
+        if (usedQuotes.has(key)) continue;
+        usedQuotes.add(key);
+        evidence.push(ev);
+        if (evidence.length >= MAX_EVIDENCE_PER_FINDING) break;
+      }
+      if (evidence.length >= MAX_EVIDENCE_PER_FINDING) break;
+    }
+    if (evidence.length < MIN_EVIDENCE) continue;
+    out.push({
+      type,
+      claim: String(g.claim || members[0].claim || '').trim(),
+      why: String(g.why_hurts_booking || members[0].why || '').trim(),
+      action: String(g.action || members[0].action || '').trim(),
+      evidence,
+    });
+  }
+  out.sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'error' ? -1 : 1;
+    return b.evidence.length - a.evidence.length; // strongest-evidenced first within a type
+  });
+  return out.slice(0, MAX_PERIOD_FINDINGS);
+}
+
+// Fallback when merging can't run (single finding, or the API failed): keep the per-day findings as
+// they are, strongest first, capped — never lose the report over a merge failure.
+function fallbackMerge(findings) {
+  const usedQuotes = new Set();
+  const out = [];
+  for (const f of [...findings].sort((a, b) => {
+    if (a.type !== b.type) return a.type === 'error' ? -1 : 1;
+    return (b.evidence?.length || 0) - (a.evidence?.length || 0);
+  })) {
+    const evidence = [];
+    for (const ev of f.evidence || []) {
+      const key = `${ev.callId}|${normalize(ev.quote)}`;
+      if (usedQuotes.has(key)) continue;
+      usedQuotes.add(key);
+      evidence.push(ev);
+    }
+    if (evidence.length < MIN_EVIDENCE) continue;
+    out.push({ ...f, evidence: evidence.slice(0, MAX_EVIDENCE_PER_FINDING) });
+    if (out.length >= MAX_PERIOD_FINDINGS) break;
+  }
+  return out;
+}
+
+async function mergeFindings(managerName, findings) {
+  if (!findings?.length) return [];
+  if (findings.length === 1) return fallbackMerge(findings);
+
+  const listing = findings
+    .map((f, i) => `[${i}] (${f.type}) ${f.claim} | доказів: ${f.evidence?.length || 0}`)
+    .join('\n');
+  const system =
+    `Тобі дано findings про роботу менеджера ${managerName}, порахованi ОКРЕМО за кожен день періоду. ` +
+    `Той самий повторюваний патерн тому продубльований кілька разів різними словами.\n` +
+    `Згрупуй findings, що описують ОДНУ І ТУ САМУ поведінку, і для кожної групи дай одне спільне ` +
+    `формулювання (claim / why_hurts_booking / action) — як підсумок за ВЕСЬ період.\n` +
+    `Правила: групуй лише справді однакове за суттю (не зливай різні проблеми в одну); у групі мають ` +
+    `бути findings одного type; кожен index використай НЕ БІЛЬШЕ ОДНОГО разу; спершу помилки. ` +
+    `Не вигадуй нових findings — лише групуй наявні. Максимум ${MAX_PERIOD_FINDINGS} груп: залиш ` +
+    `найважливіші (з найбільшою кількістю доказів), решту відкинь.`;
+
+  try {
+    const raw = await withRetry(
+      async () => {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            model: reduceModel(),
+            messages: [
+              { role: 'system', content: system },
+              { role: 'user', content: listing },
+            ],
+            response_format: { type: 'json_schema', json_schema: MERGE_SCHEMA },
+          }),
+        });
+        if (!res.ok) throw new Error(`OpenAI merge failed: ${res.status} ${await res.text()}`);
+        return JSON.parse((await res.json()).choices[0].message.content);
+      },
+      { attempts: 2, delayMs: 2000, label: `OpenAI merge ${managerName}` }
+    );
+    const merged = applyMergeGroups(raw.groups, findings);
+    return merged.length ? merged : fallbackMerge(findings);
+  } catch (err) {
+    console.error(`[analyze] merge failed for ${managerName}, keeping per-day findings: ${err.message}`);
+    return fallbackMerge(findings);
+  }
+}
+
 // Relevance verification (LLM). Given assembled findings (each already has >= MIN_EVIDENCE existing
 // manager quotes), ask a strict reviewer which quotes REALLY demonstrate each claim; keep only those,
 // and drop a finding that falls below MIN_EVIDENCE. On any API failure, fall back to the assembled
@@ -485,6 +627,9 @@ async function reduceFindings(managerName, calls, stats) {
 }
 
 export {
+  mergeFindings,
+  applyMergeGroups,
+  MAX_PERIOD_FINDINGS,
   reduceFindings,
   reduceFindingsConsistent,
   assembleFindings,
