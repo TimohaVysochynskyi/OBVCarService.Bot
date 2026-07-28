@@ -145,6 +145,10 @@ function findingText(f, idx) {
   lines.push(`Докази (${f.evidence.length}):`);
   f.evidence.forEach((ev, i) => {
     lines.push(`${i + 1}. «${ev.quote}» — ${formatKyiv(new Date(ev.startTime))}`);
+    // Code-measured context (interruption / long pause). Without it the quote reads as an ordinary
+    // manager line and the director can't see WHY it proves the claim — the proof is the turn order
+    // and the timecodes, not the sentence itself.
+    if (ev.note) lines.push(`   ↳ ${ev.note}`);
   });
   return lines.join('\n');
 }

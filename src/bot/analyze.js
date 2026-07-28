@@ -221,14 +221,20 @@ function renderCandidate(c) {
 // timecode used for audio). Calls without segments (OpenAI fallback) were already verified at map
 // time, so keep them (no timecode → no clip). Returns the evidence object or null.
 function verifyCandidate(c) {
+  // note = the code-measured context of a dialogue-mechanics candidate (what the client was saying,
+  // how long the pause was). It travels WITH the evidence because such a quote can never prove the
+  // claim on its own: "перебив клієнта" is demonstrated by the turn order and the client's cut-off
+  // line, not by the manager's sentence in isolation. The relevance reviewer and the delivered
+  // report both need it to make sense of the evidence.
+  const note = c.note || null;
   if (Array.isArray(c.segments) && c.segments.length) {
     const hit = findQuote(c.segments, c.quote, { requireRole: 'manager' });
     if (!hit) return null;
-    return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end };
+    return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end, note };
   }
   // No segments to check against: trust the map-time verification, but require a non-trivial quote.
   if (String(c.quote).trim().length < 3) return null;
-  return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null };
+  return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note };
 }
 
 // PURE, code-enforced evidence rules (no LLM/DB) — the guarantee against fabricated/duplicated/
@@ -290,7 +296,7 @@ async function verifyFindingsRelevance(findings) {
     index: fi,
     type: f.type,
     claim: f.claim,
-    evidence: f.evidence.map((e, ei) => ({ i: ei, quote: e.quote })),
+    evidence: f.evidence.map((e, ei) => (e.note ? { i: ei, quote: e.quote, measured: e.note } : { i: ei, quote: e.quote })),
   }));
 
   const system =
@@ -298,6 +304,10 @@ async function verifyFindingsRelevance(findings) {
     `твердження (claim) і пронумеровані цитати з реплік менеджера.\n` +
     `Визнач, які цитати САМІ ПО СОБІ доводять саме це твердження. Цитата, що нейтральна, загальна, ` +
     `не про те, або лише побічно стосується, — НЕ підтверджує (не включай її).\n` +
+    `ВАЖЛИВО: якщо в доказі є поле "measured" — це ЗАМІР КОДУ з аудіозапису (порядок реплік, таймкоди), ` +
+    `тобто встановлений ФАКТ, а не припущення. Для таких доказів не вимагай, щоб перебивання чи пауза ` +
+    `були "видні" з самої цитати — цитата тут лише вказує МІСЦЕ в розмові. Оцінюй тільки одне: чи claim ` +
+    `справді описує те явище, яке зафіксовано в "measured".\n` +
     `Будь суворим: краще менше, ніж притягнуте за вуха. Поверни для кожного finding його index і ` +
     `масив "supporting" — індекси (i) цитат, що справді підтверджують claim.`;
 
