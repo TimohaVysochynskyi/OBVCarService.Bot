@@ -139,6 +139,7 @@ async function verifyBlocker(transcript, blocker, quote) {
             `Твердження: ${BLOCKER_LABELS[blocker]}\nЦитата менеджера: «${quote}»\n\nПовна розмова:\n${transcript}`,
         },
       ],
+      temperature: 0, // same reason as the detector: the verdict must be reproducible
       response_format: { type: 'json_schema', json_schema: VERIFY_SCHEMA },
     }),
   });
@@ -173,6 +174,12 @@ async function detectDealBlocker(transcript, segments, managerName) {
               content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,
             },
           ],
+          // Pinned to 0: this is a COUNTED metric feeding the growth time series, so re-running the
+          // backfill must reproduce the same numbers. Observed at the default temperature: the same
+          // call flipped between 'none' and a blocker across runs, which would silently rewrite
+          // history. (The rest of the project's LLM calls still use the default - they produce prose,
+          // not counters, so changing those is a separate decision.)
+          temperature: 0,
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         }),
       });

@@ -658,7 +658,11 @@ async function setCallBlocker(generalCallId, { blocker, quote = null }) {
 async function getBlockerStats() {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS total,
-       COUNT(*) FILTER (WHERE deal_blocker IS NULL AND is_success IS NOT TRUE)::int AS unchecked,
+       -- Must match getCallsMissingBlocker exactly, transcript condition included: a call with no
+       -- transcript can never be checked, and counting it as "unchecked" made a finished run report
+       -- leftovers that no re-run could ever clear.
+       COUNT(*) FILTER (WHERE deal_blocker IS NULL AND is_success IS NOT TRUE
+                          AND transcript IS NOT NULL AND transcript <> '')::int AS unchecked,
        COUNT(*) FILTER (WHERE deal_blocker = 'none')::int AS clean,
        COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "noSlot",
        COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "outOfScope"
