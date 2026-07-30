@@ -655,6 +655,16 @@ async function setCallBlocker(generalCallId, { blocker, quote = null }) {
   ]);
 }
 
+// Clears every blocker decision so the whole history can be re-judged (npm run backfill:blockers
+// -- --reset). Used when the detection RULES change: Черга/Профіль are a time series, so a period
+// judged by old rules is not comparable with one judged by new rules.
+async function resetAllBlockers() {
+  const { rowCount } = await pool.query(
+    `UPDATE calls SET deal_blocker = NULL, deal_blocker_quote = NULL WHERE deal_blocker IS NOT NULL`
+  );
+  return rowCount;
+}
+
 async function getBlockerStats() {
   const { rows } = await pool.query(
     `SELECT COUNT(*)::int AS total,
@@ -1411,6 +1421,7 @@ export {
   getCallsMissingBlocker,
   setCallBlocker,
   getBlockerStats,
+  resetAllBlockers,
   getCallAudio,
   setCallAudio,
   getCallsMissingAudio,

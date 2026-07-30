@@ -1,5 +1,12 @@
 import 'dotenv/config';
-import { migrate, getCallsMissingBlocker, setCallBlocker, getBlockerStats, clearAllReportSegments } from '../core/store.js';
+import {
+  migrate,
+  getCallsMissingBlocker,
+  setCallBlocker,
+  getBlockerStats,
+  resetAllBlockers,
+  clearAllReportSegments,
+} from '../core/store.js';
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { displayName } from '../bot/operators.js';
 
@@ -28,12 +35,21 @@ function parseArgs(argv) {
   return {
     limit: limitIdx >= 0 ? Number(argv[limitIdx + 1]) : null,
     keepCache: argv.includes('--keep-cache'),
+    reset: argv.includes('--reset'),
   };
 }
 
 async function main() {
-  const { limit, keepCache } = parseArgs(process.argv.slice(2));
+  const { limit, keepCache, reset } = parseArgs(process.argv.slice(2));
   await migrate();
+
+  // --reset re-decides calls that were already decided. Needed when the detection RULES change: the
+  // Черга/Профіль counts are a time series, so the whole history must be judged by one set of rules,
+  // otherwise older weeks are simply measured differently from newer ones.
+  if (reset) {
+    const n = await resetAllBlockers();
+    console.log(`[backfillBlockers] --reset: скинуто ${n} раніше визначених дзвінків — усю історію буде перевірено за поточними правилами`);
+  }
 
   const before = await getBlockerStats();
   console.log(
