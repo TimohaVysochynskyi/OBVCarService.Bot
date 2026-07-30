@@ -155,7 +155,11 @@ async function transcribeClassifyAndSave(call, roster) {
     communicationScore: classification.communicationScore,
     audioPath: audio.relPath,
     audioBytes: audio.relPath ? audio.bytes : null,
-    audioStatus: audio.relPath ? 'stored' : 'unavailable',
+    // NULL, not 'unavailable', when the file couldn't be written: the recording DOES exist in
+    // Binotel (we just transcribed its bytes) - the disk was the problem. 'unavailable' means
+    // "Binotel has no recording", and the audio backfill skips those on re-runs, so using it here
+    // would permanently exclude a call from the archive after one transient disk error.
+    audioStatus: audio.relPath ? 'stored' : null,
   });
 }
 
