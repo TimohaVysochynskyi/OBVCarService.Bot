@@ -8,12 +8,14 @@ import {
   getDeliveredSlots,
   markSlotDelivered,
   deleteOldManualTails,
+  getBlockedCalls,
 } from '../core/store.js';
 import { reduceFindings, mergeFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
 import { assembleReport, collectRangeFindings } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
+import { BLOCKER_LABELS } from '../core/dealBlocker.js';
 import { withProgress, sendLong } from './ui.js';
-import { displayName } from './operators.js';
+import { displayName, formatPhone } from './operators.js';
 import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from './time.js';
 
 // Shown (verbatim, owner's wording) when a period yielded no findings because the manager made no
@@ -99,7 +101,25 @@ const hm = (date) => {
 function headerText(report) {
   const { name, stats, start, end } = report;
   const sales = stats.salesCount ?? 0;
-  const rate = sales ? Math.round((stats.successCount / sales) * 100) : 0;
+  // Conversion is over REACHABLE deals — the ones the СТО could actually take. Deals it turned away
+  // (fully booked / not our profile) are excluded from the denominator so the manager isn't scored
+  // down for them; they are reported separately below instead. Falls back to salesCount for periods
+  // analysed before blocker detection existed.
+  const reachable = stats.reachableCount == null ? sales : stats.reachableCount;
+  const rate = reachable ? Math.round((stats.successCount / reachable) * 100) : 0;
+  // Shown whenever there is AT LEAST ONE case (client's requirement) — deliberately independent of
+  // MIN_EVIDENCE, because this is a counted fact from the DB, not an LLM-clustered pattern.
+  const blocked = stats.blockedCount ?? 0;
+  const blockedBlock = blocked
+    ? `\n\n🚧 *Незакриті не з вини менеджера: ${blocked}*\n` +
+      [
+        stats.blockedNoSlot ? `• Черга — ${stats.blockedNoSlot} (СТО було забите)` : null,
+        stats.blockedOutOfScope ? `• Профіль — ${stats.blockedOutOfScope} (такого не робимо)` : null,
+      ]
+        .filter(Boolean)
+        .join('\n') +
+      `\n_Ці дзвінки не враховані в конверсії._`
+    : '';
   // Reuse-only periods (quarter) must not pretend to be complete: say how many days actually carry
   // an analysis, so nobody reads "no patterns" as "no problems".
   const coverage =
@@ -112,7 +132,7 @@ function headerText(report) {
     `Дзвінків: *${stats.callCount}* (угод: ${sales})\n` +
     `Записів: *${stats.successCount}* (${rate}%)\n` +
     `Середній бал: *${stats.avgScore ?? '—'}*\n` +
-    `Найслабший етап: *${stats.topWeakStage ?? '—'}*${coverage}`
+    `Найслабший етап: *${stats.topWeakStage ?? '—'}*${blockedBlock}${coverage}`
   );
 }
 
@@ -142,6 +162,26 @@ function findingText(f, idx) {
   return lines.join('\n');
 }
 
+// The individual "незакриті угоди" of the period: what the СТО could not take, in the manager's own
+// words, with the client's number so the director can ring them back when a slot frees up. Rendered
+// as PLAIN TEXT (no parse_mode) because it carries verbatim quotes and client names, which routinely
+// contain _ * [ and would break Markdown.
+async function sendBlockedCalls(api, chatId, report, { replyToMessageId } = {}) {
+  if (!(report.stats?.blockedCount > 0)) return;
+  const calls = await getBlockedCalls(report.name, report.start, report.end);
+  if (!calls.length) return;
+
+  const lines = [`🚧 Незакриті угоди — СТО не змогло взяти клієнта (${calls.length}):`, ''];
+  calls.forEach((c, i) => {
+    lines.push(`${i + 1}. ${BLOCKER_LABELS[c.blocker] || c.blocker} — ${formatKyiv(new Date(c.startTime))}`);
+    lines.push(`   Клієнт: ${c.clientName || 'Невідомо'}${c.clientNumber ? ` · ${formatPhone(c.clientNumber)}` : ''}`);
+    if (c.quote) lines.push(`   Менеджер: «${c.quote}»`);
+    lines.push('');
+  });
+  lines.push('Це НЕ провтики менеджера — ці дзвінки не враховані в конверсії.');
+  await sendLong(api, chatId, lines.join('\n'), { replyToMessageId });
+}
+
 async function sendPhrases(api, chatId, phrases, { replyToMessageId } = {}) {
   if (!phrases?.length) return;
   await sendLong(
@@ -163,6 +203,15 @@ async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
 // clipKey; each negative finding's quotes are followed by their clip. replyToMessageId threads every
 // message sent here back to the report message the button was clicked on (see registerReportActions).
 async function sendReportFindings(api, chatId, report, { clips, replyToMessageId } = {}) {
+  // "Незакриті угоди" first: it explains the numbers above, and it must appear even for a SINGLE
+  // case, so it is loaded straight from the DB rather than coming out of the LLM reduce. Failure here
+  // must not cost the owner the findings, hence the catch.
+  try {
+    await sendBlockedCalls(api, chatId, report, { replyToMessageId });
+  } catch (err) {
+    console.error(`[report] blocked-calls block failed: ${err.message}`);
+  }
+
   const blocks = (report.blocks || []).filter((b) => (b.findings || []).length);
   if (!blocks.length) {
     const sales = report.stats.salesCount ?? 0;

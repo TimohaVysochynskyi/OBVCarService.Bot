@@ -4,6 +4,7 @@ import { storeRecording } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { classifyCall } from '../core/classifyCall.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
+import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { identifyManager } from '../core/identifyManager.js';
 import { sendAlert } from '../core/telegram.js';
 
@@ -136,6 +137,24 @@ async function transcribeClassifyAndSave(call, roster) {
     console.log(`[processCalls]   ${call.generalCallId} purpose=${purpose} → non-sales, skipping effectiveness scoring`);
   }
 
+  // "Незакриті угоди": did the СТО itself turn this client away (fully booked / we don't do that)?
+  // Only asked when the deal did NOT close — a closed deal cannot be blocked by definition — which
+  // keeps this (deliberately stronger, gpt-4o) check cheap. NOT gated on call purpose: measured on
+  // live data, such calls are usually classified 'info', because the MAP sees a refusal rather than a
+  // sales opportunity. Never fatal: on failure the blocker stays NULL and the backfill decides later.
+  let blocker = { blocker: NO_BLOCKER, quote: null };
+  if (classification.isSuccess !== true) {
+    try {
+      blocker = await detectDealBlocker(transcript, segments, managerName);
+      if (blocker.blocker !== NO_BLOCKER) {
+        console.log(`[processCalls]   ${call.generalCallId} deal blocker: ${blocker.blocker} — «${blocker.quote?.slice(0, 70)}»`);
+      }
+    } catch (err) {
+      console.error(`[processCalls]   deal-blocker check failed for ${call.generalCallId}: ${err.message}`);
+      blocker = { blocker: null, quote: null };
+    }
+  }
+
   await saveCall({
     generalCallId: call.generalCallId,
     internalNumber: call.internalNumber,
@@ -153,6 +172,10 @@ async function transcribeClassifyAndSave(call, roster) {
     isSuccess: classification.isSuccess,
     weakestStage: classification.weakestStage,
     communicationScore: classification.communicationScore,
+    // 'none' = checked, no blocker. NULL only when the check itself failed or the deal closed, so the
+    // backfill can still pick it up later.
+    dealBlocker: classification.isSuccess === true ? NO_BLOCKER : blocker.blocker,
+    dealBlockerQuote: blocker.quote,
     audioPath: audio.relPath,
     audioBytes: audio.relPath ? audio.bytes : null,
     // NULL, not 'unavailable', when the file couldn't be written: the recording DOES exist in

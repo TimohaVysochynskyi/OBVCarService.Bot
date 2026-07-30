@@ -52,8 +52,15 @@ function bucketLabel(ymd, bucket) {
   return `${pad2(d)}.${pad2(m)}–${pad2(e.getUTCDate())}`;
 }
 
-const convOf = (b) =>
-  b.salesCount ? Math.round((b.successCount / b.salesCount) * 100) : 0;
+// Conversion is measured over REACHABLE deals: deals the СТО itself turned away (fully booked / not
+// our profile - see core/dealBlocker.js) leave the denominator, so a manager isn't scored down for
+// business the service could not accept. reachableCount is NULL on data analysed before blockers
+// existed → fall back to salesCount so old rows keep rendering.
+const reachableOf = (b) => (b.reachableCount == null ? b.salesCount : b.reachableCount);
+const convOf = (b) => {
+  const base = reachableOf(b);
+  return base ? Math.round((b.successCount / base) * 100) : 0;
+};
 
 // arrow vs previous value; null-safe (no arrow when either side is missing)
 function arrow(cur, prev) {
@@ -70,12 +77,13 @@ function buildDynamicsText(name, bucket, buckets) {
   }
   const title = `📈 *Менеджер: ${displayName(name)}* · останні ${buckets.length} ${bucketWord(buckets.length, bucket)}`;
 
-  // Trajectory table (monospace). "Перша"/"Друга" are placeholder columns (content TBD - see
-  // CLAUDE.md "Поточний статус") added just to check that a 6-column table still fits on mobile.
+  // Trajectory table (monospace). The last two columns are the "незакриті угоди" counts - deals the
+  // СТО could not take (core/dealBlocker.js): "Черга" = temporarily full, "Профіль" = we don't do
+  // that at all. Column names are single words because the table has to fit a phone screen.
   // "Бал" data cells are 1 char wider than the header (5 vs 4 - `BAL_DATA_WIDTH` below), so the
-  // header line has one extra space before "Перша" to keep that column aligned with the data rows.
+  // header line has one extra space before "Черга" to keep that column aligned with the data rows.
   const BAL_DATA_WIDTH = 5;
-  const head = `${"Період".padEnd(10)}${"Дзв".padStart(4)} ${"Кон".padStart(5)} ${"Бал".padStart(4)}  ${"Перша".padStart(5)} ${"Друга".padStart(5)}`;
+  const head = `${"Період".padEnd(10)}${"Дзв".padStart(4)} ${"Кон".padStart(5)} ${"Бал".padStart(4)}  ${"Черга".padStart(5)} ${"Профіль".padStart(7)}`;
   const rows = [head];
   buckets.forEach((b, i) => {
     const prev = i > 0 ? buckets[i - 1] : null;
@@ -89,11 +97,11 @@ function buildDynamicsText(name, bucket, buckets) {
     const calls = String(b.callCount).padStart(4);
     const convCell = `${conv}%${convArr}`.padStart(5);
     const scoreCell = `${b.avgScore ?? "—"}${scoreArr}`.padStart(BAL_DATA_WIDTH);
-    const placeholder1 = "—".padStart(5);
-    const placeholder2 = "—".padStart(5);
-    rows.push(
-      `${label}${calls} ${convCell} ${scoreCell} ${placeholder1} ${placeholder2}`,
-    );
+    // A dash (not 0) when the bucket predates blocker detection - "0 turned away" and "never checked"
+    // must not look the same.
+    const queueCell = String(b.blockedNoSlot ?? "—").padStart(5);
+    const scopeCell = String(b.blockedOutOfScope ?? "—").padStart(7);
+    rows.push(`${label}${calls} ${convCell} ${scoreCell} ${queueCell} ${scopeCell}`);
   });
   const table = "```\n" + rows.join("\n") + "\n```";
 
@@ -139,11 +147,15 @@ function buildDynamicsText(name, bucket, buckets) {
   // Summary shows AVERAGES over the shown period (not first→last deltas - that's what the verdict
   // above is for). Conversion is weighted by each bucket's actual sales/success counts; score is a
   // simple mean of the per-bucket averages (that's the finest grain store.getBucketedTrend gives us).
-  const totalSales = buckets.reduce((s, b) => s + (b.salesCount || 0), 0);
+  const totalReachable = buckets.reduce((s, b) => s + (reachableOf(b) || 0), 0);
   const totalSuccess = buckets.reduce((s, b) => s + (b.successCount || 0), 0);
-  const avgConv = totalSales
-    ? Math.round((totalSuccess / totalSales) * 100)
+  const avgConv = totalReachable
+    ? Math.round((totalSuccess / totalReachable) * 100)
     : null;
+  const totalBlocked = buckets.reduce(
+    (s, b) => s + (b.blockedNoSlot || 0) + (b.blockedOutOfScope || 0),
+    0,
+  );
   const scoredBuckets = buckets.filter((b) => b.avgScore != null);
   const avgScoreOverall = scoredBuckets.length
     ? Math.round(
@@ -153,10 +165,17 @@ function buildDynamicsText(name, bucket, buckets) {
       ) / 10
     : null;
 
+  // Only mentioned when it actually happened — a permanent "0" line would be noise, since the СТО
+  // turns a client away only a couple of times per month.
+  const blockedLine = totalBlocked
+    ? `Незакриті не з вини менеджера: ${totalBlocked}\n`
+    : "";
+
   const summary =
     `📊 *Підсумок за ${buckets.length} ${bucketWord(buckets.length, bucket)}:*\n` +
     `Середня конверсія ${avgConv ?? "—"}%\n` +
     `Середній бал ${avgScoreOverall ?? "—"}\n` +
+    blockedLine +
     `Динаміка: *${verdict}*`;
 
   return `${title}\n\n${table}\n👎 *Проблемні сегменти воронки:*\n${stageLines}\n\n${summary}`;

@@ -135,7 +135,13 @@ function registerMyStats(bot) {
     const s = await getOperatorStats(name, start, end);
     const sales = s.salesCount ?? 0;
     const info = s.infoCount ?? 0;
-    const rate = sales ? Math.round((s.successCount / sales) * 100) : 0;
+    // Conversion over REACHABLE deals: ones the СТО itself turned away don't count against the
+    // manager (see core/dealBlocker.js). Mentioned only when it actually happened.
+    const reachable = s.reachableCount == null ? sales : s.reachableCount;
+    const rate = reachable ? Math.round((s.successCount / reachable) * 100) : 0;
+    const blockedLine = s.blockedCount
+      ? `\nНезакриті не з вини менеджера: *${s.blockedCount}* (не враховані в конверсії)`
+      : '';
     const phone = ctx.botUser?.phone ? formatPhone(ctx.botUser.phone) : 'не збережено';
     const header =
       `📊 *Моя статистика* — ${label}\n` +
@@ -143,9 +149,9 @@ function registerMyStats(bot) {
       `Оператор: *${displayName(name)}*\n` +
       `Телефон: ${phone}\n\n` +
       `Дзвінків: *${s.callCount}* (угод: ${sales}, інформаційних: ${info})\n` +
-      `Записів: *${s.successCount}* з ${sales} угод (${rate}%)\n` +
+      `Записів: *${s.successCount}* з ${reachable} угод (${rate}%)\n` +
       `Середній бал (угоди): *${s.avgScore ?? '—'}*\n` +
-      `Найслабший етап (угоди): *${s.topWeakStage ?? '—'}*`;
+      `Найслабший етап (угоди): *${s.topWeakStage ?? '—'}*${blockedLine}`;
     const kb = new InlineKeyboard()
       .text('☎️ Оновити мій номер', 'me:phone')
       .row()

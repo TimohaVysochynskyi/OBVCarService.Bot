@@ -310,8 +310,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -333,6 +333,8 @@ async function saveCall(call) {
       call.audioPath ?? null,
       call.audioBytes ?? null,
       call.audioStatus ?? null,
+      call.dealBlocker ?? null,
+      call.dealBlockerQuote ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -586,8 +588,13 @@ const NOT_BLOCKED_FILTER = `deal_blocker IS DISTINCT FROM 'no_slot' AND deal_blo
 // he is not scored down for business the service could not accept. The weakest stage is likewise
 // computed over non-blocked calls only - otherwise "закриття угоди" would top the funnel-problem list
 // purely because the shop was full.
+// NOTE the "OR is_success": a closed deal ALWAYS belongs in the denominator. By construction a blocked
+// call can't be successful (the blocker is only checked when the deal didn't close), but is_success is
+// rewritten later by backfill:analysis / rescore:sales, and if that ever flipped a blocked call to
+// successful, a plain "not blocked" denominator would put it in the numerator only — reporting a
+// conversion above 100%. Keeping it here makes successCount <= reachableCount true by construction.
 const BLOCKER_COLUMNS_SQL = `
-       COUNT(*) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER})::int AS "reachableCount",
+       COUNT(*) FILTER (WHERE ${SALES_FILTER} AND (${NOT_BLOCKED_FILTER} OR is_success))::int AS "reachableCount",
        COUNT(*) FILTER (WHERE ${BLOCKED_FILTER})::int AS "blockedCount",
        COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "blockedNoSlot",
        COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "blockedOutOfScope"`;
@@ -677,7 +684,7 @@ async function getBucketedTrend(name, bucket, limit = 8) {
        COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
-       MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER}) AS "topWeakStage"
+       MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
      FROM calls
      WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> ''
      GROUP BY 1 ORDER BY 1 DESC LIMIT $3`,
@@ -1396,6 +1403,10 @@ export {
   updateClientInfoIfMissing,
   getSalesCallsWithSegments,
   updateCallScore,
+  getBlockedCalls,
+  getCallsMissingBlocker,
+  setCallBlocker,
+  getBlockerStats,
   getCallAudio,
   setCallAudio,
   getCallsMissingAudio,
