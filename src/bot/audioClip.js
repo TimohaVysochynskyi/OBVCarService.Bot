@@ -133,7 +133,7 @@ async function sendClip(api, chatId, buf, ev, { replyToMessageId } = {}) {
   const caption = `🎧 «${quote}»`;
   const extra = { caption };
   if (replyToMessageId) extra.reply_parameters = { message_id: replyToMessageId, allow_sending_without_reply: true };
-  await api.sendAudio(chatId, new InputFile(buf, `evidence-${ev.callId}.mp3`), extra);
+  await api.sendAudio(chatId, new InputFile(buf, `dialog-${ev.callId}.mp3`), extra);
 }
 
 export { prepareClips, clipKey, sendClip, ffmpegAvailable };

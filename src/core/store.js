@@ -537,7 +537,7 @@ async function getBucketedTrend(name, bucket, limit = 8) {
 }
 
 // All-time (no period filter) - the archive dropped its period-picker step in favor of paginating
-// straight through a manager's whole history. Since 2026-07-27 the archive first asks for a CATEGORY
+// straight through a manager's whole history, OLDEST FIRST (so paging right moves forward in time). Since 2026-07-27 the archive first asks for a CATEGORY
 // (call_purpose), so both queries take an optional purpose: 'sales' | 'info' | 'other' | 'none'
 // ('none' = call_purpose IS NULL, i.e. ingested before purpose detection / MAP failed), or null for
 // every call.
@@ -567,7 +567,7 @@ async function listOperatorCalls(name, limit, offset, purpose = null) {
             call_purpose AS "callPurpose"
      FROM calls
      WHERE manager_name = $1 AND transcript IS NOT NULL AND transcript <> '' ${sql}
-     ORDER BY start_time DESC
+     ORDER BY start_time ASC
      LIMIT $2 OFFSET $3`,
     [name, limit, offset, ...params]
   );

@@ -18,7 +18,7 @@ const MODE_BY_PERIOD = { day: 'daily', week: 'range', month: 'range', quarter: '
 async function statsPicker() {
   const operators = await getOperators();
   if (!operators.length) {
-    return { text: 'Поки немає оброблених дзвінків.', kb: new InlineKeyboard().text('« Меню', 'menu') };
+    return { text: 'Поки немає оброблених дзвінків.', kb: new InlineKeyboard().text('« Назад до меню', 'menu') };
   }
   return { text: '📊 Оберіть менеджера:', kb: operatorListKeyboard(operators, 'stat') };
 }
@@ -37,8 +37,8 @@ async function showDynamics(ctx, name, bucket) {
     .row()
     .text('📊 Звіт за період →', `stat:rep:${name}`)
     .row()
-    .text('« Менеджери', 'stat:pick')
-    .text('« Повернутися назад', 'menu');
+    .text('« Назад до меню', 'menu')
+    .text('« Менеджери', 'stat:pick');
   await showScreen(ctx, text, kb);
 }
 
@@ -78,7 +78,7 @@ function registerStats(bot) {
       .text('« Періоди', `stat:rep:${name}`)
       .text('📈 Динаміка', `stat:op:${name}`)
       .row()
-      .text('« Меню', 'menu');
+      .text('« Назад до меню', 'menu');
     // The evidence report (admin-only) is delivered COLLAPSED - header/trend + "Розгорнути"/
     // "Рекомендації" buttons, same as every other report delivery path. Audio isn't cut until
     // "Розгорнути" is clicked, so this is fast now (no ffmpeg/download up front).
@@ -142,15 +142,15 @@ function registerMyStats(bot) {
       `_${formatKyiv(start)} – ${formatKyiv(end)}_\n\n` +
       `Оператор: *${displayName(name)}*\n` +
       `Телефон: ${phone}\n\n` +
-      `Дзвінків: *${s.callCount}* (продажних: ${sales}, інформаційних: ${info})\n` +
-      `Записів: *${s.successCount}* з ${sales} продажних (${rate}%)\n` +
-      `Середній бал (продажні): *${s.avgScore ?? '—'}*\n` +
-      `Найслабший етап (продажні): *${s.topWeakStage ?? '—'}*`;
+      `Дзвінків: *${s.callCount}* (угод: ${sales}, інформаційних: ${info})\n` +
+      `Записів: *${s.successCount}* з ${sales} угод (${rate}%)\n` +
+      `Середній бал (угоди): *${s.avgScore ?? '—'}*\n` +
+      `Найслабший етап (угоди): *${s.topWeakStage ?? '—'}*`;
     const kb = new InlineKeyboard()
       .text('☎️ Оновити мій номер', 'me:phone')
       .row()
-      .text('« Період', 'me:pick')
-      .text('« Меню', 'menu');
+      .text('« Назад до меню', 'menu')
+      .text('« Період', 'me:pick');
     const body = s.callCount ? header : `${header}\n\n_Немає дзвінків за період._`;
     await showScreen(ctx, body, kb);
   });

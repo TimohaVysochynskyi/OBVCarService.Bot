@@ -32,7 +32,7 @@ function settingsMenu() {
     .row()
     .text('🕒 Час звітів', 'set:times')
     .row()
-    .text('« Меню', 'menu');
+    .text('« Назад до меню', 'menu');
   return {
     text:
       '⚙️ *Налаштування*\n\n' +

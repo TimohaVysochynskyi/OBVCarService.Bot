@@ -39,7 +39,7 @@ function memberLine(u) {
 function rolesMenu() {
   const kb = new InlineKeyboard();
   for (const r of MANAGEABLE_ROLES) kb.text(`${ROLE_LABELS[r]}`, `roles:list:${r}`).row();
-  kb.text('« Меню', 'menu');
+  kb.text('« Назад до меню', 'menu');
   return { text: '👥 *Ролі*\nОберіть роль, щоб переглянути / додати людей:', kb };
 }
 

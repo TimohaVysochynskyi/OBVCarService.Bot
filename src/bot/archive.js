@@ -30,8 +30,11 @@ const isNonSales = (p) => p === "other" || p === "info";
 // The four archive categories (calls.call_purpose; 'none' = NULL, i.e. ingested before purpose
 // detection or MAP failure). Each gets its OWN icon: the picker shows them side by side, so the old
 // shared ℹ️ for both info and other made two different categories look like one.
+// NB: a sales-opportunity call is called "угода" everywhere the user can see it, never
+// "продажний" — that adjective also means "venal/corrupt" in Ukrainian (owner's call, 2026-07-28).
+// The DB value stays 'sales' (internal).
 const CATEGORIES = [
-  { key: "sales", icon: "💰", plural: "Продажні", one: "продажний" },
+  { key: "sales", icon: "💰", plural: "Угоди", one: "угода" },
   { key: "info", icon: "ℹ️", plural: "Інформаційні", one: "інформаційний" },
   { key: "other", icon: "⚙️", plural: "Службові", one: "службовий" },
   { key: "none", icon: "❔", plural: "Інші", one: "інший" },
@@ -52,7 +55,7 @@ async function archivePicker() {
   if (!operators.length) {
     return {
       text: "Поки немає оброблених дзвінків.",
-      kb: new InlineKeyboard().text("« Меню", "menu"),
+      kb: new InlineKeyboard().text("« Назад до меню", "menu"),
     };
   }
   return {
@@ -69,7 +72,7 @@ function registerArchive(bot) {
   });
 
   // A manager's history is browsed BY CATEGORY: opening a manager shows the category picker, and
-  // only then the (paginated) call list of that one category, newest first. Categories with no
+  // only then the (paginated) call list of that one category, oldest first. Categories with no
   // calls aren't offered at all. There is still no period-picker step - pagination handles browsing.
   bot.callbackQuery(/^arch:op:(.+)$/, async (ctx) => {
     const name = ctx.match[1];
@@ -94,7 +97,9 @@ function registerArchive(bot) {
     for (const c of available) {
       kb.text(`${c.icon} ${c.plural} (${counts[c.key]})`, `arch:cat:${c.key}:${name}`).row();
     }
-    kb.text("« Менеджери", "arch:pick").text("« Повернутися назад", "menu");
+    // Menu on the LEFT, the step-back on the RIGHT — one consistent order on every screen (owner's
+    // request); mixing the two sides is what made the navigation feel random.
+    kb.text("« Назад до меню", "menu").text("« Менеджери", "arch:pick");
     const text = available.length
       ? `${operatorLabel(name)}\nОберіть категорію дзвінків:`
       : `${operatorLabel(name)}\nНемає оброблених дзвінків.`;
@@ -108,8 +113,8 @@ function registerArchive(bot) {
 
     if (total === 0) {
       const back = new InlineKeyboard()
-        .text("« Категорії", `arch:op:${name}`)
-        .text("« Меню", "menu");
+        .text("« Назад до меню", "menu")
+        .text("« Категорії", `arch:op:${name}`);
       await showScreen(
         ctx,
         `${operatorLabel(name)} · ${category.icon} ${category.plural}\nНемає дзвінків у цій категорії.`,
@@ -135,18 +140,21 @@ function registerArchive(bot) {
       kb.text(btn, `arch:call:${c.generalCallId}:${offset}:${cat}`).row();
     }
     // Pagination: ⏪/⏩ jump two pages, ◀/▶ one. Each is shown only when it actually lands somewhere
-    // new, so no two visible arrows lead to the same page.
+    // new, so no two visible arrows lead to the same page. Calls are listed OLDEST FIRST, so paging
+    // RIGHT moves forward in time towards the newest (owner's request) — the counter shows only the
+    // current window; the total lives in the message above, where there is room to label it.
     const at = (o) => `arch:go:${o}:${cat}:${name}`;
     if (offset >= JUMP) kb.text("⏪", at(Math.max(0, offset - JUMP)));
     if (offset > 0) kb.text("◀", at(Math.max(0, offset - PAGE)));
-    kb.text(`${offset + 1}–${Math.min(offset + PAGE, total)} / ${total}`, "noop");
+    kb.text(`${offset + 1}–${Math.min(offset + PAGE, total)}`, "noop");
     if (offset + PAGE < total) kb.text("▶", at(offset + PAGE));
     if (offset + JUMP < total) kb.text("⏩", at(offset + JUMP));
-    kb.row().text("« Категорії", `arch:op:${name}`).text("« Меню", "menu");
+    kb.row().text("« Назад до меню", "menu").text("« Категорії", `arch:op:${name}`);
 
     await showScreen(
       ctx,
-      `${operatorLabel(name)} · ${category.icon} ${category.plural}\nОберіть дзвінок:`,
+      `${operatorLabel(name)} · ${category.icon} ${category.plural}\n` +
+        `Усього дзвінків цього типу: ${total}\n\nОберіть дзвінок:`,
       kb,
     );
   }
@@ -170,7 +178,7 @@ function registerArchive(bot) {
     // labelled as ("Невідомо" when nobody ever named them).
     const header =
       `📞 Телефон: ${c.clientNumber ? formatPhone(c.clientNumber) : "—"}\n` +
-      `Ім'я: ${c.clientName || "Невідомо"}\n` +
+      `Клієнт: ${c.clientName || "Невідомо"}\n` +
       `Менеджер: ${displayName(c.managerName) ?? "—"}\n` +
       `Час: ${formatKyiv(new Date(c.startTime))}\n` +
       `Тривалість: ${c.durationSec ?? "—"} с\n` +
@@ -209,8 +217,8 @@ function registerArchive(bot) {
       reply_markup: new InlineKeyboard()
         .text("🎧 Прослухати запис", `arch:play:${gid}`)
         .row()
-        .text("« Список", `arch:go:${listOffset}:${listCat}:${listName}`)
-        .text("« Меню", "menu"),
+        .text("« Назад до меню", "menu")
+        .text("« Список", `arch:go:${listOffset}:${listCat}:${listName}`),
     });
   });
 
@@ -226,7 +234,7 @@ function registerArchive(bot) {
         const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const buf = Buffer.from(await res.arrayBuffer());
-        await ctx.replyWithAudio(new InputFile(buf, `call-${gid}.mp3`), {
+        await ctx.replyWithAudio(new InputFile(buf, `dialog-${gid}.mp3`), {
           caption: `Запис дзвінка ${gid}`,
         });
       });

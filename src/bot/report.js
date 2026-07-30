@@ -18,8 +18,11 @@ import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from '.
 
 // Shown (verbatim, owner's wording) when a period yielded no findings because the manager made no
 // sales calls in it — the numeric header above it still carries the volume of work they did.
+// "угода" instead of "продажний дзвінок" throughout the user-facing texts: the adjective
+// "продажний" also means "venal/corrupt" in Ukrainian, so the owner banned it (2026-07-28). The
+// internal call_purpose value stays 'sales'.
 const NO_SALES_TEXT =
-  'За цей період менеджер не здійснював продажних дзвінків, тому оцінка продажних навичок наразі неможлива. Вище наведені кількісні показники роботи.';
+  'За цей період менеджер не мав дзвінків-угод, тому оцінка навичок продажу наразі неможлива. Вище наведені кількісні показники роботи.';
 
 // Evidence-first report delivery (Telegram text + audio clips). A report is a set of BLOCKS — each
 // block is one analysed time segment (a frozen 'scheduled' segment reused from report_segments, or a
@@ -91,8 +94,8 @@ const hm = (date) => {
 };
 
 // Numeric header. Conversion / score / weakest stage are over SALES-relevant calls. Deliberately
-// compact (client's request, 2026-07-24): no info-call count, no "з N продажних" on Записів, no
-// "(продажні)" qualifiers - the reader already knows these numbers are sales-scoped.
+// compact (client's request, 2026-07-24): no info-call count, no "з N угод" on Записів, no
+// "(угоди)" qualifiers - the reader already knows these numbers are deal-scoped.
 function headerText(report) {
   const { name, stats, start, end } = report;
   const sales = stats.salesCount ?? 0;
@@ -106,7 +109,7 @@ function headerText(report) {
   return (
     `📊 *Доказовий звіт* — ${displayName(name)}\n` +
     `${formatKyiv(start)} – ${formatKyiv(end)}\n\n` +
-    `Дзвінків: *${stats.callCount}* (продажних: ${sales})\n` +
+    `Дзвінків: *${stats.callCount}* (угод: ${sales})\n` +
     `Записів: *${stats.successCount}* (${rate}%)\n` +
     `Середній бал: *${stats.avgScore ?? '—'}*\n` +
     `Найслабший етап: *${stats.topWeakStage ?? '—'}*${coverage}`
@@ -326,7 +329,7 @@ function registerReportActions(bot) {
       // behaviours to cluster into findings (MIN_EVIDENCE), there are none here either. Not a
       // bug: expect this whenever "Розгорнути" also shows "нічого не знайдено" for the period.
       await ctx.reply(
-        'Для цього періоду немає готових формулювань — замало продажних дзвінків із зафіксованою поведінкою (той самий поріг, що й для знахідок).',
+        'Для цього періоду немає готових формулювань — замало дзвінків-угод із зафіксованою поведінкою (той самий поріг, що й для знахідок).',
         { reply_parameters: replyParameters }
       );
       return;

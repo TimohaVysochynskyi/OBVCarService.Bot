@@ -127,7 +127,7 @@ function buildDynamicsText(name, bucket, buckets) {
       (dScore != null && dScore <= -SCORE_EPS ? 1 : 0);
     if (ups && !downs) verdict = "РІСТ ✅";
     else if (downs && !ups) verdict = "СПАД ⚠️";
-    else if (ups && downs) verdict = "змішана 🔄";
+    else if (ups && downs) verdict = "нестабільна 🔄";
     else verdict = "без змін ➖";
   }
 

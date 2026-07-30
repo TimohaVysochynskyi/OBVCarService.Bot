@@ -632,7 +632,7 @@ async function filesListContent() {
   const kb = new InlineKeyboard();
   for (const d of docs) kb.text(`📄 ${d.filename.slice(0, 40)}`, `kb:doc:${d.id}`).row();
   kb.text('➕ Завантажити новий', 'kb:add').row();
-  kb.text('« Меню', 'menu');
+  kb.text('« Назад до меню', 'menu');
   const list = docs.length
     ? docs.map((d) => `• «${d.filename}» — ${d.chunkCount} фрагм. · ${AUDIENCE_LABEL[d.audience] || d.audience}`).join('\n')
     : 'поки порожньо.';

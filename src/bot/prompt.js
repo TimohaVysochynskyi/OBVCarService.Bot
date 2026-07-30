@@ -53,7 +53,7 @@ const entryOf = (key) => EDITABLE.find((e) => e.key === key) || null;
 function hubScreen() {
   const kb = new InlineKeyboard();
   for (const e of EDITABLE) kb.text(e.button, `prompt:o:${e.key}`).row();
-  kb.text('« Меню', 'menu');
+  kb.text('« Назад до меню', 'menu');
   const text =
     '🧠 *Промпти AI*\n\n' +
     'Тут редагуються інструкції, за якими AI оцінює роботу менеджерів. Оберіть, що змінити:';
@@ -82,7 +82,7 @@ async function detailScreen(key) {
     .row()
     .text('« Назад', 'prompt')
     .row()
-    .text('« Меню', 'menu');
+    .text('« Назад до меню', 'menu');
   return { text: `${e.title}\n\n${status}\n\n${e.about}`, kb };
 }
 

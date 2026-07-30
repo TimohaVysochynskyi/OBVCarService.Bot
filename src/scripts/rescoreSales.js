@@ -19,10 +19,10 @@ async function main() {
   await migrate();
   const calls = await getSalesCallsWithSegments();
   if (!calls.length) {
-    console.log('[rescore:sales] немає продажних дзвінків із segments — нічого робити');
+    console.log('[rescore:sales] немає дзвінків-угод із segments — нічого робити');
     return true;
   }
-  console.log(`[rescore:sales] продажних дзвінків до перерахунку: ${calls.length}`);
+  console.log(`[rescore:sales] дзвінків-угод до перерахунку: ${calls.length}`);
 
   let ok = 0;
   let changed = 0;
