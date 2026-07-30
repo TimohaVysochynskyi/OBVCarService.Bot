@@ -250,9 +250,10 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
 //   segments:   [{ role:'manager'|'client', text, start, end }] with per-turn timecodes for audio
 //               clipping, or null when there's nothing to diarize (voicemail / single speaker).
 // managerName (when known from Binotel) anchors role detection on our specific employee.
-async function transcribeDiarized(audioBlob, managerName) {
-  // Stereo → per-channel separation (much better roles); mono → content diarization.
-  const channels = await probeChannels(audioBlob);
+async function transcribeDiarized(audioBlob, managerName, { audioPath } = {}) {
+  // Stereo → per-channel separation (much better roles); mono → content diarization. When the
+  // recording is already on disk (core/audioStore.js) ffprobe reads that file directly.
+  const channels = await probeChannels(audioPath || audioBlob);
   const multichannel = (channels ?? 1) >= 2;
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);
   const data = await sttDiarize(audioBlob, { multichannel });

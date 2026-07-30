@@ -1,2 +1,5 @@
 node_modules
 .env
+
+# Local archive of call recordings (src/core/audioStore.js). Lives on the VPS, never in git.
+data/

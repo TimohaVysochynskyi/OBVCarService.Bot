@@ -74,6 +74,19 @@ async function migrate() {
     -- exists so that real values start accumulating the moment Binotel populates the field.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS hangup_by TEXT;
 
+    -- Local audio archive (src/core/audioStore.js). Recordings used to be streamed from Binotel to
+    -- the transcriber and dropped; the client requires them KEPT, so the ingest now saves each file
+    -- on the VPS and records where.
+    --   audio_path   — path RELATIVE to the storage root ("2026-07/6747512562.mp3"). NULL = not stored.
+    --   audio_bytes  — size of the stored file (lets us report archive size / spot truncation).
+    --   audio_status — 'stored' | 'unavailable'. NULL means "never attempted", which is what the
+    --                  audio backfill (src/scripts/backfillAudio.js) selects on; 'unavailable' means
+    --                  we asked Binotel and it has no recording, so the row is skipped on re-runs
+    --                  instead of retrying forever — but it stays visible, nothing is lost silently.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS audio_path TEXT;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS audio_bytes INTEGER;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS audio_status TEXT;
+
     CREATE TABLE IF NOT EXISTS pending_calls (
       general_call_id TEXT PRIMARY KEY,
       internal_number TEXT,
@@ -285,8 +298,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -305,9 +318,64 @@ async function saveCall(call) {
       call.clientNumber ?? null,
       call.clientName ?? null,
       call.hangupBy ?? null,
+      call.audioPath ?? null,
+      call.audioBytes ?? null,
+      call.audioStatus ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
+}
+
+// --- Local audio archive (see src/core/audioStore.js) ----------------------------------------
+
+// Where a call's recording lives locally (+ start_time, needed to derive the path for rows saved
+// before audio archiving existed). Used by the report clipper and the archive's playback button so
+// they read the local file instead of re-downloading from Binotel.
+async function getCallAudio(generalCallId) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+            audio_path AS "audioPath", audio_bytes AS "audioBytes", audio_status AS "audioStatus"
+     FROM calls WHERE general_call_id = $1`,
+    [generalCallId]
+  );
+  return rows[0] || null;
+}
+
+async function setCallAudio(generalCallId, { audioPath = null, audioBytes = null, audioStatus }) {
+  await pool.query(
+    `UPDATE calls SET audio_path = $2, audio_bytes = $3, audio_status = $4 WHERE general_call_id = $1`,
+    [generalCallId, audioPath, audioBytes, audioStatus]
+  );
+}
+
+// Calls whose recording isn't archived yet, OLDEST FIRST — the oldest recordings are the ones
+// Binotel is most likely to age out, so they are fetched first. Rows already marked 'unavailable'
+// are skipped unless retryMissing is set (they have a permanent answer from Binotel).
+async function getCallsMissingAudio({ limit = null, retryMissing = false } = {}) {
+  const statusClause = retryMissing
+    ? `(audio_status IS NULL OR audio_status <> 'stored')`
+    : `audio_status IS NULL`;
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+            manager_name AS "managerName", duration_sec AS "durationSec"
+     FROM calls
+     WHERE audio_path IS NULL AND ${statusClause}
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function getAudioArchiveStats() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE audio_status = 'stored')::int AS stored,
+       COUNT(*) FILTER (WHERE audio_status = 'unavailable')::int AS unavailable,
+       COUNT(*) FILTER (WHERE audio_status IS NULL)::int AS untried,
+       COALESCE(SUM(audio_bytes), 0)::bigint AS bytes
+     FROM calls`
+  );
+  return rows[0];
 }
 
 // Backfill / re-map: overwrite the analysis artifacts of an existing call (transcript + segments +
@@ -643,7 +711,7 @@ async function getCallByGeneralId(generalCallId) {
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
             weakest_stage AS "weakestStage", communication_score AS "communicationScore",
             call_purpose AS "callPurpose", client_number AS "clientNumber",
-            client_name AS "clientName", segments
+            client_name AS "clientName", segments, audio_path AS "audioPath"
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -1152,6 +1220,17 @@ async function setElevenLabsBalanceState(state) {
   await setState('elevenlabs_balance_state', state);
 }
 
+// Same dedup pattern for free disk space on the volume that holds the audio archive: 'ok' | 'low'.
+// Recordings are kept forever by requirement, so the disk WILL fill eventually - the poller warns
+// once on crossing the threshold and re-arms when space is freed.
+async function getAudioSpaceState() {
+  return getState('audio_space_state');
+}
+
+async function setAudioSpaceState(state) {
+  await setState('audio_space_state', state);
+}
+
 async function getReportTimes() {
   const raw = await getState('report_times');
   if (raw == null) return [...DEFAULT_REPORT_TIMES];
@@ -1235,6 +1314,10 @@ export {
   updateClientInfoIfMissing,
   getSalesCallsWithSegments,
   updateCallScore,
+  getCallAudio,
+  setCallAudio,
+  getCallsMissingAudio,
+  getAudioArchiveStats,
   getEarliestCallTime,
   migrateKb,
   insertKbDoc,
@@ -1265,6 +1348,8 @@ export {
   markSlotDelivered,
   getElevenLabsBalanceState,
   setElevenLabsBalanceState,
+  getAudioSpaceState,
+  setAudioSpaceState,
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,

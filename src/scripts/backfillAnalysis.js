@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { getCallsMissingSegments, updateCallFullAnalysis } from '../core/store.js';
-import { getCallRecordUrl } from '../core/binotel.js';
+import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { classifyCall } from '../core/classifyCall.js';
@@ -38,13 +38,18 @@ async function main() {
   for (const c of calls) {
     const name = displayName(c.managerName);
     try {
-      const url = await getCallRecordUrl(c.generalCallId);
-      if (!url) {
+      // Local archive first (core/audioStore.js) — re-analysis no longer depends on Binotel still
+      // holding the recording, and costs no Binotel traffic once the audio backfill has run.
+      const audio = await getRecordingForCall(c.generalCallId);
+      if (!audio) {
         skipped += 1;
-        console.warn(`   • ${c.generalCallId} (${name}) — no recording in Binotel, skip`);
+        console.warn(`   • ${c.generalCallId} (${name}) — no recording (local or Binotel), skip`);
         continue;
       }
-      const { transcript, segments } = await transcribeAudio(url, { managerName: name });
+      const { transcript, segments } = await transcribeAudio(audio.buffer, {
+        managerName: name,
+        audioPath: audio.path,
+      });
 
       let behaviors = null;
       try {

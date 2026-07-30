@@ -69,6 +69,8 @@ ELEVENLABS_MIN_BALANCE_USD=2      # low-balance alert threshold (needs `user_rea
 ELEVENLABS_USD_PER_1000_CREDITS=0.22  # credits→USD estimate; calibrate to your ElevenLabs dashboard
 FFMPEG_PATH=ffmpeg                # audio-clip cutter for the evidence report (see Крок 1)
 FFPROBE_PATH=ffprobe              # stereo/mono detection for multichannel STT (ships with ffmpeg)
+AUDIO_STORAGE_DIR=                # local archive of call recordings; empty = <repo>/data/recordings
+AUDIO_MIN_FREE_MB=1024            # one-time alert threshold for free disk space
 AUDIO_CLIP_PAD_SEC=3
 BACKFILL_LIMIT=30
 JOB_TYPE=poll
@@ -131,7 +133,23 @@ cd ~/OBVCarService.Bot
 npm run backfill:analysis        # BACKFILL_LIMIT (дефолт 30) керує глибиною
 ```
 
-> Потребує `ELEVENLABS_API_KEY` + `OPENAI_API_KEY` (кредити) і живих записів у Binotel. Дзвінки без запису в Binotel пропускаються з попередженням.
+> Потребує `ELEVENLABS_API_KEY` + `OPENAI_API_KEY` (кредити) і записів (локальний архів або Binotel). Дзвінки, запису яких немає ні локально, ні в Binotel, пропускаються з попередженням.
+
+## Крок 8 — одноразовий беклог АУДІО (локальний архів записів)
+
+Нові дзвінки з моменту деплою зберігають свій mp3 на диск автоматично (`src/core/audioStore.js`, папка `data/recordings/YYYY-MM/`). Щоб архів не починався з дня деплою, стягни записи всіх дзвінків, які вже є в БД:
+
+```bash
+cd ~/OBVCarService.Bot
+nohup npm run backfill:audio > backfill_audio.log 2>&1 &
+tail -f backfill_audio.log
+```
+
+- Найстаріші дзвінки йдуть першими (їх Binotel видалить першими), пауза 1.5 с між дзвінками (rate-limit Binotel), тож ~800 дзвінків ≈ 45-50 хв.
+- **Ідемпотентно й безпечно повторювати:** уже заархівовані пропускаються, файл, що є на диску, не перезавантажується. Прогін із помилками віддає non-zero exit — просто запусти команду ще раз, вона продовжить.
+- Обʼєм: Binotel віддає mp3 32 kbps моно (~4 КБ/с) → ~270 КБ на дзвінок, ~150 МБ/міс приросту. Перевір вільне місце: `df -h /`.
+- Записи зберігаються **назавжди** (вимога клієнта), тому поллер шле один алерт, коли вільного місця стає менше `AUDIO_MIN_FREE_MB` (деф. 1024 МБ).
+- ⚠️ Папка `data/` **не в git** і **не бекапиться** — при переїзді на інший сервер її треба перенести вручну (`rsync`).
 
 ## Оновлення коду
 

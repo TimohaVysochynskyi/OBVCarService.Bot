@@ -84,17 +84,32 @@ async function detectLanguages(text) {
   );
 }
 
-async function transcribeAudio(audioUrl, { managerName } = {}) {
-  const audioBlob = await withRetry(
-    async () => {
-      console.log(`[transcribe] downloading recording from ${audioUrl}`);
-      const res = await fetch(audioUrl);
-      if (!res.ok) throw new Error(`Failed to download recording: ${res.status}`);
-      return res.blob();
-    },
-    { attempts: 3, delayMs: 1000, label: 'download recording' }
-  );
-  console.log(`[transcribe] downloaded ${audioBlob.size} bytes`);
+// Accepts the audio itself (Buffer/Blob — what the ingest passes now that recordings are downloaded
+// once and archived locally, see core/audioStore.js) or, for convenience, a URL to fetch. Passing
+// bytes is the normal path: it means the recording is downloaded exactly ONCE per call.
+// audioPath (optional) points at the locally stored file so the channel probe can read it directly
+// instead of writing the bytes to a temp file again.
+async function toBlob(audio) {
+  if (typeof audio === 'string') {
+    const blob = await withRetry(
+      async () => {
+        console.log(`[transcribe] downloading recording from ${audio}`);
+        const res = await fetch(audio);
+        if (!res.ok) throw new Error(`Failed to download recording: ${res.status}`);
+        return res.blob();
+      },
+      { attempts: 3, delayMs: 1000, label: 'download recording' }
+    );
+    return blob;
+  }
+  if (Buffer.isBuffer(audio)) return new Blob([audio], { type: 'audio/mpeg' });
+  if (audio && typeof audio.arrayBuffer === 'function') return audio; // already a Blob
+  throw new Error('transcribeAudio: expected a Buffer, Blob or URL string');
+}
+
+async function transcribeAudio(audio, { managerName, audioPath } = {}) {
+  const audioBlob = await toBlob(audio);
+  console.log(`[transcribe] audio ready: ${audioBlob.size} bytes`);
 
   // Primary path: ElevenLabs (Scribe) — transcription + speaker diarization in one call, returning
   // a ready "Менеджер:/Клієнт:" dialogue AND timecoded segments (for audio clipping). If it fails
@@ -102,7 +117,7 @@ async function transcribeAudio(audioUrl, { managerName } = {}) {
   // path has no diarization/timecodes, so segments is null (report shows text quotes, no clips).
   if (process.env.ELEVENLABS_API_KEY) {
     try {
-      const result = await transcribeDiarized(audioBlob, managerName);
+      const result = await transcribeDiarized(audioBlob, managerName, { audioPath });
       console.log(`[transcribe] ElevenLabs OK — ${result.transcript.length} chars (diarized, ${result.segments?.length ?? 0} segments)`);
       return result;
     } catch (err) {

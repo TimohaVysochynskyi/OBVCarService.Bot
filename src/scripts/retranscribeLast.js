@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { getRecentCalls, updateCallAnalysis } from '../core/store.js';
-import { getCallRecordUrl } from '../core/binotel.js';
+import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeDiarized } from '../core/elevenlabs.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { displayName } from '../bot/operators.js';
@@ -31,17 +31,16 @@ async function main() {
   for (const c of calls) {
     const who = displayName(c.managerName) || c.managerName || c.internalNumber || '—';
     try {
-      const url = await getCallRecordUrl(c.generalCallId);
-      if (!url) {
-        console.warn(`   • ${c.generalCallId} (${who}) — no recording in Binotel, skip`);
+      // Local archive first (core/audioStore.js), Binotel only as a fallback.
+      const audio = await getRecordingForCall(c.generalCallId);
+      if (!audio) {
+        console.warn(`   • ${c.generalCallId} (${who}) — no recording (local or Binotel), skip`);
         continue;
       }
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`download HTTP ${res.status}`);
-      const blob = await res.blob();
+      const blob = new Blob([audio.buffer], { type: 'audio/mpeg' });
 
       // Force ElevenLabs (throws if it fails — we do NOT fall back to OpenAI here on purpose).
-      const { transcript, segments } = await transcribeDiarized(blob, who);
+      const { transcript, segments } = await transcribeDiarized(blob, who, { audioPath: audio.path });
       let behaviors = null;
       try {
         behaviors = await analyzeCallBehaviors(transcript, segments, who);

@@ -1,5 +1,6 @@
 import { callExists, saveCall, upsertPending, markPendingFailed, removePendingCall, getPendingCalls, getOperatorRoster } from '../core/store.js';
-import { listCallsForPeriod, getCallRecordUrl } from '../core/binotel.js';
+import { listCallsForPeriod } from '../core/binotel.js';
+import { storeRecording } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { classifyCall } from '../core/classifyCall.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
@@ -93,11 +94,23 @@ async function resolveManagerName(call, transcript, roster) {
 // evaluation. So the per-call MAP (which decides callPurpose) runs BEFORE classifyCall, and
 // classifyCall runs only when the call is a sales call.
 async function transcribeClassifyAndSave(call, roster) {
-  const recordUrl = await getCallRecordUrl(call.generalCallId);
+  // Download the recording ONCE, archive it on disk, then transcribe from the same bytes. The
+  // client requires every recording to be kept, and this also means later re-analysis, report clips
+  // and archive playback no longer depend on Binotel still having the file. Storing is best-effort:
+  // audio.buffer is returned even when the write failed, so a disk problem can't cost us the call.
+  const audio = await storeRecording(call.generalCallId, call.startTime);
+  if (!audio.buffer) throw new Error(audio.error || 'запис недоступний у Binotel');
+  console.log(
+    `[processCalls]   audio ${audio.reused ? 'reused' : 'stored'}: ${audio.relPath ?? '(не збережено)'} (${audio.bytes} B)`
+  );
+
   // employeeName (Binotel, personal extensions) anchors speaker-role detection on our actual
   // employee. Null for shared handsets — role detection falls back to operator-role heuristics.
   // segments = timecoded diarized turns (null on the OpenAI fallback / single-speaker calls).
-  const { transcript, segments } = await transcribeAudio(recordUrl, { managerName: call.employeeName });
+  const { transcript, segments } = await transcribeAudio(audio.buffer, {
+    managerName: call.employeeName,
+    audioPath: audio.path,
+  });
   const managerName = await resolveManagerName(call, transcript, roster);
 
   // Per-call "map": decides callPurpose (sales/info/other) and, for sales calls, tags manager
@@ -140,7 +153,27 @@ async function transcribeClassifyAndSave(call, roster) {
     isSuccess: classification.isSuccess,
     weakestStage: classification.weakestStage,
     communicationScore: classification.communicationScore,
+    audioPath: audio.relPath,
+    audioBytes: audio.relPath ? audio.bytes : null,
+    audioStatus: audio.relPath ? 'stored' : 'unavailable',
   });
+}
+
+// An excluded extension (the director's mobile) is still archived AS AUDIO, per the client's "keep
+// every recording" requirement — but nothing else: no transcription, no analysis, no row in `calls`,
+// so it stays out of the managers' statistics exactly as before. The file therefore has no
+// audio_path anywhere in the DB; the archive on disk is the record. Never throws.
+async function archiveExcludedAudio(call) {
+  try {
+    const audio = await storeRecording(call.generalCallId, call.startTime);
+    if (!audio.relPath) {
+      console.warn(`[processCalls]   excluded ${call.generalCallId}: audio not archived (${audio.error || 'невідома причина'})`);
+      return;
+    }
+    console.log(`[processCalls]   excluded ${call.generalCallId}: audio ${audio.reused ? 'reused' : 'archived'} at ${audio.relPath}`);
+  } catch (err) {
+    console.error(`[processCalls]   excluded ${call.generalCallId}: audio archiving failed: ${err.message}`);
+  }
 }
 
 // One attempt at turning a discovered call into a saved transcript. Never throws - on failure
@@ -148,9 +181,19 @@ async function transcribeClassifyAndSave(call, roster) {
 // retries it, instead of silently losing it.
 async function processOneCall(call, roster) {
   const pendingLabel = call.employeeName || String(call.internalNumber);
+  const excluded = EXCLUDED_EXTENSIONS.includes(String(call.internalNumber));
 
-  if (EXCLUDED_EXTENSIONS.includes(String(call.internalNumber))) {
-    console.log(`[processCalls]   skipping ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion`);
+  if (excluded && call.durationSec > 0 && call.recordingStatus !== 'uploaded') {
+    // Archive-only call whose recording isn't uploaded yet. Queue it so the audio isn't lost just
+    // because the checkpoint has already moved past this window - retryPendingCalls archives it.
+    console.log(`[processCalls]   ${call.generalCallId} (excluded) recording not ready (${call.recordingStatus}) - queued for audio archiving`);
+    await upsertPending({ ...call, managerName: pendingLabel }, `excluded ext, recording status: ${call.recordingStatus}`);
+    return;
+  }
+
+  if (excluded) {
+    console.log(`[processCalls]   skipping ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion (audio only)`);
+    if (call.durationSec > 0) await archiveExcludedAudio(call);
     return;
   }
 
@@ -216,7 +259,9 @@ async function retryPendingCalls() {
   console.log(`[processCalls] retrying ${pending.length} pending call(s)`);
   for (const call of pending) {
     if (EXCLUDED_EXTENSIONS.includes(String(call.internalNumber))) {
-      console.log(`[processCalls]   dropping pending ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion`);
+      // Excluded from analysis, but its recording is still archived (see archiveExcludedAudio).
+      console.log(`[processCalls]   pending ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion (audio only)`);
+      if (call.durationSec > 0) await archiveExcludedAudio(call);
       await removePendingCall(call.generalCallId);
       continue;
     }

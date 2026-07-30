@@ -19,6 +19,7 @@
     "backfill:purpose": "node src/scripts/backfillPurpose.js",
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
+    "backfill:audio": "node src/scripts/backfillAudio.js",
     "kb:reindex": "node src/scripts/reindexKb.js",
     "rescore:sales": "node src/scripts/rescoreSales.js"
   },

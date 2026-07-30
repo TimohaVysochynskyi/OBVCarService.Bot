@@ -23,12 +23,17 @@ function runFfprobe(args) {
 }
 
 // Returns the channel count (integer) of the first audio stream, or null if it can't be determined.
-async function probeChannels(blob) {
+// Accepts a Blob (written to a temp file, since ffprobe needs a real path) or - now that recordings
+// are archived locally (core/audioStore.js) - the path of the stored file, which skips that copy.
+async function probeChannels(input) {
   let dir;
   try {
-    dir = await mkdtemp(join(tmpdir(), 'obv-probe-'));
-    const path = join(dir, 'in.audio');
-    await writeFile(path, Buffer.from(await blob.arrayBuffer()));
+    let path = typeof input === 'string' ? input : null;
+    if (!path) {
+      dir = await mkdtemp(join(tmpdir(), 'obv-probe-'));
+      path = join(dir, 'in.audio');
+      await writeFile(path, Buffer.from(await input.arrayBuffer()));
+    }
     const out = await runFfprobe([
       '-v', 'error',
       '-select_streams', 'a:0',

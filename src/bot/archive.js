@@ -6,7 +6,7 @@ import {
   getOperatorPurposeCounts,
   getCallByGeneralId,
 } from "../core/store.js";
-import { getCallRecordUrl } from "../core/binotel.js";
+import { getRecordingForCall } from "../core/audioStore.js";
 import { operatorListKeyboard, operatorLabel } from "./keyboards.js";
 import { displayName, formatPhone } from "./operators.js";
 import { formatDialogue } from "./dialogue.js";
@@ -226,15 +226,13 @@ function registerArchive(bot) {
     const gid = ctx.match[1];
     await ctx.answerCallbackQuery({ text: "Готую аудіо…" });
     try {
-      // Fetch record URL from Binotel + download the mp3 + upload to Telegram can take 10-30s;
-      // keep an "надсилає аудіо" indicator alive the whole time.
+      // Recordings are archived locally at ingest (core/audioStore.js), so this is normally just a
+      // disk read + upload. Calls from before archiving fall back to Binotel (and are archived on
+      // the way), which is the slow path - keep the "надсилає аудіо" indicator alive throughout.
       await withProgress(ctx.api, ctx.chat.id, "upload_voice", async () => {
-        const url = await getCallRecordUrl(gid);
-        if (!url) throw new Error("немає URL запису");
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const buf = Buffer.from(await res.arrayBuffer());
-        await ctx.replyWithAudio(new InputFile(buf, `dialog-${gid}.mp3`), {
+        const audio = await getRecordingForCall(gid);
+        if (!audio) throw new Error("запис недоступний");
+        await ctx.replyWithAudio(new InputFile(audio.buffer, `dialog-${gid}.mp3`), {
           caption: `Запис дзвінка ${gid}`,
         });
       });

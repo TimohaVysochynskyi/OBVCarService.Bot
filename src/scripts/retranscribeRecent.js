@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { getOperators, getRecentCallsForOperator, updateCallTranscript } from '../core/store.js';
-import { getCallRecordUrl } from '../core/binotel.js';
+import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { displayName, hasAlias } from '../bot/operators.js';
 
@@ -39,11 +39,15 @@ async function main() {
     console.log(`[retranscribe] ${displayName(op.name)} — ${calls.length} call(s):`);
     for (const c of calls) {
       try {
-        const url = await getCallRecordUrl(c.generalCallId);
-        if (!url) throw new Error('no record URL from Binotel');
+        // Local archive first (core/audioStore.js), Binotel only as a fallback.
+        const audio = await getRecordingForCall(c.generalCallId);
+        if (!audio) throw new Error('no recording (local or Binotel)');
         // Pass the operator's display name so speaker-role detection anchors on OUR employee
         // (e.g. picks the speaker who says "це Андрій"), not on "who plays the service operator".
-        const { transcript } = await transcribeAudio(url, { managerName: displayName(op.name) });
+        const { transcript } = await transcribeAudio(audio.buffer, {
+          managerName: displayName(op.name),
+          audioPath: audio.path,
+        });
         await updateCallTranscript(c.generalCallId, transcript);
         console.log(`   ✓ ${c.generalCallId} (${c.startTime}) — ${transcript.length} chars`);
         ok += 1;

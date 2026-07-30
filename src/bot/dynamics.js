@@ -5,6 +5,11 @@ import { displayName } from "./operators.js";
 // verdict (first→last deltas). Pure text builder (no DB/LLM) → easy to unit-test; the caller feeds
 // buckets from store.getBucketedTrend (chronological, oldest→newest).
 
+// How many buckets the trajectory shows at most. Capped at 12 on the owner's call (2026-07-30): the
+// horizon must not exceed 366 days / 12 months, and 12 rows is as long a list as the screen should
+// get. It applies to both granularities — 12 months (a year) or the last 12 weeks.
+const MAX_BUCKETS = 12;
+
 const MONTHS_UK = [
   "січ",
   "лют",
@@ -157,4 +162,4 @@ function buildDynamicsText(name, bucket, buckets) {
   return `${title}\n\n${table}\n👎 *Проблемні сегменти воронки:*\n${stageLines}\n\n${summary}`;
 }
 
-export { buildDynamicsText };
+export { buildDynamicsText, MAX_BUCKETS };

@@ -3,7 +3,7 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InputFile } from 'grammy';
-import { getCallRecordUrl } from '../core/binotel.js';
+import { getRecordingForCall } from '../core/audioStore.js';
 
 // Audio evidence for the report: cut a short clip around a quoted line so the owner can listen and
 // verify. Uses SYSTEM ffmpeg (fast, tiny clips). If ffmpeg isn't installed the report still works —
@@ -89,15 +89,15 @@ async function prepareClips(report) {
   let dir;
   try {
     dir = await mkdtemp(join(tmpdir(), 'obv-clip-'));
-    const sources = new Map(); // callId → path of downloaded full mp3 (or null if unavailable)
+    const sources = new Map(); // callId → path of the full mp3 (local archive, or null if unavailable)
 
     for (const c of wanted) {
       try {
         if (!sources.has(c.callId)) {
-          sources.set(c.callId, await downloadRecording(c.callId, dir));
+          sources.set(c.callId, await sourceRecording(c.callId, dir));
         }
         const src = sources.get(c.callId);
-        if (!src) continue; // recording unavailable in Binotel → skip
+        if (!src) continue; // no local file and Binotel has nothing → skip
 
         const from = Math.max(0, c.start - PAD);
         const dur = Math.max(1, (Number(c.end ?? c.start) - c.start) + 2 * PAD);
@@ -116,13 +116,18 @@ async function prepareClips(report) {
   return clips;
 }
 
-async function downloadRecording(callId, dir) {
-  const url = await getCallRecordUrl(callId);
-  if (!url) return null;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`download ${callId}: HTTP ${res.status}`);
+// Path of the full recording to cut from. Recordings are archived locally at ingest
+// (core/audioStore.js), so the normal case needs NO download at all — ffmpeg reads the stored file
+// in place. Only calls from before audio archiving (or a failed store) fall back to Binotel, and
+// what's downloaded is archived on the way so the next clip is local too.
+async function sourceRecording(callId, dir) {
+  const audio = await getRecordingForCall(callId);
+  if (!audio) return null;
+  if (audio.path) return audio.path; // stored on disk — ffmpeg reads it in place, nothing to copy
+
+  // Downloaded but not archivable (disk problem): cut from a temp copy rather than lose the evidence.
   const path = join(dir, `src-${String(callId).replace(/[^\w.-]/g, '_')}.mp3`);
-  await writeFile(path, Buffer.from(await res.arrayBuffer()));
+  await writeFile(path, audio.buffer);
   return path;
 }
 

@@ -3,8 +3,12 @@ import {
   setCheckpoint,
   getElevenLabsBalanceState,
   setElevenLabsBalanceState,
+  getAudioSpaceState,
+  setAudioSpaceState,
+  getAudioArchiveStats,
 } from '../core/store.js';
 import { getElevenLabsBalance } from '../core/elevenlabs.js';
+import { freeSpaceMb, storageRoot } from '../core/audioStore.js';
 import { sendAlert } from '../core/telegram.js';
 import { processCallsForRange, retryPendingCalls } from './processCalls.js';
 
@@ -45,6 +49,30 @@ async function checkElevenLabsBalance() {
   }
 }
 
+// Disk watchdog for the audio archive. Recordings are kept indefinitely (client requirement), so
+// free space only ever goes one way. Same change-only alerting as the balance check: fires once when
+// free space drops below AUDIO_MIN_FREE_MB and re-arms when space is freed. Never throws.
+async function checkAudioDiskSpace() {
+  const freeMb = await freeSpaceMb();
+  if (freeMb == null) return;
+
+  const minFreeMb = Number(process.env.AUDIO_MIN_FREE_MB || 1024);
+  const state = freeMb < minFreeMb ? 'low' : 'ok';
+  const prev = await getAudioSpaceState();
+  if (state === prev) return;
+
+  if (state === 'low') {
+    const stats = await getAudioArchiveStats().catch(() => null);
+    const archiveMb = stats ? Math.round(Number(stats.bytes) / (1024 * 1024)) : null;
+    await sendAlert(
+      `⚠️ Мало місця на диску: вільно ${freeMb} МБ (порог ${minFreeMb} МБ). ` +
+      `Архів записів розмов — ${archiveMb == null ? 'невідомо' : archiveMb + ' МБ'} у ${storageRoot()}. ` +
+      `Записи зберігаються назавжди, тому місце треба або розширити, або перенести старі записи.`
+    ).catch((e) => console.error(`[poll] disk alert failed: ${e.message}`));
+  }
+  await setAudioSpaceState(state);
+}
+
 // Uses a persisted checkpoint instead of a fixed "last N minutes" window, so a delayed or
 // skipped cron run never creates a gap - the next run just picks up exactly where the last
 // one left off. Falls back to POLL_WINDOW_MINUTES only on the very first run ever.
@@ -60,8 +88,9 @@ async function pollNewCalls() {
   await processCallsForRange(start, end);
   await setCheckpoint(end);
 
-  // Low-balance watchdog — never let it break the poll.
+  // Watchdogs — never let either of them break the poll.
   await checkElevenLabsBalance().catch((e) => console.error(`[poll] balance check failed: ${e.message}`));
+  await checkAudioDiskSpace().catch((e) => console.error(`[poll] disk space check failed: ${e.message}`));
 }
 
 export { pollNewCalls };

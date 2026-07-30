@@ -3,7 +3,7 @@ import { getOperators, getOperatorStats, getBucketedTrend } from '../core/store.
 import { operatorListKeyboard, periodKeyboard, operatorLabel } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
 import { deliverManagerReport } from './report.js';
-import { buildDynamicsText } from './dynamics.js';
+import { buildDynamicsText, MAX_BUCKETS } from './dynamics.js';
 import { periodRange, formatKyiv } from './time.js';
 import { showScreen, withProgress } from './ui.js';
 
@@ -27,8 +27,8 @@ async function statsPicker() {
 // growth verdict across the last buckets (weeks or months). Text-only, no LLM (getBucketedTrend is
 // one live SQL query), so it's instant. The classic per-period evidence report is a drill-down.
 async function showDynamics(ctx, name, bucket) {
-  const limit = bucket === 'month' ? 6 : 8;
-  const buckets = await getBucketedTrend(name, bucket, limit);
+  // Same cap for weeks and months: never more than 12 buckets (= at most 366 days of history).
+  const buckets = await getBucketedTrend(name, bucket, MAX_BUCKETS);
   const text = buildDynamicsText(name, bucket, buckets);
   const tick = (b) => (b === bucket ? ' ✓' : '');
   const kb = new InlineKeyboard()
