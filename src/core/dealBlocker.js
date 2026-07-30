@@ -37,6 +37,10 @@ const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову
 
 ЗАВДАННЯ: визначити, чи клієнта НЕ ВЗЯЛИ на обслуговування САМЕ ЧЕРЕЗ ОБМЕЖЕННЯ САМОГО СТО — тобто менеджер зробив усе, що міг, але сервіс фізично/принципово не міг надати послугу.
 
+ОБИДВІ УМОВИ мусять виконуватись одночасно, інакше — "${NO_BLOCKER}":
+ (А) клієнт справді хотів послугу або запис у цій розмові;
+ (Б) менеджер ПРЯМО сказав, що СТО цього зробити не може.
+
 Поверни РІВНО одне значення blocker.
 
 ГОЛОВНИЙ ТЕСТ, який відрізняє дві категорії: «чи взяли б цього клієнта ІНШОГО ДНЯ?»
@@ -54,6 +58,12 @@ const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову
    ⚠️ УВАГА: якщо потрібний майстер/спеціаліст просто ВІДСУТНІЙ ЗАРАЗ (хворий, у відпустці, завантажений) — це "no_slot", а НЕ "out_of_scope", бо іншого дня його візьмуть.
 
 3) "${NO_BLOCKER}" — усе інше. ЦЕ ЗНАЧЕННЯ ЗА ЗАМОВЧУВАННЯМ: якщо сумніваєшся — ставь "${NO_BLOCKER}".
+
+⚠️ ПАСТКИ МОВИ АВТОСЕРВІСУ (перевірено на реальних розмовах цього СТО — саме тут найчастіше помиляються):
+- «забитий/забито» в автосервісі ЗАЗВИЧАЙ означає ЗАСМІЧЕНИЙ вузол, а не завантажений сервіс: «радіатори забиті», «фільтр був забитий», «сітка забита», «воно забилося» → це ДІАГНОСТИКА ДЕТАЛІ, blocker="${NO_BLOCKER}". Тільки «у нас усе забито», «забито на сьогодні», «забито на місяць» (про ЗАПИС/ГРАФІК) може бути "no_slot".
+- «робимо, не робимо» — менеджер пропонує КЛІЄНТУ вирішити, робити роботу чи ні. Це НЕ відмова → "${NO_BLOCKER}".
+- Роздуми менеджера про те, що для роботи «потрібен хтось знаючий», «треба розбиратися по схемах» — це НЕ відмова сервісу → "${NO_BLOCKER}".
+- Про завантаженість/відсутність місць запитав КЛІЄНТ, а менеджер не підтвердив → "${NO_BLOCKER}".
 
 КРИТИЧНО ВАЖЛИВО — це НЕ блокер (тут ставь "${NO_BLOCKER}"):
 - Клієнта не влаштувала ЦІНА («дорого», «подумаю», «в іншому місці дешевше») — це заперечення, з ним працює менеджер.
@@ -81,6 +91,66 @@ const SCHEMA = {
     additionalProperties: false,
   },
 };
+
+// Second, ADVERSARIAL pass. Measured on live data the base rate of a real blocker is tiny (roughly
+// 2-4 calls in six weeks), so precision dominates: at even a 5% false-positive rate a single pass
+// over the history would invent dozens of blockers, drown the few real ones and — because blocked
+// calls leave the conversion denominator — silently flatter every manager. The detector alone was
+// measured producing ~1 false positive in 3 (a manager musing "someone who knows should look at the
+// wiring" was read as a refusal), so a strict reviewer that DEFAULTS TO REJECT is what makes the
+// number trustworthy. Same shape as the findings relevance pass in bot/analyze.js.
+const VERIFY_SYSTEM = `Ти СУВОРИЙ рецензент. Інша модель твердить, що в цій розмові СТО не змогло взяти клієнта. Твоє завдання — ВІДКИНУТИ твердження, якщо воно не доведене.
+
+Підтверджуй (confirmed=true) ТІЛЬКИ якщо виконано ВСЕ:
+1. Клієнт у цій розмові справді хотів послугу або запис.
+2. Наведена цитата — це слова МЕНЕДЖЕРА, і в них ПРЯМО сказано, що СТО не може цього зробити (немає вільного часу / не надаємо таке).
+3. Причина в САМОМУ СТО, а не в клієнті (не ціна, не «подумаю», не «перетелефоную»).
+4. Клієнта в результаті НЕ записали (якщо записали, хай і на іншу дату — це закрита угода, confirmed=false).
+
+Відкидай (confirmed=false), якщо цитата насправді про: засмічену деталь («радіатор забитий», «фільтр забитий»), пропозицію клієнтові вирішити («робимо, не робимо»), роздуми про потрібного спеціаліста, запитання клієнта без підтвердження менеджера, або якщо ти просто не впевнений.
+
+Якщо сумніваєшся — confirmed=false.`;
+
+const VERIFY_SCHEMA = {
+  name: 'blocker_verdict',
+  strict: true,
+  schema: {
+    type: 'object',
+    properties: {
+      confirmed: { type: 'boolean' },
+      reason: { type: 'string' },
+    },
+    required: ['confirmed', 'reason'],
+    additionalProperties: false,
+  },
+};
+
+async function verifyBlocker(transcript, blocker, quote) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: model(),
+      messages: [
+        { role: 'system', content: VERIFY_SYSTEM },
+        {
+          role: 'user',
+          content:
+            `Твердження: ${BLOCKER_LABELS[blocker]}\nЦитата менеджера: «${quote}»\n\nПовна розмова:\n${transcript}`,
+        },
+      ],
+      response_format: { type: 'json_schema', json_schema: VERIFY_SCHEMA },
+    }),
+  });
+  if (!res.ok) throw new Error(`OpenAI blocker verify failed: ${res.status} ${await res.text()}`);
+  return JSON.parse((await res.json()).choices[0].message.content);
+}
+
+// The model sometimes copies the transcript line WITH its role label ("Менеджер: ..."). Strip it so
+// the stored quote reads cleanly in the report (and matches the segment text, which has no label).
+function stripRoleLabel(quote) {
+  return quote.replace(/^\s*(Менеджер|Клієнт|Клиент|Оператор)\s*:\s*/i, '').trim();
+}
 
 // Returns { blocker: 'no_slot'|'out_of_scope'|'none', quote, start, end }.
 // 'none' is returned for anything unclear, and ALSO whenever the model's quote cannot be located in a
@@ -117,13 +187,27 @@ async function detectDealBlocker(transcript, segments, managerName) {
   const blocker = DEAL_BLOCKERS.includes(raw.blocker) ? raw.blocker : NO_BLOCKER;
   if (blocker === NO_BLOCKER) return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
 
-  const quote = String(raw.quote || '').trim();
+  const quote = stripRoleLabel(String(raw.quote || ''));
   const hit = quote ? findQuote(verifySegments, quote, { requireRole: 'manager' }) : null;
   if (!hit) {
     // The constraint was asserted but not backed by a real manager line — treat as no blocker.
     console.warn(`[dealBlocker] "${blocker}" dropped: quote not found in a manager segment ("${quote.slice(0, 60)}")`);
     return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
   }
+
+  // Adversarial second opinion. A verifier FAILURE must not silently create a blocker, so an error
+  // here rejects the candidate: with a base rate this low, a wrong positive costs more than a miss.
+  try {
+    const verdict = await verifyBlocker(transcript, blocker, quote);
+    if (!verdict.confirmed) {
+      console.log(`[dealBlocker] "${blocker}" rejected by verifier: ${verdict.reason?.slice(0, 120)}`);
+      return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+    }
+  } catch (err) {
+    console.error(`[dealBlocker] verification failed, rejecting "${blocker}": ${err.message}`);
+    return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+  }
+
   return { blocker, quote, start: hit.start, end: hit.end };
 }
 

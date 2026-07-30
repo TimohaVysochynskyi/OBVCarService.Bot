@@ -74,6 +74,18 @@ async function migrate() {
     -- exists so that real values start accumulating the moment Binotel populates the field.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS hangup_by TEXT;
 
+    -- "Незакриті угоди" (src/core/dealBlocker.js): the deal did not close because the СТО itself
+    -- could not take the job, NOT because the manager mishandled it.
+    --   deal_blocker       — 'no_slot' (temporarily full) | 'out_of_scope' (we never do this) |
+    --                        'none' (checked, no blocker). NULL = not checked yet, which is what the
+    --                        blocker backfill selects on.
+    --   deal_blocker_quote — the VERBATIM manager line that states the constraint, re-verified in code
+    --                        against the call's manager segments; without it the blocker is discarded.
+    -- Blocked calls are excluded from the conversion denominator and from the weakest-stage mode, so a
+    -- manager is not scored down for business the service could not accept.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS deal_blocker TEXT;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS deal_blocker_quote TEXT;
+
     -- Local audio archive (src/core/audioStore.js). Recordings used to be streamed from Binotel to
     -- the transcriber and dropped; the client requires them KEPT, so the ingest now saves each file
     -- on the VPS and records where.
@@ -561,6 +573,25 @@ async function getOperators() {
 // computed over SALES-relevant calls only, so routine informational calls don't drag the numbers.
 // callCount is the total; salesCount/infoCount give the breakdown shown in the header.
 const SALES_FILTER = `call_purpose IS DISTINCT FROM 'info' AND call_purpose IS DISTINCT FROM 'other'`;
+
+// "Незакриті угоди" — the СТО could not take the job (src/core/dealBlocker.js). Deliberately NOT
+// gated on call_purpose: measured on live data, blocked calls are usually classified 'info' (the MAP
+// sees a refusal, not a sales opportunity), so gating on 'sales' would count almost none of them.
+// NULL-safe: an unchecked row (deal_blocker IS NULL) counts as NOT blocked in both directions.
+const BLOCKED_FILTER = `deal_blocker IN ('no_slot','out_of_scope')`;
+const NOT_BLOCKED_FILTER = `deal_blocker IS DISTINCT FROM 'no_slot' AND deal_blocker IS DISTINCT FROM 'out_of_scope'`;
+
+// The blocker-aware numbers every screen shares. reachableCount is the CONVERSION DENOMINATOR: deals
+// the manager could actually have closed (sales calls minus the ones the СТО itself turned away), so
+// he is not scored down for business the service could not accept. The weakest stage is likewise
+// computed over non-blocked calls only - otherwise "закриття угоди" would top the funnel-problem list
+// purely because the shop was full.
+const BLOCKER_COLUMNS_SQL = `
+       COUNT(*) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER})::int AS "reachableCount",
+       COUNT(*) FILTER (WHERE ${BLOCKED_FILTER})::int AS "blockedCount",
+       COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "blockedNoSlot",
+       COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "blockedOutOfScope"`;
+
 async function getOperatorStats(name, start, end) {
   const { rows } = await pool.query(
     `SELECT
@@ -569,11 +600,62 @@ async function getOperatorStats(name, start, end) {
        COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
-       MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER}) AS "topWeakStage"
+       MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
        AND transcript IS NOT NULL AND transcript <> ''`,
     [name, start, end]
+  );
+  return rows[0];
+}
+
+// The individual blocked calls of a period, for the report block that must appear even for a SINGLE
+// case. Carries the verified manager quote plus who called (so the director can ring the client back
+// when a slot frees up).
+async function getBlockedCalls(name, start, end) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+            deal_blocker AS "blocker", deal_blocker_quote AS "quote",
+            client_number AS "clientNumber", client_name AS "clientName"
+     FROM calls
+     WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3 AND ${BLOCKED_FILTER}
+     ORDER BY start_time ASC`,
+    [name, start, end]
+  );
+  return rows;
+}
+
+// Calls whose blocker hasn't been decided yet. A CLOSED deal cannot be blocked by definition, so only
+// non-closed calls are checked - that keeps the (gpt-4o) cost proportional to what actually matters.
+async function getCallsMissingBlocker({ limit = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            call_purpose AS "callPurpose", transcript, segments
+     FROM calls
+     WHERE deal_blocker IS NULL AND is_success IS NOT TRUE
+       AND transcript IS NOT NULL AND transcript <> ''
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function setCallBlocker(generalCallId, { blocker, quote = null }) {
+  await pool.query(`UPDATE calls SET deal_blocker = $2, deal_blocker_quote = $3 WHERE general_call_id = $1`, [
+    generalCallId,
+    blocker,
+    quote,
+  ]);
+}
+
+async function getBlockerStats() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS total,
+       COUNT(*) FILTER (WHERE deal_blocker IS NULL AND is_success IS NOT TRUE)::int AS unchecked,
+       COUNT(*) FILTER (WHERE deal_blocker = 'none')::int AS clean,
+       COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "noSlot",
+       COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "outOfScope"
+     FROM calls`
   );
   return rows[0];
 }
