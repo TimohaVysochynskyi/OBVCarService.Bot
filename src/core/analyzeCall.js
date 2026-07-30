@@ -141,4 +141,4 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
   return { version: ANALYSIS_VERSION, callPurpose, items };
 }
 
-export { analyzeCallBehaviors, ANALYSIS_VERSION, CALL_PURPOSES };
+export { analyzeCallBehaviors, ANALYSIS_VERSION, CALL_PURPOSES, pseudoSegments };
