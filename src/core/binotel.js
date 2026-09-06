@@ -19,9 +19,32 @@ async function callBinotel(path, body) {
         body: JSON.stringify({ ...auth(), ...body }),
       });
       if (!res.ok) {
-        throw new Error(`Binotel ${path} failed: ${res.status} ${await res.text()}`);
+        const err = new Error(`Binotel ${path} failed: ${res.status} ${await res.text()}`);
+        // 5xx is Binotel being broken, not us - let the poller report it as an outage.
+        if (res.status >= 500) err.binotelUnavailable = true;
+        throw err;
       }
-      const data = await res.json();
+      // Read the body ourselves instead of res.json(). When Binotel's own API application throws,
+      // it answers HTTP 200 with content-type text/html and the body "Something went wrong
+      // (exception)" - verified on 2026-09-06, when EVERY method (including a nonexistent one and
+      // deliberately wrong credentials) returned exactly that for ~7 hours. res.json() then died
+      // with "Unexpected token 'S', \"Something \"... is not valid JSON", which reads like a bug in
+      // OUR parsing and completely hides the fact that the upstream is simply down. Parsing here
+      // lets the error say what actually happened, and tags it so the poller can dedupe the alert
+      // (see jobs/pollNewCalls.js) instead of shouting every 15 minutes for the whole outage.
+      const rawBody = await res.text();
+      let data;
+      try {
+        data = JSON.parse(rawBody);
+      } catch {
+        const contentType = res.headers.get('content-type') || 'no content-type';
+        const snippet = rawBody.trim().slice(0, 200) || '(empty body)';
+        const err = new Error(
+          `Binotel ${path} returned non-JSON (HTTP ${res.status}, ${contentType}): ${snippet}`
+        );
+        err.binotelUnavailable = true;
+        throw err;
+      }
       console.log(`[binotel] response from ${path}:`, JSON.stringify(data).slice(0, 500));
       // Binotel reports API-level failures (e.g. rate limiting: "Requests are too frequent") with
       // HTTP 200 + {status:"error",...} - res.ok alone misses this entirely. Left unchecked, a

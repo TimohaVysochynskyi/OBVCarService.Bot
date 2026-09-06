@@ -1334,6 +1334,30 @@ async function setAudioSpaceState(state) {
   await setState('audio_space_state', state);
 }
 
+// Binotel outage state, same change-only alerting idea as the two watchdogs above but with a
+// reminder, because unlike a low balance an outage is nothing WE can fix - it just has to be
+// waited out (or chased with Binotel support), and a silent multi-day gap in ingestion would be
+// worse than a nudge. Stored as JSON: { since, lastAlertAt, message } while Binotel is down,
+// absent while it is healthy. Read/written by jobs/pollNewCalls.js.
+async function getBinotelOutage() {
+  const raw = await getState('binotel_outage');
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch {
+    return null; // corrupted value behaves like "no outage recorded" - the next failure re-arms it
+  }
+}
+
+async function setBinotelOutage(outage) {
+  await setState('binotel_outage', JSON.stringify(outage));
+}
+
+async function clearBinotelOutage() {
+  await deleteState('binotel_outage');
+}
+
 async function getReportTimes() {
   const raw = await getState('report_times');
   if (raw == null) return [...DEFAULT_REPORT_TIMES];
@@ -1458,6 +1482,9 @@ export {
   setElevenLabsBalanceState,
   getAudioSpaceState,
   setAudioSpaceState,
+  getBinotelOutage,
+  setBinotelOutage,
+  clearBinotelOutage,
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,

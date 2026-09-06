@@ -76,16 +76,18 @@ async function sendMessage(text, { chatId } = {}) {
 // (app_state.alert_recipients, managed by admins). This replaces the old single TELEGRAM_CHAT_ID
 // env target. With no recipients configured the alert is still written to the log, never dropped
 // silently. A failed send to one recipient doesn't block the others.
-async function sendAlert(text) {
+// The icon is overridable so the same channel can carry the matching "it's fixed" notice
+// (e.g. Binotel back up) without it reading as a new breakage.
+async function sendAlert(text, { icon = '⚠️' } = {}) {
   const recipients = await getRecipients('alert');
   if (recipients.length === 0) {
     console.warn('[telegram] no alert recipients configured (bot → Налаштування) - alert only logged:');
-    console.warn(`⚠️ ${text}`);
+    console.warn(`${icon} ${text}`);
     return;
   }
   for (const r of recipients) {
     try {
-      await sendMessage(`⚠️ ${text}`, { chatId: r.id });
+      await sendMessage(`${icon} ${text}`, { chatId: r.id });
     } catch (err) {
       console.error(`[telegram] alert to ${r.id} failed: ${err.message}`);
     }

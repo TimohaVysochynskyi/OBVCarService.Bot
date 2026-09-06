@@ -23,7 +23,11 @@ async function main() {
 main().catch(async (err) => {
   console.error(err);
   try {
-    await sendAlert(`Джоба "${process.env.JOB_TYPE}" впала: ${err.message}`);
+    // A Binotel outage is already reported (once, then on a reminder cadence) by the poller's
+    // outage watchdog - re-alerting here would put the every-15-minutes spam straight back.
+    if (!err?.alertSent) {
+      await sendAlert(`Джоба "${process.env.JOB_TYPE}" впала: ${err.message}`);
+    }
   } catch (alertErr) {
     console.error(`[index] failed to send failure alert: ${alertErr.message}`);
   }

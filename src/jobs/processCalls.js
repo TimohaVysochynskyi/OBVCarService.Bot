@@ -307,6 +307,15 @@ async function retryPendingCalls() {
       await transcribeClassifyAndSave(call, roster);
       console.log(`[processCalls]   pending call recovered: ${call.generalCallId}`);
     } catch (err) {
+      // A Binotel outage is not this call's fault, and every pending row would burn an attempt on
+      // every 15-minute poll for as long as the outage lasts (MAX_PENDING_ATTEMPTS = 20 is under
+      // five hours) - which would mark perfectly good calls "failed" and lose them for real. Abort
+      // the whole retry pass instead: there is nothing to retry against while the API is down, and
+      // the poller turns this into a single deduped outage alert.
+      if (err?.binotelUnavailable) {
+        console.error(`[processCalls]   aborting pending retries - Binotel is unavailable: ${err.message}`);
+        throw err;
+      }
       console.error(`[processCalls]   pending retry failed for ${call.generalCallId}: ${err.message}`);
       await upsertPending(call, err.message);
     }
