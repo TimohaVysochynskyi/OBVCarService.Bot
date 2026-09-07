@@ -394,16 +394,18 @@ const HEALTH = {
   binotelOk: 'відповідає, ключі приймаються',
   // Свідомо не «усе гаразд»: ендпоінт перевіряє доступність і ключ, але НЕ залишок коштів.
   openAiOk: 'ключ приймається (залишок коштів так не перевіряється)',
-  elevenBalance: (usd, credits) => `залишок ~${usd} (${spaced(credits)} кредитів)`,
+  elevenBalance: (usd, credits) => `залишок ~$${usd} (${spaced(credits)} кредитів)`,
   elevenUnknown: 'баланс прочитати не вдалося, але транскрипція може працювати',
   audioToolsOk: 'ffmpeg і ffprobe на місці',
   disk: (freeMb, archiveMb) =>
     `вільно ${spaced(freeMb)} МБ${archiveMb == null ? '' : `, архів записів — ${spaced(archiveMb)} МБ`}`,
   diskUnknown: 'вільне місце визначити не вдалося',
+  // «0 хв тому» читається дивно, а прогін щочверть години дуже часто буває саме щойно.
+  ago: (minutes) => (minutes <= 0 ? 'щойно' : `${minutes} хв тому`),
   ingest: (beatAge, checkpointAge) =>
-    `останній прогін ${beatAge} хв тому${checkpointAge == null ? '' : `, оброблено до ${checkpointAge} хв тому`}`,
+    `останній прогін ${HEALTH.ago(beatAge)}${checkpointAge == null ? '' : `, оброблено до ${HEALTH.ago(checkpointAge)}`}`,
   ingestUnknown: 'ще не було жодного прогону після оновлення',
-  kb: (docs, chunks) => `${docs} файл(ів), ${spaced(chunks)} фрагментів`,
+  kb: (docs, chunks) => `файлів: ${docs}, фрагментів: ${spaced(chunks)}`,
   kbEmpty: 'працює, але файлів ще не завантажено',
   verdict: (bad, warn) => {
     if (bad) return `Не працює: ${bad}. Потребує уваги: ${warn}.`;
