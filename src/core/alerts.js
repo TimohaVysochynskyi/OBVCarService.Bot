@@ -1,4 +1,7 @@
-import { getAlertState, setAlertState, clearAlertState } from './store.js';
+import { readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { getAlertState, setAlertState, clearAlertState, clearAlertStates } from './store.js';
 import { sendAlert } from './telegram.js';
 import { UI } from './errorTexts.js';
 
@@ -43,6 +46,80 @@ function alertText(described) {
   return `${described.text}\n${UI.technicalLine(described.technicalLine)}`;
 }
 
+// --- стан дедупу, коли недоступна сама база --------------------------------------------------
+// Стан алертів живе в `app_state`, тобто в тій самій базі, падіння якої і треба повідомити. Без
+// цього резерву алерт про недоступний Postgres летів би що 15 хвилин усю аварію — рівно той спам,
+// який ми прибирали. Файл у tmp — best-effort: він потрібен лише на час, поки база лежить, і
+// стирається на першому ж здоровому прогоні (`resetIngestAlerts`), щоб застарілий запис не
+// заглушив наступну аварію.
+const FALLBACK_FILE = join(tmpdir(), 'obv-alert-state.json');
+
+function readFallback() {
+  try {
+    return JSON.parse(readFileSync(FALLBACK_FILE, 'utf8')) || {};
+  } catch {
+    return {};
+  }
+}
+
+function writeFallback(all) {
+  try {
+    writeFileSync(FALLBACK_FILE, JSON.stringify(all));
+  } catch (err) {
+    console.error(`[alerts] резервний стан не записано: ${err.message}`);
+  }
+}
+
+async function readState(key) {
+  try {
+    return await getAlertState(key);
+  } catch (err) {
+    console.error(`[alerts] стан із бази не прочитано (${key}): ${err.message}`);
+    return readFallback()[key] ?? null;
+  }
+}
+
+async function writeState(key, value) {
+  try {
+    await setAlertState(key, value);
+  } catch {
+    const all = readFallback();
+    all[key] = value;
+    writeFallback(all);
+  }
+}
+
+async function dropState(key) {
+  try {
+    await dropState(key);
+  } catch {
+    const all = readFallback();
+    delete all[key];
+    writeFallback(all);
+  }
+}
+
+// Здоровий прогін інжесту: прибрати всі стани алертів про його падіння (і в базі, і резервний
+// файл цілком). Повертає, чи щось справді було активним — щоб сказати про відновлення.
+async function resetIngestAlerts(prefix = 'ingest_') {
+  let cleared = 0;
+  try {
+    cleared = await clearAlertStates(prefix);
+  } catch (err) {
+    console.error(`[alerts] стани не прибрано: ${err.message}`);
+  }
+  const all = readFallback();
+  const stale = Object.keys(all).filter((key) => key.startsWith(prefix)).length;
+  if (Object.keys(all).length) {
+    try {
+      rmSync(FALLBACK_FILE, { force: true });
+    } catch {
+      /* залишений файл нічого не ламає - його переб'є наступний запис */
+    }
+  }
+  return cleared + stale > 0;
+}
+
 // --- дедуп станів ----------------------------------------------------------------------------
 // active   — стан проблеми ЗАРАЗ (true = зламано).
 // message  — ({ first, downFor, since }) => текст. Викликається на першому алерті й на кожному
@@ -53,7 +130,7 @@ function alertText(described) {
 // Повертає true, якщо цього разу щось надіслано (потрібно тому, хто мусить знати, чи алерт уже
 // пішов, — напр. jobs/index.js не дублює свій загальний алерт).
 async function alertOnce(key, { active, message, recovered, reminderMin = 0 }) {
-  const previous = await getAlertState(key);
+  const previous = await readState(key);
   const now = Date.now();
 
   if (!active) {
@@ -70,7 +147,7 @@ async function alertOnce(key, { active, message, recovered, reminderMin = 0 }) {
 
   if (!previous) {
     await sendAlert(message({ first: true, downFor: null, since: null }));
-    await setAlertState(key, { since: stamp, lastAlertAt: stamp });
+    await writeState(key, { since: stamp, lastAlertAt: stamp });
     return true;
   }
 
@@ -92,8 +169,8 @@ async function alertOnce(key, { active, message, recovered, reminderMin = 0 }) {
   );
   // `since` зберігається як був — інакше кожне нагадування обнуляло б тривалість простою, і
   // «лежить уже 6 годин» ніколи б не зʼявилось. Зіпсоване значення переанкорюється на зараз.
-  await setAlertState(key, { since: sinceValid ? new Date(sinceMs).toISOString() : stamp, lastAlertAt: stamp });
+  await writeState(key, { since: sinceValid ? new Date(sinceMs).toISOString() : stamp, lastAlertAt: stamp });
   return true;
 }
 
-export { alertOnce, alertText, kyivTime, humanDuration };
+export { alertOnce, alertText, kyivTime, humanDuration, resetIngestAlerts };

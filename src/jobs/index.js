@@ -3,7 +3,7 @@ import { migrate } from '../core/store.js';
 import { pollNewCalls } from './pollNewCalls.js';
 import { sendAlert } from '../core/telegram.js';
 import { describeError } from '../core/errors.js';
-import { alertText } from '../core/alerts.js';
+import { alertOnce, alertText } from '../core/alerts.js';
 import { recordError } from '../core/errorLog.js';
 import { installProcessTraps } from '../core/processTraps.js';
 import { markAlive } from '../core/liveness.js';
@@ -41,7 +41,17 @@ main().catch(async (err) => {
   try {
     // A Binotel outage is already reported (once, then on a reminder cadence) by the poller's
     // outage watchdog - re-alerting here would put the every-15-minutes spam straight back.
-    if (!err?.alertSent) await sendAlert(alertText(described));
+    // Через alertOnce, а не напряму: якщо причина не зникає (недоступна база, відкликаний ключ),
+    // cron бив би тим самим повідомленням щочверть години. Ключ включає КЛАС помилки, тож нова
+    // проблема все одно про себе скаже. Стан цього дедупу переживає навіть падіння Postgres —
+    // core/alerts.js тримає резервну копію у файлі.
+    if (!err?.alertSent) {
+      await alertOnce(`ingest_${described.code}`, {
+        active: true,
+        reminderMin: 120,
+        message: () => alertText(described),
+      });
+    }
   } catch (alertErr) {
     console.error(`[index] не вдалося надіслати алерт: ${alertErr.message}`);
   }

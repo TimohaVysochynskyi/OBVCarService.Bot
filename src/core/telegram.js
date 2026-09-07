@@ -70,22 +70,57 @@ async function sendMessage(text, { chatId } = {}) {
   }
 }
 
+// Резервні отримувачі: кому писати, коли основний список недоступний або порожній.
+//
+// Це остання ланка, якої бракувало. Список отримувачів живе в `app_state`, тобто в тій самій
+// базі, падіння якої і треба повідомити — тож `getRecipients` кидав, і алерт про недоступний
+// Postgres не доходив НІКОМУ. Тепер у такому разі беруться id з env, і нічого налаштовувати не
+// треба: `TELEGRAM_BOOTSTRAP_CHAT_IDS` (сід директорів) — це вже ті самі люди.
+// ALERT_FALLBACK_CHAT_IDS дозволяє задати інший список, якщо потрібно.
+function fallbackRecipients() {
+  const raw = process.env.ALERT_FALLBACK_CHAT_IDS || process.env.TELEGRAM_BOOTSTRAP_CHAT_IDS || '';
+  return raw
+    .split(',')
+    .map((part) => part.trim())
+    .filter((id) => /^-?\d+$/.test(id))
+    .map((id) => ({ id, name: id }));
+}
+
 // Alerts fan out to every recipient configured in the bot's /settings → "Сповіщення про поломки"
-// (app_state.alert_recipients, managed by admins). This replaces the old single TELEGRAM_CHAT_ID
-// env target. With no recipients configured the alert is still written to the log, never dropped
+// (app_state.alert_recipients, managed by admins), and fall back to the env list above when that
+// is unreachable or empty. With neither, the alert is still written to the log, never dropped
 // silently. A failed send to one recipient doesn't block the others.
-// The icon is overridable so the same channel can carry the matching "it's fixed" notice
-// (e.g. Binotel back up) without it reading as a new breakage.
 async function sendAlert(text, { icon = '⚠️' } = {}) {
-  const recipients = await getRecipients('alert');
-  if (recipients.length === 0) {
-    console.warn('[telegram] no alert recipients configured (bot → Налаштування) - alert only logged:');
-    console.warn(`${icon} ${text}`);
+  let recipients = [];
+  let unreachable = false;
+  try {
+    recipients = await getRecipients('alert');
+  } catch (err) {
+    unreachable = true;
+    console.error(`[telegram] список отримувачів недоступний: ${err.message}`);
+  }
+
+  let body = `${icon} ${text}`;
+  if (!recipients.length) {
+    recipients = fallbackRecipients();
+    // Читач мусить знати, що це резервний шлях: інакше «алерт прийшов» виглядає як «усе гаразд,
+    // просто одна поломка», хоча насправді не працює й сам список отримувачів.
+    if (recipients.length && unreachable) {
+      body +=
+        '\n\n(надіслано резервним каналом — база даних недоступна, ' +
+        'тож список отримувачів із налаштувань прочитати не вдалося)';
+    }
+  }
+
+  if (!recipients.length) {
+    console.warn('[telegram] немає ні отримувачів у налаштуваннях, ні резервних id - алерт лише в лозі:');
+    console.warn(body);
     return;
   }
+
   for (const r of recipients) {
     try {
-      await sendMessage(`${icon} ${text}`, { chatId: r.id });
+      await sendMessage(body, { chatId: r.id });
     } catch (err) {
       console.error(`[telegram] alert to ${r.id} failed: ${err.message}`);
     }

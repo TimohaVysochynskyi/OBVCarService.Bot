@@ -34,7 +34,7 @@
 
 > Що видно — залежить від ролі (див. «Токен і доступ»): admin бачить п.1–7, manager — п.8 + база знань, mechanic — лише база знань.
 
-> ⚠️ Нативний список команд admin: `/menu /stats /archive /ask /files /report /prompt /roles /settings /log`. Три з них (`/files`, `/settings`, `/log`) свідомо БЕЗ inline-кнопки, щоб не перевантажувати меню.
+> ⚠️ Нативний список команд admin: `/menu /stats /archive /ask /files /report /prompt /roles /settings /log /health`. Чотири з них (`/files`, `/settings`, `/log`, `/health`) свідомо БЕЗ inline-кнопки, щоб не перевантажувати меню.
 
 > ⚠️ **Усі тексти про помилки — у `core/errorTexts.js`, і тільки там.** Правити формулювання в хендлерах не треба: вони збираються з каталогу (`core/errors.js`) у чотири слоти — що не вийшло / чому / що робити + доля даних / код і номер інциденту. Стиль зафіксований коментарем угорі файлу, а юніт-тест ганяє всі рядки по списку заборонених зворотів.
 
@@ -49,6 +49,7 @@ dialogue.js   — запасне on-demand AI-розділення мовців 
 report.js     — фіча 1: планувальник + доказовий звіт (buildRangeReport для тиждень/місяць/квартал, buildReportByMode: daily|range|range_reuse|live, deliverReport/deliverManagerReport/sendManualReport); expandKey кодує режим 1 символом + base36-таймкоди через 64-байтовий ліміт callback_data
 audioClip.js  — нарізка аудіо-кліпів навколо цитат (системний ffmpeg, preflight+graceful degradation; ріже ЗБЕРЕЖЕНИЙ локально файл прямо на місці — завантаження з Binotel лише для дзвінків без архіву); prepareClips/sendClip/clipKey
 operators.js  — аліаси відображення імен операторів (напр. 0674738200 → «Богдан»); тільки рендер, БД без змін
+health.js     — екран «🩺 Перевірка стану» (/health, admin): стан кожної залежності НА ВИМОГУ (база, Binotel, OpenAI, ElevenLabs, ffmpeg+ffprobe, диск, свіжість збору, база знань) + вердикт + інциденти за добу. Усі перевірки паралельні, з таймаутом, безкоштовні й не мають права кинути
 incidents.js  — екран «🩺 Журнал» (/log, admin): зведення за 7 днів за класами + останні інциденти → повний дамп → «📋 Для розробника» (готовий блок на пересилання). Читає error_log, куди пишуть ОБИДВА процеси через core/errorLog.js
 errorReply.js — ЖОДНОЇ МЕРТВОЇ КНОПКИ: errorGuard — один middleware (стоїть перед перевіркою доступу, бо роль читається з БД на кожен апдейт) → повідомлення за шаблоном + знятий спінер + лог із кодом інциденту; installBotCatch (остання сітка); registerErrorActions — кнопка «🔧 Деталі для розробника» (`err:d:<інцидент>`, дамп у памʼяті процесу на 24 год); actionOf — яка саме дія не вдалася, для заголовка. Тексти — core/errorTexts.js, класи — core/errors.js
 access.js     — ролі та доступ: getUser (кеш), canAccess/featureOf (per-feature gate), mainMenu-роль, seedDirectors

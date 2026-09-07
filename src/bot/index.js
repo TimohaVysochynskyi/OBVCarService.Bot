@@ -16,6 +16,7 @@ import { registerPrompt, openPromptMenu, savePromptText } from './prompt.js';
 import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
 import { registerSettings, openSettings, addRecipientByIdText } from './settings.js';
 import { registerIncidents, openIncidents } from './incidents.js';
+import { registerHealth, openHealth } from './health.js';
 import { formatPhone } from './operators.js';
 import {
   getUser,
@@ -130,11 +131,12 @@ const CMD = {
   settings: { command: 'settings', description: '⚙️ Налаштування' },
   myreport: { command: 'myreport', description: '📊 Моя статистика' },
   log: { command: 'log', description: '🩺 Журнал інцидентів' },
+  health: { command: 'health', description: '🩺 Перевірка стану' },
 };
 
 function commandsForRole(role) {
   if (isAdmin(role))
-    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log];
+    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
   return [CMD.menu, CMD.ask]; // mechanic
 }
@@ -207,6 +209,7 @@ bot.command('settings', openSettings);
 // Діагностика — лише в нативному списку команд, без inline-кнопки: те саме рішення, що для
 // /files і /settings, щоб не перевантажувати меню.
 bot.command('log', openIncidents);
+bot.command('health', (ctx) => openHealth(ctx, kbState));
 bot.command('myreport', openMyReport);
 
 // --- Inline callbacks ----------------------------------------------------------------------
@@ -231,6 +234,7 @@ registerSettings(bot);
 registerReportActions(bot);
 registerErrorActions(bot);
 registerIncidents(bot);
+registerHealth(bot, kbState);
 
 // A manager saving their own phone number (request_users doesn't return a phone). Last in the
 // contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via

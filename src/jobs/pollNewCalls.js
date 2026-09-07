@@ -4,7 +4,8 @@ import { getElevenLabsBalance } from '../core/elevenlabs.js';
 import { freeSpaceMb, storageRoot } from '../core/audioStore.js';
 import { describeError, appError } from '../core/errors.js';
 import { NOTICES } from '../core/errorTexts.js';
-import { alertOnce, alertText } from '../core/alerts.js';
+import { sendAlert } from '../core/telegram.js';
+import { alertOnce, alertText, resetIngestAlerts } from '../core/alerts.js';
 import { processCallsForRange, retryPendingCalls } from './processCalls.js';
 
 // Watchdogs of the ingest. All three go through the SAME dedup (jobs/alerts.js: alertOnce): one
@@ -104,6 +105,13 @@ async function pruneErrorLog() {
   if (removed) console.log(`[poll] прибрано зі журналу інцидентів: ${removed}`);
 }
 
+// Прогін завершився — знімаємо всі алерти про його падіння і, якщо якийсь був активний, кажемо
+// про відновлення. Без цього нагадування про давно полагоджену проблему приходило б вічно.
+async function clearIngestFailureAlerts() {
+  const wasFailing = await resetIngestAlerts();
+  if (wasFailing) await sendAlert(NOTICES.ingestRecovered, { icon: '✅' });
+}
+
 // Uses a persisted checkpoint instead of a fixed "last N minutes" window, so a delayed or
 // skipped cron run never creates a gap - the next run just picks up exactly where the last
 // one left off. Falls back to POLL_WINDOW_MINUTES only on the very first run ever.
@@ -121,6 +129,8 @@ async function pollNewCalls() {
     await setCheckpoint(end);
     // A completed pass is the only proof Binotel is actually answering again.
     await noteBinotelUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
+    // ...і водночас доказ, що причина падінь прогону (яка б вона не була) зникла.
+    await clearIngestFailureAlerts().catch((e) => console.error(`[poll] alert reset failed: ${e.message}`));
   } catch (err) {
     if (err?.binotelUnavailable) {
       const sent = await noteBinotelDown(err).catch((e) => {

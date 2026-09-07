@@ -1452,6 +1452,12 @@ const DEFAULT_REPORT_TIMES = ['13:00', '19:30'];
 // hold plain 'ok'/'low' strings. Such a value doesn't parse as an object and is therefore read as
 // "no active alert": right after the deploy an already-standing problem re-alerts once, and from
 // then on the dedup is exact. A stale 'ok' produces nothing at all.
+// Найдешевша перевірка «база відповідає» — для екрана /health. Кидає, якщо ні.
+async function pingDb() {
+  await pool.query('SELECT 1');
+  return true;
+}
+
 async function getAlertState(key) {
   const raw = await getState(key);
   if (!raw) return null;
@@ -1469,6 +1475,13 @@ async function setAlertState(key, state) {
 
 async function clearAlertState(key) {
   await deleteState(key);
+}
+
+// Прибрати цілу групу станів за префіксом — потрібно, щоб здоровий прогін інжесту зняв усі
+// алерти про своє падіння, не перелічуючи класи помилок по одному.
+async function clearAlertStates(prefix) {
+  const { rowCount } = await pool.query('DELETE FROM app_state WHERE key LIKE $1', [`${prefix}%`]);
+  return rowCount;
 }
 
 async function getReportTimes() {
@@ -1591,9 +1604,11 @@ export {
   removeReportTime,
   getDeliveredSlots,
   markSlotDelivered,
+  pingDb,
   getAlertState,
   setAlertState,
   clearAlertState,
+  clearAlertStates,
   onPoolError,
   setHeartbeat,
   getHeartbeat,

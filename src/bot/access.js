@@ -51,6 +51,7 @@ function featureOf(ctx) {
     if (cq.startsWith('roles')) return 'roles';
     if (cq === 'set' || cq.startsWith('set:')) return 'settings';
     if (cq === 'log' || cq.startsWith('log:')) return 'logs';
+    if (cq === 'health' || cq.startsWith('health:')) return 'health';
     if (cq.startsWith('me:')) return 'stats_self';
     return 'menu';
   }
@@ -69,6 +70,7 @@ function featureOf(ctx) {
       roles: 'roles',
       settings: 'settings',
       log: 'logs',
+      health: 'health',
       myreport: 'stats_self',
     };
     return map[cmd] ?? 'menu';
