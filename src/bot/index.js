@@ -27,6 +27,7 @@ import {
   seedDirectors,
 } from './access.js';
 import { sendLong, withProgress, showScreen, installMessageTracker } from './ui.js';
+import { errorGuard, installBotCatch, registerErrorActions, reportToUser } from './errorReply.js';
 
 // Knowledge base needs pgvector; migrateKb() at startup flips this on. Handlers degrade
 // gracefully when it's false.
@@ -46,6 +47,11 @@ installMessageTracker(bot);
 
 // Session first, so ctx.session is available to the auth middleware (self-claim / menus).
 bot.use(session({ initial: () => ({ awaiting: null, screenId: null }) }));
+
+// Error guard next - BEFORE the access check on purpose. The auth middleware reads the role from
+// the database on every update, so a Postgres outage throws right there; catching only further
+// down the chain would leave the bot looking dead to everyone with nothing on screen.
+bot.use(errorGuard);
 
 const cancelKeyboard = () => ({ remove_keyboard: true });
 const isCancel = (t) => /^\s*(✖️|❌)?\s*скасувати\b/i.test(t || '');
@@ -209,6 +215,7 @@ registerPrompt(bot);
 registerRoles(bot);
 registerSettings(bot);
 registerReportActions(bot);
+registerErrorActions(bot);
 
 // A manager saving their own phone number (request_users doesn't return a phone). Last in the
 // contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via
@@ -280,8 +287,9 @@ bot.on('message:text', async (ctx) => {
         );
       }
     } catch (err) {
-      console.error(`[bot] KB answer failed: ${err.message}`);
-      await ctx.reply(`❌ Не вдалося відповісти: ${err.message}`);
+      // Свій catch, а не errorGuard: після повідомлення про помилку треба лишити людину в режимі
+      // питань і сказати про це - інакше вона не зрозуміє, що можна просто спитати ще раз.
+      await reportToUser(ctx, err, { action: 'kb_ask' });
     }
     await ctx.reply('Ще питання? Напишіть його наступним повідомленням, або відкрийте /menu, щоб вийти.');
     return;
@@ -290,9 +298,8 @@ bot.on('message:text', async (ctx) => {
   await ctx.reply('Скористайтеся кнопкою «Menu» біля поля вводу або командою /menu.');
 });
 
-bot.catch((err) => {
-  console.error(`[bot] handler error: ${err.error?.message || err.message}`);
-});
+// Last resort for anything thrown outside the middleware chain (see errorReply.js).
+installBotCatch(bot);
 
 async function main() {
   await migrate();

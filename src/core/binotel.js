@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 
 const BASE_URL = process.env.BINOTEL_BASE_URL || 'https://api.binotel.com/api/4.0';
 
@@ -19,7 +20,7 @@ async function callBinotel(path, body) {
         body: JSON.stringify({ ...auth(), ...body }),
       });
       if (!res.ok) {
-        const err = new Error(`Binotel ${path} failed: ${res.status} ${await res.text()}`);
+        const err = await httpError('binotel', path, res);
         // 5xx is Binotel being broken, not us - let the poller report it as an outage.
         if (res.status >= 500) err.binotelUnavailable = true;
         throw err;
@@ -42,6 +43,10 @@ async function callBinotel(path, body) {
         const err = new Error(
           `Binotel ${path} returned non-JSON (HTTP ${res.status}, ${contentType}): ${snippet}`
         );
+        err.provider = 'binotel';
+        err.op = path;
+        err.status = res.status;
+        err.body = snippet;
         err.binotelUnavailable = true;
         throw err;
       }
@@ -54,7 +59,14 @@ async function callBinotel(path, body) {
       // withRetry actually retry it, and - for the poller - means the checkpoint isn't advanced
       // past a period Binotel never really confirmed, so the next poll retries the same window.
       if (data.status === 'error') {
-        throw new Error(`Binotel ${path} returned an error: ${data.code} ${data.message}`);
+        // binotelCode робить клас однозначним: 106 - це тротлінг, 104 - немає запису, і поводитись
+        // з ними треба по-різному (перше варто повторити, друге - ніколи).
+        const err = new Error(`Binotel ${path} returned an error: ${data.code} ${data.message}`);
+        err.provider = 'binotel';
+        err.op = path;
+        err.binotelCode = Number(data.code);
+        err.description = data.message;
+        throw err;
       }
       return data;
     },

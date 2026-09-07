@@ -2,6 +2,8 @@ import { InlineKeyboard } from 'grammy';
 import { extractText as pdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 import { withRetry } from '../core/retry.js';
+import { appError, httpError } from '../core/errors.js';
+import { reportToUser } from './errorReply.js';
 import {
   insertKbDoc,
   insertKbChunks,
@@ -51,7 +53,7 @@ async function extractPages(buffer, filename) {
   if (ext === 'txt' || ext === 'text' || ext === 'md') {
     return [{ page: null, text: buffer.toString('utf8') }];
   }
-  throw new Error(`формат .${ext} не підтримується (лише PDF, DOCX, TXT)`);
+  throw appError('FMT-UNSUP', { message: `формат .${ext} не підтримується` });
 }
 
 // Merged plain text (backward-compatible helper, e.g. for the exported API / tests).
@@ -228,7 +230,7 @@ async function embedTexts(texts) {
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: EMBED_MODEL(), input: batch }),
         });
-        if (!res.ok) throw new Error(`OpenAI embeddings failed: ${res.status} ${await res.text()}`);
+        if (!res.ok) throw await httpError('openai', 'побудова векторів для пошуку', res);
         const data = await res.json();
         return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
       },
@@ -309,7 +311,7 @@ async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 
           response_format: { type: 'json_schema', json_schema: schema },
         }),
       });
-      if (!res.ok) throw new Error(`${label} failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('openai', label, res);
       const data = await res.json();
       return JSON.parse(data.choices[0].message.content);
     },
@@ -394,7 +396,7 @@ async function retrieve(question, audiences) {
   }
 
   if (!vectorOk && !lexicalOk) {
-    throw new Error('пошук у базі знань недоступний (ні семантичний, ні текстовий) — спробуйте пізніше');
+    throw appError('KB-NOSEARCH');
   }
 
   const fused = new Map();
@@ -610,14 +612,14 @@ async function ingestPendingDoc(ctx, pending, audience) {
       const { chunkCount } = await ingestPages(name, pages, author, fileId, mime, audience);
       return { chunkCount, textLength };
     });
-    if (!result) {
-      await ctx.reply(`⚠️ З «${name}» не вдалося витягти текст. Якщо це сканований PDF/зображення — потрібне розпізнавання (OCR).`);
-      return;
-    }
+    // Текст не витягся: PDF без текстового шару (скан або фото сторінок). Клас відомий тут,
+    // тому кидаємо його з кодом - формулювання прийде з core/errorTexts.js, як і в решти помилок.
+    if (!result) throw appError('PDF-SCANNED');
     await ctx.reply(`✅ Додано «${name}» для ${AUDIENCE_LABEL[audience]} — ${result.chunkCount} фрагм. (~${result.textLength} симв.). Тепер можна ставити питання.`);
   } catch (err) {
-    console.error(`[kb] ingest "${name}" failed: ${err.message}`);
-    await ctx.reply(`❌ Не вдалося обробити "${name}": ${err.message}`);
+    // subject -> у заголовок потрапляє назва файлу: директор часто заливає кілька підряд, і
+    // «Не вдалося опрацювати файл» без назви не дає зрозуміти, який саме не пройшов.
+    await reportToUser(ctx, err, { action: 'kb_edit', subject: name });
   }
 }
 

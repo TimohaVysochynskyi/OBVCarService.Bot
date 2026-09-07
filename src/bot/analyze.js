@@ -1,4 +1,5 @@
 import { withRetry } from '../core/retry.js';
+import { httpError } from '../core/errors.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
@@ -416,7 +417,7 @@ async function mergeFindings(managerName, findings) {
             response_format: { type: 'json_schema', json_schema: MERGE_SCHEMA },
           }),
         });
-        if (!res.ok) throw new Error(`OpenAI merge failed: ${res.status} ${await res.text()}`);
+        if (!res.ok) throw await httpError('openai', 'зведення знахідок за період', res);
         return JSON.parse((await res.json()).choices[0].message.content);
       },
       { attempts: 2, delayMs: 2000, label: `OpenAI merge ${managerName}` }
@@ -472,7 +473,7 @@ async function verifyFindingsRelevance(findings) {
             response_format: { type: 'json_schema', json_schema: RELEVANCE_SCHEMA },
           }),
         });
-        if (!res.ok) throw new Error(`OpenAI relevance verify failed: ${res.status} ${await res.text()}`);
+        if (!res.ok) throw await httpError('openai', 'перевірка релевантності доказів', res);
         return JSON.parse((await res.json()).choices[0].message.content);
       },
       { attempts: 2, delayMs: 1500, label: 'OpenAI relevance verify' }
@@ -532,7 +533,7 @@ async function runReducePass(managerName, candidates, stats) {
           response_format: { type: 'json_schema', json_schema: FINDINGS_SCHEMA },
         }),
       });
-      if (!res.ok) throw new Error(`OpenAI reduce failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('openai', 'аналіз дзвінків за період', res);
       return JSON.parse((await res.json()).choices[0].message.content);
     },
     { attempts: 2, delayMs: 2000, label: `OpenAI reduce ${managerName}` }

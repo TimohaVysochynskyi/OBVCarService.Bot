@@ -1,4 +1,5 @@
 import { withRetry } from '../core/retry.js';
+import { httpError } from '../core/errors.js';
 
 // Turns a raw (mono, single-channel, unlabelled) call transcript into a readable dialogue with
 // "Менеджер:" / "Клієнт:" turns. The recording has no channel separation, so the model infers who
@@ -32,7 +33,7 @@ async function formatDialogue(transcript) {
           ],
         }),
       });
-      if (!res.ok) throw new Error(`OpenAI dialogue format failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('openai', 'форматування діалогу', res);
       const data = await res.json();
       return data.choices[0].message.content;
     },

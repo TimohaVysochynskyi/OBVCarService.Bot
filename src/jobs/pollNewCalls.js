@@ -1,173 +1,98 @@
-import {
-  getCheckpoint,
-  setCheckpoint,
-  getElevenLabsBalanceState,
-  setElevenLabsBalanceState,
-  getAudioSpaceState,
-  setAudioSpaceState,
-  getAudioArchiveStats,
-  getBinotelOutage,
-  setBinotelOutage,
-  clearBinotelOutage,
-} from '../core/store.js';
+import { getCheckpoint, setCheckpoint, getAudioArchiveStats } from '../core/store.js';
 import { getElevenLabsBalance } from '../core/elevenlabs.js';
 import { freeSpaceMb, storageRoot } from '../core/audioStore.js';
-import { sendAlert } from '../core/telegram.js';
+import { describeError, appError } from '../core/errors.js';
+import { NOTICES } from '../core/errorTexts.js';
+import { alertOnce, alertText } from './alerts.js';
 import { processCallsForRange, retryPendingCalls } from './processCalls.js';
 
-// Low-balance watchdog for ElevenLabs. Runs each poll but alerts (to the same recipients as failure
-// alerts, via sendAlert) only when the state CHANGES — so no spam. Credits → approx USD via a
-// configurable rate (the API reports credits, not dollars). Never throws.
+// Watchdogs of the ingest. All three go through the SAME dedup (jobs/alerts.js: alertOnce): one
+// alert when the problem appears, an optional reminder while it lasts, and one notice when it
+// clears. Wording lives in core/errorTexts.js. None of them may ever break the poll itself.
+
+// Low ElevenLabs balance. Credits → approx USD via a configurable rate (the API reports credits,
+// not dollars). Also warns ONCE about a missing `user_read` permission, which is a config problem
+// rather than a state - hence its own key, so it can't silence the balance alert or vice versa.
 async function checkElevenLabsBalance() {
   if (!process.env.ELEVENLABS_API_KEY) return;
-  const bal = await getElevenLabsBalance();
-  const prev = await getElevenLabsBalanceState();
+  const balance = await getElevenLabsBalance();
 
-  if (!bal.ok) {
-    // Only the (fixable) permission problem is worth a one-time heads-up; transient errors stay quiet.
-    if (bal.reason === 'missing_permission' && prev !== 'no_permission') {
-      await sendAlert(
-        '⚠️ ElevenLabs: не можу перевіряти баланс — API-ключу бракує права «user_read». ' +
-        'Додайте дозвіл user_read до ключа (ElevenLabs → Developers → API Keys), щоб отримувати сповіщення про низький баланс.'
-      ).catch((e) => console.error(`[poll] balance alert failed: ${e.message}`));
-      await setElevenLabsBalanceState('no_permission');
-    }
-    return;
-  }
+  await alertOnce('elevenlabs_permission', {
+    active: !balance.ok && balance.reason === 'missing_permission',
+    message: () => alertText(describeError(appError('ELV-PERM'), { action: 'ingest', icon: '⚠️' })),
+  });
+
+  // Everything except a permission problem stays quiet: a transient error says nothing about the
+  // balance, and treating it as "low" would fire a false alarm.
+  if (!balance.ok) return;
 
   const usdPer1000 = Number(process.env.ELEVENLABS_USD_PER_1000_CREDITS || 0.22);
   const minUsd = Number(process.env.ELEVENLABS_MIN_BALANCE_USD || 2);
-  const remainingUsd = (bal.remainingCredits / 1000) * usdPer1000;
-  const state = remainingUsd < minUsd ? 'low' : 'ok';
+  const remainingUsd = (balance.remainingCredits / 1000) * usdPer1000;
 
-  if (state !== prev) {
-    if (state === 'low') {
-      await sendAlert(
-        `⚠️ ElevenLabs: низький баланс — залишилося ~$${remainingUsd.toFixed(2)} ` +
-        `(${bal.remainingCredits} кредитів із ${bal.limit}). Поповніть, інакше транскрипція ` +
-        `перемкнеться на OpenAI (без діаризації, таймкодів і аудіо-доказів).`
-      ).catch((e) => console.error(`[poll] balance alert failed: ${e.message}`));
-    }
-    await setElevenLabsBalanceState(state); // re-arms when balance recovers to 'ok'
-  }
+  await alertOnce('elevenlabs_balance_state', {
+    active: remainingUsd < minUsd,
+    message: () =>
+      NOTICES.elevenLabsLow(remainingUsd.toFixed(2), balance.remainingCredits, balance.limit),
+    recovered: () => NOTICES.elevenLabsRefilled(remainingUsd.toFixed(2)),
+  });
 }
 
-// Disk watchdog for the audio archive. Recordings are kept indefinitely (client requirement), so
-// free space only ever goes one way. Same change-only alerting as the balance check: fires once when
-// free space drops below AUDIO_MIN_FREE_MB and re-arms when space is freed. Never throws.
+// Free disk space on the volume that holds the audio archive. Recordings are kept indefinitely
+// (client requirement), so space only ever goes one way - the alert is a heads-up, not an incident.
 async function checkAudioDiskSpace() {
   const freeMb = await freeSpaceMb();
   if (freeMb == null) return;
 
   const minFreeMb = Number(process.env.AUDIO_MIN_FREE_MB || 1024);
-  const state = freeMb < minFreeMb ? 'low' : 'ok';
-  const prev = await getAudioSpaceState();
-  if (state === prev) return;
+  const stats = freeMb < minFreeMb ? await getAudioArchiveStats().catch(() => null) : null;
+  const archiveMb = stats ? Math.round(Number(stats.bytes) / (1024 * 1024)) : null;
 
-  if (state === 'low') {
-    const stats = await getAudioArchiveStats().catch(() => null);
-    const archiveMb = stats ? Math.round(Number(stats.bytes) / (1024 * 1024)) : null;
-    await sendAlert(
-      `⚠️ Мало місця на диску: вільно ${freeMb} МБ (порог ${minFreeMb} МБ). ` +
-      `Архів записів розмов — ${archiveMb == null ? 'невідомо' : archiveMb + ' МБ'} у ${storageRoot()}. ` +
-      `Записи зберігаються назавжди, тому місце треба або розширити, або перенести старі записи.`
-    ).catch((e) => console.error(`[poll] disk alert failed: ${e.message}`));
-  }
-  await setAudioSpaceState(state);
+  await alertOnce('audio_space_state', {
+    active: freeMb < minFreeMb,
+    message: () => NOTICES.diskLow(freeMb, minFreeMb, archiveMb, storageRoot()),
+    recovered: () => NOTICES.diskFreed(freeMb),
+  });
 }
 
-// Binotel outage watchdog. Unlike the two watchdogs above, this one alerts about something we
-// cannot fix at all: on 2026-09-06 api.binotel.com answered EVERY request - any method, any
-// credentials, from several networks - with HTTP 200 + "Something went wrong (exception)" for
-// hours, so ingestion simply stops until Binotel is back. Alerting on each 15-minute poll run
-// buried the owner in identical messages, but staying completely silent would hide a multi-day
-// gap in ingestion. So: one alert when it first goes down, a reminder every
-// BINOTEL_OUTAGE_REMINDER_MIN while it stays down, and one notice when it recovers. State lives
-// in app_state.binotel_outage (see store.js), so it survives the cron process exiting each run -
-// which is exactly why plain in-memory dedup wouldn't work here.
+// Binotel outage. Unlike the two above, this one reports something nobody here can fix: on
+// 2026-09-06 api.binotel.com answered EVERY request - any method, any credentials, from several
+// networks - with HTTP 200 + "Something went wrong (exception)" for hours, and ingestion simply
+// stops until Binotel is back. Alerting on each 15-minute run buried the owner in identical
+// messages; staying silent would hide a multi-day gap. Hence: one alert, a reminder every
+// BINOTEL_OUTAGE_REMINDER_MIN, and one notice on recovery.
 const DEFAULT_REMINDER_MIN = 120;
 
-function reminderMs() {
-  const min = Number(process.env.BINOTEL_OUTAGE_REMINDER_MIN || DEFAULT_REMINDER_MIN);
-  return (Number.isFinite(min) && min > 0 ? min : DEFAULT_REMINDER_MIN) * 60 * 1000;
+function outageReminderMin() {
+  const minutes = Number(process.env.BINOTEL_OUTAGE_REMINDER_MIN || DEFAULT_REMINDER_MIN);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_REMINDER_MIN;
 }
 
-// Kyiv wall-clock for humans. The ingest itself is UTC-only by design (the checkpoint is an
-// absolute moment); this is purely how the alert text reads to the person getting it.
-function kyivTime(date) {
-  return new Intl.DateTimeFormat('uk-UA', {
-    timeZone: 'Europe/Kyiv',
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function humanDuration(ms) {
-  const totalMin = Math.max(0, Math.round(ms / 60000));
-  const hours = Math.floor(totalMin / 60);
-  const minutes = totalMin % 60;
-  if (hours === 0) return `${minutes} хв`;
-  return `${hours} год ${minutes} хв`;
-}
-
+// Returns true when an alert was actually sent, so jobs/index.js knows not to add its generic
+// "джоба впала" on top of it.
 async function noteBinotelDown(err) {
-  const now = new Date();
-  const previous = await getBinotelOutage();
-  const checkpoint = await getCheckpoint().catch(() => null);
-  const checkpointLine = checkpoint
-    ? `Дані не втрачаються: чекпоінт стоїть на ${kyivTime(checkpoint)} і не рухається, тож після відновлення інжест сам догонить увесь пропущений період.`
-    : 'Дані не втрачаються: чекпоінт не рухається, тож після відновлення інжест сам догонить пропущений період.';
-
-  if (!previous) {
-    await sendAlert(
-      `Binotel API недоступний — збір дзвінків призупинено з ${kyivTime(now)}.\n\n` +
-        `Відповідь Binotel: ${err.message}\n\n` +
-        `${checkpointLine}\n` +
-        `Це збій на боці Binotel, не в нашому коді. Наступне нагадування — через ${humanDuration(reminderMs())}, якщо не відновиться.`
-    );
-    await setBinotelOutage({ since: now.toISOString(), lastAlertAt: now.toISOString(), message: err.message });
-    return;
-  }
-
-  const since = new Date(previous.since);
-  const sinceValid = !Number.isNaN(since.getTime());
-  const lastAlertAt = new Date(previous.lastAlertAt || previous.since);
-  const lastAlertValid = !Number.isNaN(lastAlertAt.getTime());
-
-  // Still inside the quiet window - stay silent, but keep the recorded cause current.
-  if (lastAlertValid && now.getTime() - lastAlertAt.getTime() < reminderMs()) {
-    await setBinotelOutage({ ...previous, message: err.message });
-    return;
-  }
-
-  const downFor = sinceValid ? humanDuration(now.getTime() - since.getTime()) : 'невідомо скільки';
-  await sendAlert(
-    `Binotel API досі недоступний — уже ${downFor}${sinceValid ? ` (з ${kyivTime(since)})` : ''}. Збір дзвінків призупинено.\n\n` +
-      `Відповідь Binotel: ${err.message}\n\n` +
-      `${checkpointLine}\n` +
-      'Якщо триває довго — варто написати в підтримку Binotel.'
-  );
-  await setBinotelOutage({
-    since: sinceValid ? since.toISOString() : now.toISOString(),
-    lastAlertAt: now.toISOString(),
-    message: err.message,
+  return alertOnce('binotel_outage', {
+    active: true,
+    reminderMin: outageReminderMin(),
+    // The first alert states the problem; a reminder leads with how long it has been going on.
+    // Both go through describeError, so the "what to do / are we losing data" part is identical -
+    // hours later that is exactly what the reader needs repeated.
+    message: ({ first, downFor, since }) =>
+      alertText(
+        describeError(err, {
+          action: 'ingest',
+          icon: '⚠️',
+          ...(first ? {} : { title: NOTICES.binotelStillDown(downFor, since) }),
+        })
+      ),
   });
 }
 
 async function noteBinotelUp() {
-  const previous = await getBinotelOutage();
-  if (!previous) return; // nothing was broken - stay quiet
-
-  await clearBinotelOutage();
-  const since = new Date(previous.since);
-  const downFor = Number.isNaN(since.getTime()) ? null : humanDuration(Date.now() - since.getTime());
-  await sendAlert(
-    `Binotel API відновився — збір дзвінків працює далі${downFor ? ` (простій ${downFor})` : ''}. ` +
-      'Пропущені за цей час дзвінки обробляються з чекпоінта.',
-    { icon: '✅' }
-  );
+  return alertOnce('binotel_outage', {
+    active: false,
+    recovered: ({ downFor }) => NOTICES.binotelRecovered(downFor),
+  });
 }
 
 // Uses a persisted checkpoint instead of a fixed "last N minutes" window, so a delayed or
@@ -189,10 +114,14 @@ async function pollNewCalls() {
     await noteBinotelUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
   } catch (err) {
     if (err?.binotelUnavailable) {
-      await noteBinotelDown(err).catch((e) => console.error(`[poll] outage alert failed: ${e.message}`));
-      // Tells jobs/index.js the failure has already been reported, so it doesn't add the generic
-      // "джоба впала" alert on top of it every single run.
+      const sent = await noteBinotelDown(err).catch((e) => {
+        console.error(`[poll] outage alert failed: ${e.message}`);
+        return false;
+      });
+      // Even inside the quiet window the failure counts as reported: the point of the dedup is
+      // that jobs/index.js must NOT fall back to its generic alert every 15 minutes.
       err.alertSent = true;
+      if (sent) console.log('[poll] outage alert sent');
     }
     throw err;
   }

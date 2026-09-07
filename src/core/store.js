@@ -1312,50 +1312,35 @@ async function setReportUntil(date) {
 // array means "no scheduled reports". report.js reads this on every scheduler tick.
 const DEFAULT_REPORT_TIMES = ['13:00', '19:30'];
 
-// Dedup state for the ElevenLabs low-balance alert: 'ok' | 'low' | 'no_permission'. The ingest
-// checks the balance each run but only alerts when the state CHANGES (so it fires once on crossing
-// into low / on a permission problem, and re-arms when the balance recovers).
-async function getElevenLabsBalanceState() {
-  return getState('elevenlabs_balance_state');
-}
-
-async function setElevenLabsBalanceState(state) {
-  await setState('elevenlabs_balance_state', state);
-}
-
-// Same dedup pattern for free disk space on the volume that holds the audio archive: 'ok' | 'low'.
-// Recordings are kept forever by requirement, so the disk WILL fill eventually - the poller warns
-// once on crossing the threshold and re-arms when space is freed.
-async function getAudioSpaceState() {
-  return getState('audio_space_state');
-}
-
-async function setAudioSpaceState(state) {
-  await setState('audio_space_state', state);
-}
-
-// Binotel outage state, same change-only alerting idea as the two watchdogs above but with a
-// reminder, because unlike a low balance an outage is nothing WE can fix - it just has to be
-// waited out (or chased with Binotel support), and a silent multi-day gap in ingestion would be
-// worse than a nudge. Stored as JSON: { since, lastAlertAt, message } while Binotel is down,
-// absent while it is healthy. Read/written by jobs/pollNewCalls.js.
-async function getBinotelOutage() {
-  const raw = await getState('binotel_outage');
+// Dedup state for every watchdog alert of the ingest (Binotel outage, ElevenLabs balance and
+// permission, free disk space). ONE mechanism for all of them - see jobs/alerts.js: alertOnce.
+// Stored as JSON { since, lastAlertAt } while the problem is active, and DELETED once it clears,
+// so "no key" means "everything is fine".
+//
+// Kept in the database rather than in memory because the poller is a cron process that exits after
+// every run - in-memory dedup could never work here.
+//
+// The keys are the historical ones ('elevenlabs_balance_state', 'audio_space_state'), which used to
+// hold plain 'ok'/'low' strings. Such a value doesn't parse as an object and is therefore read as
+// "no active alert": right after the deploy an already-standing problem re-alerts once, and from
+// then on the dedup is exact. A stale 'ok' produces nothing at all.
+async function getAlertState(key) {
+  const raw = await getState(key);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
-    return null; // corrupted value behaves like "no outage recorded" - the next failure re-arms it
+    return null; // legacy plain string or corrupted value - the next check re-arms it
   }
 }
 
-async function setBinotelOutage(outage) {
-  await setState('binotel_outage', JSON.stringify(outage));
+async function setAlertState(key, state) {
+  await setState(key, JSON.stringify(state));
 }
 
-async function clearBinotelOutage() {
-  await deleteState('binotel_outage');
+async function clearAlertState(key) {
+  await deleteState(key);
 }
 
 async function getReportTimes() {
@@ -1478,13 +1463,9 @@ export {
   removeReportTime,
   getDeliveredSlots,
   markSlotDelivered,
-  getElevenLabsBalanceState,
-  setElevenLabsBalanceState,
-  getAudioSpaceState,
-  setAudioSpaceState,
-  getBinotelOutage,
-  setBinotelOutage,
-  clearBinotelOutage,
+  getAlertState,
+  setAlertState,
+  clearAlertState,
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,

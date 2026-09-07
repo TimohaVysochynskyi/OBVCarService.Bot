@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 import { findQuote } from './quoteMatch.js';
 import { SALES_STAGES } from './stages.js';
 
@@ -111,7 +112,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         }),
       });
-      if (!res.ok) throw new Error(`OpenAI call-behaviors failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('openai', 'аналіз поведінки в дзвінку', res);
       return JSON.parse((await res.json()).choices[0].message.content);
     },
     { attempts: 2, delayMs: 1500, label: 'OpenAI call behaviors' }

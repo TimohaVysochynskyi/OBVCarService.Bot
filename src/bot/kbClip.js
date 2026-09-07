@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { InputFile } from 'grammy';
 import { PDFDocument } from 'pdf-lib';
 import { withRetry } from '../core/retry.js';
+import { httpError } from '../core/errors.js';
 
 // Knowledge-base answers cite pages, not whole books: this module cuts JUST the cited pages out of
 // the original PDF and sends that as a small document. Same idea as audioClip.js for calls (send
@@ -31,8 +32,16 @@ async function fetchTelegramFile(fileId) {
   const meta = await withRetry(
     async () => {
       const res = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
+      if (!res.ok) throw await httpError('telegram', 'getFile', res);
       const data = await res.json();
-      if (!data.ok) throw new Error(`getFile failed: ${data.description || res.status}`);
+      // getFile вміє відповісти HTTP 200 з ok:false - тоді причина лежить у description.
+      if (!data.ok) {
+        const err = new Error(`telegram getFile: ${data.description || 'ok:false'}`);
+        err.provider = 'telegram';
+        err.op = 'getFile';
+        err.description = data.description;
+        throw err;
+      }
       return data.result;
     },
     { attempts: 3, delayMs: 1000, label: 'Telegram getFile' }
@@ -40,7 +49,7 @@ async function fetchTelegramFile(fileId) {
   return withRetry(
     async () => {
       const res = await fetch(`https://api.telegram.org/file/bot${token}/${meta.file_path}`);
-      if (!res.ok) throw new Error(`file download failed: HTTP ${res.status}`);
+      if (!res.ok) throw await httpError('telegram', 'завантаження файлу', res);
       return Buffer.from(await res.arrayBuffer());
     },
     { attempts: 3, delayMs: 1500, label: 'Telegram file download' }

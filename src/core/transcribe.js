@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 import { transcribeDiarized } from './elevenlabs.js';
 
 // Business is a Ukrainian auto-service. Ukrainian phone speech is full of dialect/surzhyk
@@ -26,9 +27,7 @@ async function transcribeOnce(audioBlob, { language, prompt } = {}) {
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
         body: form,
       });
-      if (!res.ok) {
-        throw new Error(`OpenAI transcription failed: ${res.status} ${await res.text()}`);
-      }
+      if (!res.ok) throw await httpError('openai', 'транскрипція розмови', res);
       const data = await res.json();
       return data.text;
     },
@@ -74,9 +73,7 @@ async function detectLanguages(text) {
           response_format: { type: 'json_schema', json_schema: DETECT_SCHEMA },
         }),
       });
-      if (!res.ok) {
-        throw new Error(`OpenAI language detection failed: ${res.status} ${await res.text()}`);
-      }
+      if (!res.ok) throw await httpError('openai', 'визначення мови розмови', res);
       const data = await res.json();
       return JSON.parse(data.choices[0].message.content);
     },
@@ -95,7 +92,7 @@ async function toBlob(audio) {
       async () => {
         console.log(`[transcribe] downloading recording from ${audio}`);
         const res = await fetch(audio);
-        if (!res.ok) throw new Error(`Failed to download recording: ${res.status}`);
+        if (!res.ok) throw await httpError('recording', 'завантаження запису', res);
         return res.blob();
       },
       { attempts: 3, delayMs: 1000, label: 'download recording' }

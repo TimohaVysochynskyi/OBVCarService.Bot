@@ -7,6 +7,9 @@ import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { identifyManager } from '../core/identifyManager.js';
 import { sendAlert } from '../core/telegram.js';
+import { appError, classify, describeError, isHopeless, reviveError } from '../core/errors.js';
+import { NOTICES } from '../core/errorTexts.js';
+import { alertText } from './alerts.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // stay safely under Binotel's 24h cap on this endpoint
 const MAX_PENDING_ATTEMPTS = Number(process.env.MAX_PENDING_ATTEMPTS || 20);
@@ -100,7 +103,7 @@ async function transcribeClassifyAndSave(call, roster) {
   // and archive playback no longer depend on Binotel still having the file. Storing is best-effort:
   // audio.buffer is returned even when the write failed, so a disk problem can't cost us the call.
   const audio = await storeRecording(call.generalCallId, call.startTime);
-  if (!audio.buffer) throw new Error(audio.error || 'запис недоступний у Binotel');
+  if (!audio.buffer) throw appError('SYS-NOFILE', { message: audio.error || 'Binotel не віддав запис' });
   console.log(
     `[processCalls]   audio ${audio.reused ? 'reused' : 'stored'}: ${audio.relPath ?? '(не збережено)'} (${audio.bytes} B)`
   );
@@ -275,6 +278,24 @@ async function processCallsForRange(start, end) {
   }
 }
 
+// Дзвінок вибув із черги обробки - назавжди. Повідомлення будується з КЛАСУ помилки, а не з її
+// тексту: у базі лежить лише рядок (`last_error`), тож reviveError відновлює з нього сервіс і
+// HTTP-код, а describeError додає причину, що робити і рядок про долю даних.
+async function alertCallDropped(call, err, { title }) {
+  const described = describeError(err, {
+    title,
+    icon: '⚠️',
+    advice: NOTICES.callDroppedAdvice,
+    data: NOTICES.callGaveUpData,
+  });
+  console.error(
+    `[processCalls] ${described.code} інцидент ${described.incident}: ${described.technicalLine}`
+  );
+  await sendAlert(alertText(described)).catch((e) =>
+    console.error(`[processCalls] не вдалося надіслати алерт: ${e.message}`)
+  );
+}
+
 // Retries everything still sitting in the pending queue before we look for brand-new calls.
 // Gives up (and alerts) after MAX_PENDING_ATTEMPTS so a permanently broken recording doesn't
 // retry forever.
@@ -296,9 +317,9 @@ async function retryPendingCalls() {
     if (call.attempts >= MAX_PENDING_ATTEMPTS) {
       console.error(`[processCalls] giving up on ${call.generalCallId} after ${call.attempts} attempts`);
       await markPendingFailed(call.generalCallId);
-      await sendAlert(`Не вдалося обробити дзвінок ${call.generalCallId} (${call.managerName}) після ${call.attempts} спроб. Позначено як "failed", дані в pending_calls збережено для перевірки вручну.`).catch(
-        (e) => console.error(`[processCalls] failed to send alert: ${e.message}`)
-      );
+      await alertCallDropped(call, reviveError(call.lastError), {
+        title: NOTICES.callGaveUp(call.generalCallId, call.managerName, call.attempts),
+      });
       continue;
     }
 
@@ -315,6 +336,18 @@ async function retryPendingCalls() {
       if (err?.binotelUnavailable) {
         console.error(`[processCalls]   aborting pending retries - Binotel is unavailable: ${err.message}`);
         throw err;
+      }
+      // The other extreme: a failure that this call will never survive - the recording does not
+      // exist, or the conversation is too long for the model. Retrying it 20 times over five hours
+      // changes nothing except the delay before anyone is told, so drop it now and say why.
+      const code = classify(err);
+      if (isHopeless(code)) {
+        console.error(`[processCalls]   ${call.generalCallId} is hopeless (${code}): ${err.message}`);
+        await markPendingFailed(call.generalCallId);
+        await alertCallDropped(call, err, {
+          title: NOTICES.callHopeless(call.generalCallId, call.managerName),
+        });
+        continue;
       }
       console.error(`[processCalls]   pending retry failed for ${call.generalCallId}: ${err.message}`);
       await upsertPending(call, err.message);

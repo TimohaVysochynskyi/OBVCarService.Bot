@@ -39,6 +39,9 @@ function featureOf(ctx) {
   const cq = ctx.callbackQuery?.data;
   if (cq) {
     if (cq === 'menu' || cq === 'noop') return 'menu';
+    // Кнопка «Деталі для розробника» під повідомленням про помилку. Доступна всім ролям: помилку
+    // може зловити й менеджер, і саме він тоді передає подробиці розробнику.
+    if (cq.startsWith('err:')) return 'menu';
     if (cq === 'kb:ask') return 'kb_ask';
     if (cq.startsWith('kb:')) return 'kb_edit'; // menu/add/doc/open/del/delok/aud/audset/audput = file mgmt
     if (cq.startsWith('stat:')) return 'stats_all';

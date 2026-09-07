@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
 import { getRecipients } from './store.js';
+import { httpError } from './errors.js';
 
 const TELEGRAM_MAX_LENGTH = 4096;
 const CHUNK_TARGET_LENGTH = 3800; // margin below the hard limit for safety
@@ -10,9 +11,7 @@ async function rawSend(token, chatId, text, parseMode) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) }),
   });
-  if (!res.ok) {
-    throw new Error(`Telegram sendMessage failed: ${res.status} ${await res.text()}`);
-  }
+  if (!res.ok) throw await httpError('telegram', 'надсилання повідомлення', res);
 }
 
 // Telegram hard-caps messages at 4096 chars - split on paragraph/line breaks so we don't

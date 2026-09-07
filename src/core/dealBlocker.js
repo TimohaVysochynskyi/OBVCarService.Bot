@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 import { findQuote } from './quoteMatch.js';
 import { pseudoSegments } from './analyzeCall.js';
 
@@ -147,7 +148,7 @@ async function verifyBlocker(transcript, blocker, quote) {
       response_format: { type: 'json_schema', json_schema: VERIFY_SCHEMA },
     }),
   });
-  if (!res.ok) throw new Error(`OpenAI blocker verify failed: ${res.status} ${await res.text()}`);
+  if (!res.ok) throw await httpError('openai', 'перевірка незакритої угоди', res);
   return JSON.parse((await res.json()).choices[0].message.content);
 }
 
@@ -187,7 +188,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         }),
       });
-      if (!res.ok) throw new Error(`OpenAI deal-blocker failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('openai', 'пошук незакритої угоди', res);
       return JSON.parse((await res.json()).choices[0].message.content);
     },
     // gpt-4o on this account has a 30k tokens/min cap and the report reduce uses the same model, so

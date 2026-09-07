@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 
 // Shared handsets (901/902) don't tell Binotel who answered, so we identify the operator from
 // what they say on the recording. The candidate list comes from Binotel itself (the operator
@@ -54,9 +55,7 @@ async function identifyManager(transcript, roster = []) {
           response_format: { type: 'json_schema', json_schema: schema },
         }),
       });
-      if (!res.ok) {
-        throw new Error(`OpenAI manager identification failed: ${res.status} ${await res.text()}`);
-      }
+      if (!res.ok) throw await httpError('openai', 'визначення менеджера з розмови', res);
       const data = await res.json();
       const parsed = JSON.parse(data.choices[0].message.content);
       return parsed.operator || null;

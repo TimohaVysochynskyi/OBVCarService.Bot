@@ -1,4 +1,5 @@
 import { InlineKeyboard, InputFile } from "grammy";
+import { appError } from "../core/errors.js";
 import {
   getOperators,
   countOperatorCalls,
@@ -231,14 +232,17 @@ function registerArchive(bot) {
       // the way), which is the slow path - keep the "надсилає аудіо" indicator alive throughout.
       await withProgress(ctx.api, ctx.chat.id, "upload_voice", async () => {
         const audio = await getRecordingForCall(gid);
-        if (!audio) throw new Error("запис недоступний");
+        if (!audio) throw appError("SYS-NOFILE");
         await ctx.replyWithAudio(new InputFile(audio.buffer, `dialog-${gid}.mp3`), {
           caption: `Запис дзвінка ${gid}`,
         });
       });
     } catch (err) {
-      console.error(`[bot] audio for ${gid} failed: ${err.message}`);
-      await ctx.reply(`Не вдалося надіслати аудіо: ${err.message}`);
+      // Прокидуємо в errorGuard: він розпізнає клас (немає запису / немає ffmpeg / Telegram) і
+      // напише про це людською мовою, з кодом інциденту. Тут лишається тільки те, чого guard не
+      // знає, — про який саме дзвінок ішлося.
+      console.error(`[bot] аудіо дзвінка ${gid}: ${err.message}`);
+      throw err;
     }
   });
 

@@ -1,4 +1,5 @@
 import { withRetry } from "./retry.js";
+import { httpError } from "./errors.js";
 import { SALES_STAGES } from "./stages.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
 import {
@@ -106,11 +107,8 @@ async function classifyCall(transcript, segments = null) {
           response_format: { type: "json_schema", json_schema: SCHEMA },
         }),
       });
-      if (!res.ok) {
-        throw new Error(
-          `OpenAI classification failed: ${res.status} ${await res.text()}`,
-        );
-      }
+      if (!res.ok)
+        throw await httpError("openai", "оцінка дзвінка", res);
       const data = await res.json();
       return JSON.parse(data.choices[0].message.content);
     },

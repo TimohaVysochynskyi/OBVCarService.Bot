@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { httpError } from './errors.js';
 import { probeChannels } from './audioMeta.js';
 
 // ElevenLabs Speech-to-Text (Scribe): transcription + speaker separation in ONE request.
@@ -45,7 +46,7 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
         headers: { 'xi-api-key': key },
         body: form,
       });
-      if (!res.ok) throw new Error(`ElevenLabs STT failed: ${res.status} ${await res.text()}`);
+      if (!res.ok) throw await httpError('elevenlabs', 'транскрипція розмови', res);
       return res.json();
     },
     { attempts: 3, delayMs: 2000, label: 'ElevenLabs STT' }
@@ -224,7 +225,7 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
             response_format: { type: 'json_schema', json_schema: ROLE_SCHEMA },
           }),
         });
-        if (!res.ok) throw new Error(`OpenAI speaker role failed: ${res.status} ${await res.text()}`);
+        if (!res.ok) throw await httpError('openai', 'визначення ролей мовців', res);
         return JSON.parse((await res.json()).choices[0].message.content);
       },
       { attempts: 2, delayMs: 1000, label: 'OpenAI speaker role' }
