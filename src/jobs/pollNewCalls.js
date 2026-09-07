@@ -1,9 +1,10 @@
-import { getCheckpoint, setCheckpoint, getAudioArchiveStats } from '../core/store.js';
+import { getCheckpoint, setCheckpoint, getAudioArchiveStats, deleteOldErrorLog } from '../core/store.js';
+import { checkBotAlive } from '../core/liveness.js';
 import { getElevenLabsBalance } from '../core/elevenlabs.js';
 import { freeSpaceMb, storageRoot } from '../core/audioStore.js';
 import { describeError, appError } from '../core/errors.js';
 import { NOTICES } from '../core/errorTexts.js';
-import { alertOnce, alertText } from './alerts.js';
+import { alertOnce, alertText } from '../core/alerts.js';
 import { processCallsForRange, retryPendingCalls } from './processCalls.js';
 
 // Watchdogs of the ingest. All three go through the SAME dedup (jobs/alerts.js: alertOnce): one
@@ -95,6 +96,14 @@ async function noteBinotelUp() {
   });
 }
 
+// Чистка журналу інцидентів. Робить полер, бо він і так прокидається щочверть години, а журнал
+// потрібен для розбору «що було вчора», не «що було пів року тому».
+async function pruneErrorLog() {
+  const keepDays = Number(process.env.ERROR_LOG_KEEP_DAYS || 30);
+  const removed = await deleteOldErrorLog(new Date(Date.now() - keepDays * 24 * 3600 * 1000));
+  if (removed) console.log(`[poll] прибрано зі журналу інцидентів: ${removed}`);
+}
+
 // Uses a persisted checkpoint instead of a fixed "last N minutes" window, so a delayed or
 // skipped cron run never creates a gap - the next run just picks up exactly where the last
 // one left off. Falls back to POLL_WINDOW_MINUTES only on the very first run ever.
@@ -126,9 +135,12 @@ async function pollNewCalls() {
     throw err;
   }
 
-  // Watchdogs — never let either of them break the poll.
+  // Watchdogs — never let any of them break the poll.
   await checkElevenLabsBalance().catch((e) => console.error(`[poll] balance check failed: ${e.message}`));
   await checkAudioDiskSpace().catch((e) => console.error(`[poll] disk space check failed: ${e.message}`));
+  // Наглядач за ботом живе ТУТ, бо полер і так бігає щочверть години — окремий таймер не потрібен.
+  await checkBotAlive().catch((e) => console.error(`[poll] bot liveness check failed: ${e.message}`));
+  await pruneErrorLog().catch((e) => console.error(`[poll] error log cleanup failed: ${e.message}`));
 }
 
 export { pollNewCalls };

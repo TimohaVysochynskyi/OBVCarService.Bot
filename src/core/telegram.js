@@ -1,17 +1,16 @@
 import { withRetry } from './retry.js';
+import { fetchOk } from './http.js';
 import { getRecipients } from './store.js';
-import { httpError } from './errors.js';
 
 const TELEGRAM_MAX_LENGTH = 4096;
 const CHUNK_TARGET_LENGTH = 3800; // margin below the hard limit for safety
 
 async function rawSend(token, chatId, text, parseMode) {
-  const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+  const res = await fetchOk('telegram', 'надсилання повідомлення', `https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, ...(parseMode ? { parse_mode: parseMode } : {}) }),
   });
-  if (!res.ok) throw await httpError('telegram', 'надсилання повідомлення', res);
 }
 
 // Telegram hard-caps messages at 4096 chars - split on paragraph/line breaks so we don't

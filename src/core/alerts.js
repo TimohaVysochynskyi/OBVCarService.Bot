@@ -1,8 +1,9 @@
-import { getAlertState, setAlertState, clearAlertState } from '../core/store.js';
-import { sendAlert } from '../core/telegram.js';
-import { UI } from '../core/errorTexts.js';
+import { getAlertState, setAlertState, clearAlertState } from './store.js';
+import { sendAlert } from './telegram.js';
+import { UI } from './errorTexts.js';
 
-// Алерти інжесту: дедуп станів і формат повідомлення.
+// Алерти: дедуп станів і формат повідомлення. У core/, бо потрібні ОБОМ процесам — інжест
+// сповіщає про аварії постачальників, бот — про те, що інжест перестав бігати.
 //
 // Тут був не один механізм, а три майже однакові: аварія Binotel, баланс ElevenLabs і вільне
 // місце на диску — кожен зі власним ключем і власною семантикою. Вони почали розходитись

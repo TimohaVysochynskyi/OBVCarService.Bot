@@ -9,7 +9,8 @@ import { identifyManager } from '../core/identifyManager.js';
 import { sendAlert } from '../core/telegram.js';
 import { appError, classify, describeError, isHopeless, reviveError } from '../core/errors.js';
 import { NOTICES } from '../core/errorTexts.js';
-import { alertText } from './alerts.js';
+import { alertText } from '../core/alerts.js';
+import { recordError } from '../core/errorLog.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // stay safely under Binotel's 24h cap on this endpoint
 const MAX_PENDING_ATTEMPTS = Number(process.env.MAX_PENDING_ATTEMPTS || 20);
@@ -291,6 +292,11 @@ async function alertCallDropped(call, err, { title }) {
   console.error(
     `[processCalls] ${described.code} інцидент ${described.incident}: ${described.technicalLine}`
   );
+  await recordError(described, {
+    source: 'poll',
+    feature: 'ingest',
+    context: { generalCallId: call.generalCallId, manager: call.managerName, attempts: call.attempts },
+  });
   await sendAlert(alertText(described)).catch((e) =>
     console.error(`[processCalls] не вдалося надіслати алерт: ${e.message}`)
   );

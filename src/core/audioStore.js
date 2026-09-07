@@ -1,10 +1,10 @@
 import { mkdir, writeFile, readFile, rename, stat, statfs, unlink } from 'node:fs/promises';
+import { fetchOk } from './http.js';
 import { dirname, join, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCallRecordUrl } from './binotel.js';
 import { getCallAudio } from './store.js';
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
 
 // Local archive of call recordings. Until 2026-07-30 audio was never stored: the ingest fetched a
 // Binotel record URL, streamed it straight into the transcriber and dropped it. Everything that
@@ -80,8 +80,7 @@ async function fetchRecording(generalCallId) {
   if (!url) return null;
   return withRetry(
     async () => {
-      const res = await fetch(url);
-      if (!res.ok) throw await httpError('recording', `завантаження запису ${generalCallId}`, res);
+      const res = await fetchOk('recording', `завантаження запису ${generalCallId}`, url);
       return Buffer.from(await res.arrayBuffer());
     },
     { attempts: 3, delayMs: 1000, label: `download recording ${generalCallId}` }

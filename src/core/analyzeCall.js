@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
+import { parseModelJson } from './errors.js';
+import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
 import { SALES_STAGES } from './stages.js';
 
@@ -97,7 +98,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
 
   const raw = await withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'аналіз поведінки в дзвінку', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -112,8 +113,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'аналіз поведінки в дзвінку', res);
-      return JSON.parse((await res.json()).choices[0].message.content);
+      return parseModelJson(await res.json(), 'openai', 'аналіз поведінки в дзвінку');
     },
     { attempts: 2, delayMs: 1500, label: 'OpenAI call behaviors' }
   );

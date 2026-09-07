@@ -1,11 +1,11 @@
 import fs from 'node:fs/promises';
+import { fetchOk } from '../core/http.js';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { InputFile } from 'grammy';
 import { PDFDocument } from 'pdf-lib';
 import { withRetry } from '../core/retry.js';
-import { httpError } from '../core/errors.js';
 
 // Knowledge-base answers cite pages, not whole books: this module cuts JUST the cited pages out of
 // the original PDF and sends that as a small document. Same idea as audioClip.js for calls (send
@@ -31,8 +31,7 @@ async function fetchTelegramFile(fileId) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const meta = await withRetry(
     async () => {
-      const res = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
-      if (!res.ok) throw await httpError('telegram', 'getFile', res);
+      const res = await fetchOk('telegram', 'getFile', `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);
       const data = await res.json();
       // getFile вміє відповісти HTTP 200 з ok:false - тоді причина лежить у description.
       if (!data.ok) {
@@ -48,8 +47,7 @@ async function fetchTelegramFile(fileId) {
   );
   return withRetry(
     async () => {
-      const res = await fetch(`https://api.telegram.org/file/bot${token}/${meta.file_path}`);
-      if (!res.ok) throw await httpError('telegram', 'завантаження файлу', res);
+      const res = await fetchOk('telegram', 'завантаження файлу', `https://api.telegram.org/file/bot${token}/${meta.file_path}`);
       return Buffer.from(await res.arrayBuffer());
     },
     { attempts: 3, delayMs: 1500, label: 'Telegram file download' }

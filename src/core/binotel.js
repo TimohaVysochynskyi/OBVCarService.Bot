@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
 import { httpError } from './errors.js';
+import { fetchRaw } from './http.js';
 
 const BASE_URL = process.env.BINOTEL_BASE_URL || 'https://api.binotel.com/api/4.0';
 
@@ -14,7 +15,7 @@ async function callBinotel(path, body) {
   return withRetry(
     async () => {
       console.log(`[binotel] POST ${path}`, JSON.stringify(body));
-      const res = await fetch(`${BASE_URL}/${path}`, {
+      const res = await fetchRaw('binotel', path, `${BASE_URL}/${path}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...auth(), ...body }),

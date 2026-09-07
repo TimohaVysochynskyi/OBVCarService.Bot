@@ -14,6 +14,10 @@ const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const PAD = Number(process.env.AUDIO_CLIP_PAD_SEC || 3); // seconds of context on each side
 const MAX_CLIPS_PER_FINDING = 3;
 const CAPTION_QUOTE_MAX = 300;
+// Без обмеження часу зависший ffmpeg не давав ні результату, ні помилки: «Розгорнути» просто
+// не завершувалось ніколи. Нарізка секундного фрагмента - справа мілісекунд, тож хвилини вдосталь.
+const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 60_000);
+const PROBE_TIMEOUT_MS = 5_000;
 
 // Stable key so the same (call, timecode) maps to one cut clip across findings/recipients.
 function clipKey(callId, start, end) {
@@ -27,8 +31,19 @@ function ffmpegAvailable() {
     ffmpegProbe = new Promise((resolve) => {
       try {
         const p = spawn(FFMPEG, ['-version']);
-        p.on('error', () => resolve(false));
-        p.on('close', (code) => resolve(code === 0));
+        // Проба кешується на весь процес, тож її зависання зупинило б усі звіти назавжди.
+        const timer = setTimeout(() => {
+          p.kill('SIGKILL');
+          resolve(false);
+        }, PROBE_TIMEOUT_MS);
+        p.on('error', () => {
+          clearTimeout(timer);
+          resolve(false);
+        });
+        p.on('close', (code) => {
+          clearTimeout(timer);
+          resolve(code === 0);
+        });
       } catch {
         resolve(false);
       }
@@ -41,9 +56,22 @@ function runFfmpeg(args) {
   return new Promise((resolve, reject) => {
     const p = spawn(FFMPEG, args);
     let stderr = '';
+    const timer = setTimeout(() => {
+      p.kill('SIGKILL');
+      const err = new Error(`ffmpeg не завершився за ${Math.round(FFMPEG_TIMEOUT_MS / 1000)}с`);
+      err.name = 'TimeoutError';
+      reject(err);
+    }, FFMPEG_TIMEOUT_MS);
     p.stderr.on('data', (d) => (stderr += d.toString()));
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-300)}`))));
+    p.on('error', (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-300)}`));
+    });
   });
 }
 
@@ -76,15 +104,21 @@ function neededClips(report) {
 // Build a Map(clipKey → mp3 Buffer) for a report's negative findings. Downloads each source
 // recording once (cached per call), cuts every needed clip with ffmpeg. Any failure (no ffmpeg,
 // recording gone, cut error) just omits that clip → the report shows the text quote without audio.
+// Повертає { clips, missing }: `missing` - код класу, ЧОМУ аудіо немає, або null.
+// Раніше все просто ковталось у порожню мапу, і директор отримував звіт без аудіо-доказів, ніде
+// не бачачи причини - ні що на сервері немає ffmpeg, ні що Binotel уже видалив записи.
 async function prepareClips(report) {
   const clips = new Map();
   const wanted = neededClips(report);
-  if (!wanted.length) return clips;
+  if (!wanted.length) return { clips, missing: null };
 
   if (!(await ffmpegAvailable())) {
     console.warn('[audioClip] ffmpeg not available — report will be text-only (no audio clips)');
-    return clips;
+    return { clips, missing: 'FFM-MISSING' };
   }
+
+  let noRecording = 0;
+  let cutFailed = 0;
 
   let dir;
   try {
@@ -97,7 +131,10 @@ async function prepareClips(report) {
           sources.set(c.callId, await sourceRecording(c.callId, dir));
         }
         const src = sources.get(c.callId);
-        if (!src) continue; // no local file and Binotel has nothing → skip
+        if (!src) {
+          noRecording += 1;
+          continue; // no local file and Binotel has nothing → skip
+        }
 
         const from = Math.max(0, c.start - PAD);
         const dur = Math.max(1, (Number(c.end ?? c.start) - c.start) + 2 * PAD);
@@ -105,15 +142,21 @@ async function prepareClips(report) {
         await runFfmpeg(['-y', '-ss', String(from), '-i', src, '-t', String(dur), '-c:a', 'libmp3lame', '-q:a', '5', out]);
         clips.set(c.key, await readFile(out));
       } catch (err) {
+        cutFailed += 1;
         console.error(`[audioClip] clip ${c.key} failed: ${err.message}`);
       }
     }
   } catch (err) {
+    cutFailed += 1;
     console.error(`[audioClip] prepareClips failed: ${err.message}`);
   } finally {
     if (dir) await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
-  return clips;
+  // Причину показуємо лише коли аудіо справді бракує, і беремо найзмістовнішу: «записів немає»
+  // конкретніше за «нарізка впала», а частковий успіх узагалі не варто коментувати.
+  let missing = null;
+  if (!clips.size && wanted.length) missing = noRecording >= cutFailed ? 'SYS-NOFILE' : 'FFM-FAIL';
+  return { clips, missing };
 }
 
 // Path of the full recording to cut from. Recordings are archived locally at ingest

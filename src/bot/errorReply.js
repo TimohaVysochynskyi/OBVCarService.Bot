@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import { describeError } from '../core/errors.js';
+import { recordError, lookupIncident } from '../core/errorLog.js';
 import { UI } from '../core/errorTexts.js';
 import { sendLong } from './ui.js';
 import { featureOf } from './access.js';
@@ -15,9 +16,9 @@ import { featureOf } from './access.js';
 // Тексти — у core/errorTexts.js, розпізнавання класу — у core/errors.js. Тут лише доставка.
 
 // --- памʼять технічних деталей --------------------------------------------------------------
-// Кнопка «Деталі для розробника» має що показати, поки процес живий. Це свідомо НЕ база даних:
-// журнал інцидентів (`/log`) — окрема фаза. Після перезапуску бота старі кнопки віддають
-// UI.detailsGone і просять переслати код інциденту, який до того ж лишається в логах pm2.
+// Гаряче сховище на час життя процесу; повна правда лежить у журналі інцидентів (`error_log`,
+// екран `/log`). Памʼять тут не для надійності, а щоб типовий випадок «натиснув деталі одразу»
+// не ходив у базу.
 const DETAILS_TTL_MS = 24 * 60 * 60 * 1000;
 const DETAILS_MAX = 300;
 const details = new Map(); // incident -> { code, at, technical }
@@ -80,6 +81,17 @@ async function reportToUser(ctx, err, { action, subject } = {}) {
   const resolved = action || actionOf(ctx);
   const described = describeError(err, { action: resolved, subject });
   remember(described.incident, described.code, described.technical);
+  await recordError(described, {
+    source: 'bot',
+    feature: resolved,
+    telegramId: ctx.from?.id,
+    context: {
+      chatId: ctx.chat?.id ?? null,
+      callback: ctx.callbackQuery?.data ?? null,
+      awaiting: ctx.session?.awaiting?.type ?? null,
+      subject: subject ?? null,
+    },
+  });
 
   // Лог — з тим самим кодом інциденту, що бачить користувач: саме за ним розробник знаходить
   // подробиці, коли клієнт переслав повідомлення.
@@ -147,9 +159,11 @@ function installBotCatch(bot) {
 function registerErrorActions(bot) {
   bot.callbackQuery(/^err:d:([0-9A-Z]{4})$/, async (ctx) => {
     const incident = ctx.match[1];
-    const found = recall(incident);
     await ctx.answerCallbackQuery();
-    if (!found) {
+    // Памʼять процесу -> журнал у базі. Друге потрібне після перезапуску бота і для інцидентів,
+    // які створив ІНШИЙ процес (алерти інжесту): їх ця памʼять не бачила ніколи.
+    const found = recall(incident) || (await lookupIncident(incident));
+    if (!found?.technical) {
       await ctx.reply(UI.detailsGone);
       return;
     }

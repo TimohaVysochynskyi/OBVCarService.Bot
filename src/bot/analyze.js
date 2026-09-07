@@ -1,5 +1,6 @@
 import { withRetry } from '../core/retry.js';
-import { httpError } from '../core/errors.js';
+import { parseModelJson } from '../core/errors.js';
+import { fetchOk } from '../core/http.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
@@ -405,7 +406,7 @@ async function mergeFindings(managerName, findings) {
   try {
     const raw = await withRetry(
       async () => {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetchOk('openai', 'зведення знахідок за період', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -417,8 +418,7 @@ async function mergeFindings(managerName, findings) {
             response_format: { type: 'json_schema', json_schema: MERGE_SCHEMA },
           }),
         });
-        if (!res.ok) throw await httpError('openai', 'зведення знахідок за період', res);
-        return JSON.parse((await res.json()).choices[0].message.content);
+        return parseModelJson(await res.json(), 'openai', 'зведення знахідок за період');
       },
       { attempts: 2, delayMs: 2000, label: `OpenAI merge ${managerName}` }
     );
@@ -461,7 +461,7 @@ async function verifyFindingsRelevance(findings) {
   try {
     out = await withRetry(
       async () => {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetchOk('openai', 'перевірка релевантності доказів', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -473,8 +473,7 @@ async function verifyFindingsRelevance(findings) {
             response_format: { type: 'json_schema', json_schema: RELEVANCE_SCHEMA },
           }),
         });
-        if (!res.ok) throw await httpError('openai', 'перевірка релевантності доказів', res);
-        return JSON.parse((await res.json()).choices[0].message.content);
+        return parseModelJson(await res.json(), 'openai', 'перевірка релевантності доказів');
       },
       { attempts: 2, delayMs: 1500, label: 'OpenAI relevance verify' }
     );
@@ -521,7 +520,7 @@ async function runReducePass(managerName, candidates, stats) {
 
   return withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'аналіз дзвінків за період', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -533,8 +532,7 @@ async function runReducePass(managerName, candidates, stats) {
           response_format: { type: 'json_schema', json_schema: FINDINGS_SCHEMA },
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'аналіз дзвінків за період', res);
-      return JSON.parse((await res.json()).choices[0].message.content);
+      return parseModelJson(await res.json(), 'openai', 'аналіз дзвінків за період');
     },
     { attempts: 2, delayMs: 2000, label: `OpenAI reduce ${managerName}` }
   );

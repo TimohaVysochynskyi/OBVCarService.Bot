@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
+import { parseModelJson } from './errors.js';
+import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
 import { pseudoSegments } from './analyzeCall.js';
 
@@ -131,7 +132,7 @@ const VERIFY_SCHEMA = {
 };
 
 async function verifyBlocker(transcript, blocker, quote) {
-  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+  const res = await fetchOk('openai', 'перевірка незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -148,8 +149,7 @@ async function verifyBlocker(transcript, blocker, quote) {
       response_format: { type: 'json_schema', json_schema: VERIFY_SCHEMA },
     }),
   });
-  if (!res.ok) throw await httpError('openai', 'перевірка незакритої угоди', res);
-  return JSON.parse((await res.json()).choices[0].message.content);
+  return parseModelJson(await res.json(), 'openai', 'перевірка незакритої угоди');
 }
 
 // The model sometimes copies the transcript line WITH its role label ("Менеджер: ..."). Strip it so
@@ -167,7 +167,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
 
   const raw = await withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'пошук незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -188,8 +188,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
           response_format: { type: 'json_schema', json_schema: SCHEMA },
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'пошук незакритої угоди', res);
-      return JSON.parse((await res.json()).choices[0].message.content);
+      return parseModelJson(await res.json(), 'openai', 'пошук незакритої угоди');
     },
     // gpt-4o on this account has a 30k tokens/min cap and the report reduce uses the same model, so
     // 429s are expected under load - back off longer and try more often than the mini-model callers.

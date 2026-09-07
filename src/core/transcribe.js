@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
+import { parseModelJson } from './errors.js';
+import { fetchOk } from './http.js';
 import { transcribeDiarized } from './elevenlabs.js';
 
 // Business is a Ukrainian auto-service. Ukrainian phone speech is full of dialect/surzhyk
@@ -22,12 +23,11 @@ async function transcribeOnce(audioBlob, { language, prompt } = {}) {
       if (language) form.append('language', language);
       if (prompt) form.append('prompt', prompt);
 
-      const res = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      const res = await fetchOk('openai', 'транскрипція розмови', 'https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
         body: form,
       });
-      if (!res.ok) throw await httpError('openai', 'транскрипція розмови', res);
       const data = await res.json();
       return data.text;
     },
@@ -58,7 +58,7 @@ const DETECT_SYSTEM = `Проаналізуй транскрипт телефо�
 async function detectLanguages(text) {
   return withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'визначення мови розмови', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -73,9 +73,8 @@ async function detectLanguages(text) {
           response_format: { type: 'json_schema', json_schema: DETECT_SCHEMA },
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'визначення мови розмови', res);
       const data = await res.json();
-      return JSON.parse(data.choices[0].message.content);
+      return parseModelJson(data, 'openai', 'визначення мови розмови');
     },
     { attempts: 2, delayMs: 1000, label: 'OpenAI language detection' }
   );
@@ -91,8 +90,7 @@ async function toBlob(audio) {
     const blob = await withRetry(
       async () => {
         console.log(`[transcribe] downloading recording from ${audio}`);
-        const res = await fetch(audio);
-        if (!res.ok) throw await httpError('recording', 'завантаження запису', res);
+        const res = await fetchOk('recording', 'завантаження запису', audio);
         return res.blob();
       },
       { attempts: 3, delayMs: 1000, label: 'download recording' }

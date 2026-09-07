@@ -17,6 +17,26 @@ const pool = new Pool({
   ssl: sslConfig(),
 });
 
+// node-postgres виносить помилку ПРОСТІЙНОГО клієнта як подію 'error' на пулі. Без жодного
+// слухача Node вважає її необробленою і вбиває процес - тобто рестарт Postgres тихо клав і бота,
+// і інжест, без єдиного повідомлення. Слухач тут є завжди; хто хоче ще й сповістити людей,
+// реєструє обробник через onPoolError. Саме так, а не імпортом telegram сюди: telegram уже
+// імпортує store, і зворотний імпорт дав би цикл.
+let poolErrorHandler = null;
+pool.on('error', (err) => {
+  console.error(`[store] помилка простійного підключення до Postgres: ${err.message}`);
+  if (!poolErrorHandler) return;
+  try {
+    poolErrorHandler(err);
+  } catch (inner) {
+    console.error(`[store] обробник помилки пулу впав: ${inner.message}`);
+  }
+});
+
+function onPoolError(handler) {
+  poolErrorHandler = handler;
+}
+
 async function migrate() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS calls (
@@ -192,6 +212,31 @@ async function migrate() {
       added_by BIGINT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
+
+    -- Journal of incidents. Written by BOTH processes (core/errorLog.js), read by the bot's /log
+    -- screen. The point is not observability for its own sake: without it the client could tell a
+    -- developer nothing but "it does not work", and the developer had to SSH into the VPS and grep
+    -- 20k lines of pm2 log by approximate time. The incident column holds the 4-character id the
+    -- person sees in the error message, so a forwarded screenshot is enough to find the row.
+    --   process   — 'bot' | 'poll' (which of the two pm2 processes hit it)
+    --   feature   — which action failed (the ACTIONS key from core/errorTexts.js)
+    --   technical — the full dump: service, HTTP status, response body, stack
+    --   context   — anything specific to the site (call id, manager, file name)
+    CREATE TABLE IF NOT EXISTS error_log (
+      id SERIAL PRIMARY KEY,
+      incident TEXT NOT NULL,
+      code TEXT NOT NULL,
+      at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      process TEXT NOT NULL,
+      feature TEXT,
+      telegram_id BIGINT,
+      message TEXT,
+      technical TEXT,
+      context JSONB
+    );
+    CREATE INDEX IF NOT EXISTS error_log_at_idx ON error_log (at DESC);
+    CREATE INDEX IF NOT EXISTS error_log_incident_idx ON error_log (incident);
+    CREATE INDEX IF NOT EXISTS error_log_code_idx ON error_log (code, at DESC);
 
     -- One-time reset of the legacy PROSE analysis prompt. The report was rewritten to an
     -- evidence-first pipeline (analyze.js), so an old stored prose prompt would be stale guidance.
@@ -942,6 +987,89 @@ async function updateCallScore(generalCallId, score) {
   await pool.query('UPDATE calls SET communication_score = $2 WHERE general_call_id = $1', [generalCallId, score]);
 }
 
+// ---- Взаємний нагляд двох процесів -------------------------------------------------------
+// Кожен процес відмічається «я живий», а сусід дивиться, чи давно була відмітка. Це закриває
+// найгірший сценарій: процес умер, і про це ніхто не знає (pm2 після max_restarts просто
+// перестає піднімати бота). Відмітка в базі, бо процеси не бачать один одного інакше.
+// ⚠️ Отже, обидва watchdog-и залежать від Postgres: якщо ляже сама база, вони теж мовчать.
+async function setHeartbeat(name, when = new Date()) {
+  await setState(`heartbeat_${name}`, when.toISOString());
+}
+
+async function getHeartbeat(name) {
+  const raw = await getState(`heartbeat_${name}`);
+  if (!raw) return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
+// ---- Journal of incidents (see the error_log table above) --------------------------------
+
+async function insertErrorLog(entry) {
+  await pool.query(
+    `INSERT INTO error_log (incident, code, process, feature, telegram_id, message, technical, context)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [
+      entry.incident,
+      entry.code,
+      entry.process,
+      entry.feature ?? null,
+      entry.telegramId ?? null,
+      entry.message ?? null,
+      entry.technical ?? null,
+      entry.context ? JSON.stringify(entry.context) : null,
+    ]
+  );
+}
+
+function mapErrorRow(row) {
+  return {
+    id: row.id,
+    incident: row.incident,
+    code: row.code,
+    at: row.at,
+    process: row.process,
+    feature: row.feature,
+    telegramId: row.telegram_id,
+    message: row.message,
+    technical: row.technical,
+    context: row.context,
+  };
+}
+
+async function listErrorLog(limit = 10, { code = null } = {}) {
+  const { rows } = code
+    ? await pool.query('SELECT * FROM error_log WHERE code = $1 ORDER BY at DESC LIMIT $2', [code, limit])
+    : await pool.query('SELECT * FROM error_log ORDER BY at DESC LIMIT $1', [limit]);
+  return rows.map(mapErrorRow);
+}
+
+// The incident id is what the person forwards, so this is the main lookup path.
+async function getErrorLogByIncident(incident) {
+  const { rows } = await pool.query(
+    'SELECT * FROM error_log WHERE incident = $1 ORDER BY at DESC LIMIT 1',
+    [incident]
+  );
+  return rows[0] ? mapErrorRow(rows[0]) : null;
+}
+
+// Grouped by class: "OAI-QUOTA - 12 разів, останній 20:14" reads far better than 12 separate rows,
+// and it is what tells a developer whether something is a one-off or a pattern.
+async function summarizeErrorLog(since) {
+  const { rows } = await pool.query(
+    `SELECT code, COUNT(*)::int AS "count", MAX(at) AS "lastAt"
+       FROM error_log WHERE at >= $1
+      GROUP BY code ORDER BY MAX(at) DESC`,
+    [since]
+  );
+  return rows;
+}
+
+async function deleteOldErrorLog(before) {
+  const { rowCount } = await pool.query('DELETE FROM error_log WHERE at < $1', [before]);
+  return rowCount;
+}
+
 // Earliest call currently on file - the backfill's start boundary (no point sweeping Binotel
 // further back than our own oldest row).
 async function getEarliestCallTime() {
@@ -1466,6 +1594,14 @@ export {
   getAlertState,
   setAlertState,
   clearAlertState,
+  onPoolError,
+  setHeartbeat,
+  getHeartbeat,
+  insertErrorLog,
+  listErrorLog,
+  getErrorLogByIncident,
+  summarizeErrorLog,
+  deleteOldErrorLog,
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,

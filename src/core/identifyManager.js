@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
+import { parseModelJson } from './errors.js';
+import { fetchOk } from './http.js';
 
 // Shared handsets (901/902) don't tell Binotel who answered, so we identify the operator from
 // what they say on the recording. The candidate list comes from Binotel itself (the operator
@@ -40,7 +41,7 @@ async function identifyManager(transcript, roster = []) {
 
   return withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'визначення менеджера з розмови', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -55,9 +56,8 @@ async function identifyManager(transcript, roster = []) {
           response_format: { type: 'json_schema', json_schema: schema },
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'визначення менеджера з розмови', res);
       const data = await res.json();
-      const parsed = JSON.parse(data.choices[0].message.content);
+      const parsed = parseModelJson(data, 'openai', 'визначення менеджера з розмови');
       return parsed.operator || null;
     },
     { attempts: 3, delayMs: 1500, label: 'OpenAI manager identification' }

@@ -1,5 +1,6 @@
 import { withRetry } from './retry.js';
-import { httpError } from './errors.js';
+import { parseModelJson } from './errors.js';
+import { fetchOk, fetchRaw } from './http.js';
 import { probeChannels } from './audioMeta.js';
 
 // ElevenLabs Speech-to-Text (Scribe): transcription + speaker separation in ONE request.
@@ -41,12 +42,11 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
       // "excellent accuracy"), which also removes the old OpenAI uk-vs-ru re-transcription dance.
       if (process.env.CALL_LANGUAGE) form.append('language_code', process.env.CALL_LANGUAGE);
 
-      const res = await fetch(STT_URL, {
+      const res = await fetchOk('elevenlabs', 'транскрипція розмови', STT_URL, {
         method: 'POST',
         headers: { 'xi-api-key': key },
         body: form,
       });
-      if (!res.ok) throw await httpError('elevenlabs', 'транскрипція розмови', res);
       return res.json();
     },
     { attempts: 3, delayMs: 2000, label: 'ElevenLabs STT' }
@@ -61,7 +61,9 @@ async function getElevenLabsBalance() {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) return { ok: false, reason: 'no_key' };
   try {
-    const res = await fetch(SUBSCRIPTION_URL, { headers: { 'xi-api-key': key } });
+    const res = await fetchRaw('elevenlabs', 'перевірка балансу', SUBSCRIPTION_URL, {
+      headers: { 'xi-api-key': key },
+    });
     if (res.status === 401) {
       const body = await res.text();
       return { ok: false, reason: /missing_permission|user_read/i.test(body) ? 'missing_permission' : 'unauthorized' };
@@ -213,7 +215,7 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
   try {
     const out = await withRetry(
       async () => {
-        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+        const res = await fetchOk('openai', 'визначення ролей мовців', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -225,8 +227,7 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
             response_format: { type: 'json_schema', json_schema: ROLE_SCHEMA },
           }),
         });
-        if (!res.ok) throw await httpError('openai', 'визначення ролей мовців', res);
-        return JSON.parse((await res.json()).choices[0].message.content);
+        return parseModelJson(await res.json(), 'openai', 'визначення ролей мовців');
       },
       { attempts: 2, delayMs: 1000, label: 'OpenAI speaker role' }
     );

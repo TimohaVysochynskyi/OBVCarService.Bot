@@ -137,6 +137,8 @@ const RULES = [
   ['TG-TOOLONG', (e) => isTelegram(e) && has(e, /message is too long|text is too long/i)],
   ['TG-CBDATA', (e) => isTelegram(e) && has(e, /BUTTON_DATA_INVALID|callback_data/i)],
   ['TG-FILESIZE', (e) => isTelegram(e) && has(e, /file is too big|request entity too large/i)],
+  // Два примірники бота: Telegram обриває getUpdates у того, хто «запізнився».
+  ['TG-409', (e) => isTelegram(e) && has(e, /conflict|terminated by other getupdates|another instance/i)],
   ['TG-5XX', (e) => isTelegram(e) && status5xx(e)],
   ['TG-NET', (e) => isTelegram(e) && (isNet(e) || isTimeout(e))],
 
@@ -183,6 +185,41 @@ const PERMANENT = new Set([
   'TG-FILESIZE', 'FMT-UNSUP', 'PDF-SCANNED', 'PDF-ENCRYPTED', 'PDF-CORRUPT', 'SYS-NOFILE',
 ]);
 const isPermanent = (code) => PERMANENT.has(code);
+
+// Вміст відповіді моделі. Голий `JSON.parse(data.choices[0].message.content)` давав два різні
+// непрозорі падіння: `SyntaxError: Unexpected token …` без жодної згадки, що це відповідь моделі
+// (саме такий текст і летів у Telegram), і `TypeError` на `JSON.parse(undefined)`, коли content
+// порожній — модель відмовилась відповідати або відповідь обрізало лімітом токенів. Тут обидва
+// випадки одразу отримують клас OAI-BADJSON і тіло у `body` для розробника.
+function modelContent(data, provider, op) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content === 'string' && content.trim()) return content;
+  const err = new Error(`${provider} ${op}: модель повернула порожню відповідь`);
+  err.provider = provider;
+  err.op = op;
+  err.code = 'OAI-BADJSON';
+  try {
+    err.body = JSON.stringify(data ?? null).slice(0, 1000);
+  } catch {
+    err.body = '(відповідь не серіалізується)';
+  }
+  throw err;
+}
+
+function parseModelJson(data, provider, op) {
+  const content = modelContent(data, provider, op);
+  try {
+    return JSON.parse(content);
+  } catch (cause) {
+    const err = new Error(`${provider} ${op}: відповідь моделі не є валідним JSON`);
+    err.provider = provider;
+    err.op = op;
+    err.code = 'OAI-BADJSON';
+    err.body = content.slice(0, 1000);
+    err.cause = cause;
+    throw err;
+  }
+}
 
 // Клас помилки, ЯКИЙ ЦЕЙ КОНКРЕТНИЙ ДЗВІНОК не переживе ніколи: повтор нічого не змінить не
 // тому, що потрібне втручання, а тому, що вхідні дані такі, які вони є. Вужче за PERMANENT: там,
@@ -284,6 +321,8 @@ export {
   technicalLineOf,
   isPermanent,
   isHopeless,
+  modelContent,
+  parseModelJson,
   reviveError,
   RULES,
 };

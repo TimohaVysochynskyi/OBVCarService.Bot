@@ -50,6 +50,7 @@ function featureOf(ctx) {
     if (cq.startsWith('prompt')) return 'prompt'; // hub + every editable AI instruction under it
     if (cq.startsWith('roles')) return 'roles';
     if (cq === 'set' || cq.startsWith('set:')) return 'settings';
+    if (cq === 'log' || cq.startsWith('log:')) return 'logs';
     if (cq.startsWith('me:')) return 'stats_self';
     return 'menu';
   }
@@ -67,6 +68,7 @@ function featureOf(ctx) {
       prompt: 'prompt',
       roles: 'roles',
       settings: 'settings',
+      log: 'logs',
       myreport: 'stats_self',
     };
     return map[cmd] ?? 'menu';

@@ -15,6 +15,7 @@ import { sendManualReport, startScheduler, registerReportActions } from './repor
 import { registerPrompt, openPromptMenu, savePromptText } from './prompt.js';
 import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
 import { registerSettings, openSettings, addRecipientByIdText } from './settings.js';
+import { registerIncidents, openIncidents } from './incidents.js';
 import { formatPhone } from './operators.js';
 import {
   getUser,
@@ -28,6 +29,12 @@ import {
 } from './access.js';
 import { sendLong, withProgress, showScreen, installMessageTracker } from './ui.js';
 import { errorGuard, installBotCatch, registerErrorActions, reportToUser } from './errorReply.js';
+import { installProcessTraps } from '../core/processTraps.js';
+import { startHeartbeat, checkPollerAlive } from '../core/liveness.js';
+import { describeError } from '../core/errors.js';
+import { recordError } from '../core/errorLog.js';
+import { sendAlert } from '../core/telegram.js';
+import { alertText } from '../core/alerts.js';
 
 // Knowledge base needs pgvector; migrateKb() at startup flips this on. Handlers degrade
 // gracefully when it's false.
@@ -36,6 +43,8 @@ const kbState = { ready: false };
 // One Telegram bot serves everything: the interactive report bot here AND the ingest's
 // outbound alerts (core/telegram.js) - same token. sendMessage (alerts) does not conflict with
 // getUpdates (this bot). Must be a clean bot with no webhook (NOT @obvcarservicebot).
+installProcessTraps('bot');
+
 const token = process.env.TELEGRAM_BOT_TOKEN;
 if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is not set - put the token of the clean bot from @BotFather there');
@@ -120,10 +129,12 @@ const CMD = {
   roles: { command: 'roles', description: '👥 Ролі' },
   settings: { command: 'settings', description: '⚙️ Налаштування' },
   myreport: { command: 'myreport', description: '📊 Моя статистика' },
+  log: { command: 'log', description: '🩺 Журнал інцидентів' },
 };
 
 function commandsForRole(role) {
-  if (isAdmin(role)) return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings];
+  if (isAdmin(role))
+    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
   return [CMD.menu, CMD.ask]; // mechanic
 }
@@ -193,6 +204,9 @@ bot.command('prompt', openPromptMenu);
 bot.command('report', runReport);
 bot.command('roles', openRolesMenu);
 bot.command('settings', openSettings);
+// Діагностика — лише в нативному списку команд, без inline-кнопки: те саме рішення, що для
+// /files і /settings, щоб не перевантажувати меню.
+bot.command('log', openIncidents);
 bot.command('myreport', openMyReport);
 
 // --- Inline callbacks ----------------------------------------------------------------------
@@ -216,6 +230,7 @@ registerRoles(bot);
 registerSettings(bot);
 registerReportActions(bot);
 registerErrorActions(bot);
+registerIncidents(bot);
 
 // A manager saving their own phone number (request_users doesn't return a phone). Last in the
 // contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via
@@ -329,12 +344,29 @@ async function main() {
   // the DB on each slot — so the scheduler always runs and needs no env chat.
   startScheduler(bot.api);
 
+  // Взаємний нагляд: бот відмічається щохвилини (за ним стежить полер), і сам раз на 5 хвилин
+  // перевіряє, чи полер узагалі бігає — cron міг бути знятий або процес зупинений і забутий.
+  startHeartbeat('bot');
+  setInterval(() => {
+    checkPollerAlive().catch((e) => console.error(`[bot] poller liveness check failed: ${e.message}`));
+  }, 5 * 60 * 1000);
+
   await bot.start({
     onStart: (info) => console.log(`[bot] @${info.username} started (long polling)`),
   });
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
+  // Старт — окремий клас проблем: зламаний .env, недоступний Postgres на migrate(), або 409
+  // Conflict, коли той самий бот уже запущено десь іще (типово — залишили запущеним на компʼютері
+  // розробника). Раніше все це давало лише стек у лозі pm2: бот тихо ходив по колу рестартів,
+  // доки pm2 не здавався, і ніхто не дізнавався ні що сталось, ні що бот більше не працює.
+  const described = describeError(err, { action: 'startup', icon: '⚠️' });
+  console.error(`[bot] ${described.code} інцидент ${described.incident}: ${described.technicalLine}`);
   console.error(err);
+  await recordError(described, { source: 'bot', feature: 'startup' });
+  await sendAlert(alertText(described)).catch((e) =>
+    console.error(`[bot] не вдалося надіслати алерт про старт: ${e.message}`)
+  );
   process.exit(1);
 });

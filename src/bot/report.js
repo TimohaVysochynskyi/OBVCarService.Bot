@@ -13,6 +13,8 @@ import {
 import { reduceFindings, mergeFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
 import { assembleReport, collectRangeFindings } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';
+import { noteIssue } from '../core/errorLog.js';
+import { NOTICES } from '../core/errorTexts.js';
 import { BLOCKER_LABELS } from '../core/dealBlocker.js';
 import { withProgress, sendLong } from './ui.js';
 import { displayName, formatPhone } from './operators.js';
@@ -202,7 +204,7 @@ async function sendReportSummary(api, chatId, report, { replyMarkup } = {}) {
 // "🔽 Розгорнути". clips (optional Map from prepareClips) carries pre-cut audio Buffers keyed by
 // clipKey; each negative finding's quotes are followed by their clip. replyToMessageId threads every
 // message sent here back to the report message the button was clicked on (see registerReportActions).
-async function sendReportFindings(api, chatId, report, { clips, replyToMessageId } = {}) {
+async function sendReportFindings(api, chatId, report, { clips, missing, replyToMessageId } = {}) {
   // "Незакриті угоди" first: it explains the numbers above, and it must appear even for a SINGLE
   // case, so it is loaded straight from the DB rather than coming out of the LLM reduce. Failure here
   // must not cost the owner the findings, hence the catch.
@@ -248,6 +250,12 @@ async function sendReportFindings(api, chatId, report, { clips, replyToMessageId
       }
     }
   }
+
+  // Знахідки є, а аудіо до них немає. Раніше це виглядало просто як звіт без доказів - тепер
+  // сказано, чому саме (немає ffmpeg / Binotel уже видалив записи / нарізка впала).
+  if (missing) {
+    await sendLong(api, chatId, NOTICES.clipsUnavailable(missing), { replyToMessageId });
+  }
 }
 
 // expandKey encodes exactly what a later "🔽 Розгорнути"/"💬 Рекомендації" click needs to re-derive
@@ -265,10 +273,16 @@ const CALLBACK_LIMIT = 64;
 
 function expandKeyOf(name, start, end, mode) {
   const key = `${MODE_CODE[mode] || 'd'}:${b36(start)}:${b36(end)}:${name}`;
-  // Surfaces in the log instead of silently producing a keyboard Telegram refuses to render.
+  // Telegram відкидає ВСЮ клавіатуру, якщо callback_data довша за ліміт, і робить це молча.
+  // Раніше про це знав лише console.error, тобто фактично ніхто; тепер це інцидент у журналі.
   const longest = Buffer.byteLength(`report:exp:${key}`);
   if (longest > CALLBACK_LIMIT) {
-    console.error(`[report] expandKey for "${name}" is ${longest} bytes (>${CALLBACK_LIMIT}) — buttons will not render`);
+    noteIssue('TG-CBDATA', {
+      source: 'bot',
+      feature: 'report',
+      detail: `expandKey для «${name}» — ${longest} Б (ліміт ${CALLBACK_LIMIT})`,
+      context: { manager: name, bytes: longest },
+    }).catch(() => {});
   }
   return key;
 }
@@ -354,8 +368,8 @@ function registerReportActions(bot) {
           await ctx.reply('Дані звіту вже недоступні.', { reply_parameters: replyParameters });
           return;
         }
-        const clips = await prepareClips(report);
-        await sendReportFindings(ctx.api, ctx.chat.id, report, { clips, replyToMessageId });
+        const { clips, missing } = await prepareClips(report);
+        await sendReportFindings(ctx.api, ctx.chat.id, report, { clips, missing, replyToMessageId });
       },
       { notice: '⏳ Готую деталі та аудіо-докази…' }
     );

@@ -1,5 +1,6 @@
 import { withRetry } from "./retry.js";
-import { httpError } from "./errors.js";
+import { parseModelJson } from "./errors.js";
+import { fetchOk } from "./http.js";
 import { SALES_STAGES } from "./stages.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
 import {
@@ -92,7 +93,7 @@ async function classifyCall(transcript, segments = null) {
   const userContent = [timecoded || transcript, facts].filter(Boolean).join('\n\n');
   return withRetry(
     async () => {
-      const res = await fetch("https://api.openai.com/v1/chat/completions", {
+      const res = await fetchOk("openai", "оцінка дзвінка", "https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -107,10 +108,8 @@ async function classifyCall(transcript, segments = null) {
           response_format: { type: "json_schema", json_schema: SCHEMA },
         }),
       });
-      if (!res.ok)
-        throw await httpError("openai", "оцінка дзвінка", res);
       const data = await res.json();
-      return JSON.parse(data.choices[0].message.content);
+      return parseModelJson(data, 'openai', 'оцінка дзвінка');
     },
     { attempts: 3, delayMs: 1500, label: "OpenAI call classification" },
   );

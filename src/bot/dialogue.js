@@ -1,5 +1,6 @@
 import { withRetry } from '../core/retry.js';
-import { httpError } from '../core/errors.js';
+import { modelContent } from '../core/errors.js';
+import { fetchOk } from '../core/http.js';
 
 // Turns a raw (mono, single-channel, unlabelled) call transcript into a readable dialogue with
 // "Менеджер:" / "Клієнт:" turns. The recording has no channel separation, so the model infers who
@@ -19,7 +20,7 @@ async function formatDialogue(transcript) {
   if (!text) return '(порожньо)';
   return withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', 'форматування діалогу', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
@@ -33,9 +34,8 @@ async function formatDialogue(transcript) {
           ],
         }),
       });
-      if (!res.ok) throw await httpError('openai', 'форматування діалогу', res);
       const data = await res.json();
-      return data.choices[0].message.content;
+      return modelContent(data, 'openai', 'форматування діалогу');
     },
     { attempts: 3, delayMs: 2000, label: 'OpenAI dialogue format' }
   );

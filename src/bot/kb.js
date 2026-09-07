@@ -1,8 +1,9 @@
 import { InlineKeyboard } from 'grammy';
+import { fetchOk } from '../core/http.js';
 import { extractText as pdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
 import { withRetry } from '../core/retry.js';
-import { appError, httpError } from '../core/errors.js';
+import { appError, parseModelJson } from '../core/errors.js';
 import { reportToUser } from './errorReply.js';
 import {
   insertKbDoc,
@@ -225,12 +226,11 @@ async function embedTexts(texts) {
     const batch = texts.slice(i, i + 96);
     const embeddings = await withRetry(
       async () => {
-        const res = await fetch('https://api.openai.com/v1/embeddings', {
+        const res = await fetchOk('openai', 'побудова векторів для пошуку', 'https://api.openai.com/v1/embeddings', {
           method: 'POST',
           headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: EMBED_MODEL(), input: batch }),
         });
-        if (!res.ok) throw await httpError('openai', 'побудова векторів для пошуку', res);
         const data = await res.json();
         return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
       },
@@ -302,7 +302,7 @@ const RERANK_SCHEMA = {
 async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 } = {}) {
   return withRetry(
     async () => {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetchOk('openai', label, 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -311,9 +311,8 @@ async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 
           response_format: { type: 'json_schema', json_schema: schema },
         }),
       });
-      if (!res.ok) throw await httpError('openai', label, res);
       const data = await res.json();
-      return JSON.parse(data.choices[0].message.content);
+      return parseModelJson(data, 'openai', label);
     },
     { attempts, delayMs, label }
   );
