@@ -34,6 +34,8 @@
 
 > Що видно — залежить від ролі (див. «Токен і доступ»): admin бачить п.1–7, manager — п.8 + база знань, mechanic — лише база знань.
 
+> ⚠️ **Усі тексти про помилки — у `core/errorTexts.js`, і тільки там.** Правити формулювання в хендлерах не треба: вони збираються з каталогу (`core/errors.js`) у чотири слоти — що не вийшло / чому / що робити + доля даних / код і номер інциденту. Стиль зафіксований коментарем угорі файлу, а юніт-тест ганяє всі рядки по списку заборонених зворотів.
+
 ## Файли
 
 ```
@@ -45,6 +47,7 @@ dialogue.js   — запасне on-demand AI-розділення мовців 
 report.js     — фіча 1: планувальник + доказовий звіт (buildRangeReport для тиждень/місяць/квартал, buildReportByMode: daily|range|range_reuse|live, deliverReport/deliverManagerReport/sendManualReport); expandKey кодує режим 1 символом + base36-таймкоди через 64-байтовий ліміт callback_data
 audioClip.js  — нарізка аудіо-кліпів навколо цитат (системний ffmpeg, preflight+graceful degradation; ріже ЗБЕРЕЖЕНИЙ локально файл прямо на місці — завантаження з Binotel лише для дзвінків без архіву); prepareClips/sendClip/clipKey
 operators.js  — аліаси відображення імен операторів (напр. 0674738200 → «Богдан»); тільки рендер, БД без змін
+errorReply.js — ЖОДНОЇ МЕРТВОЇ КНОПКИ: errorGuard — один middleware (стоїть перед перевіркою доступу, бо роль читається з БД на кожен апдейт) → повідомлення за шаблоном + знятий спінер + лог із кодом інциденту; installBotCatch (остання сітка); registerErrorActions — кнопка «🔧 Деталі для розробника» (`err:d:<інцидент>`, дамп у памʼяті процесу на 24 год); actionOf — яка саме дія не вдалася, для заголовка. Тексти — core/errorTexts.js, класи — core/errors.js
 access.js     — ролі та доступ: getUser (кеш), canAccess/featureOf (per-feature gate), mainMenu-роль, seedDirectors
 roles.js      — блок «Ролі» (admin): перегляд/додавання/видалення людей; request_users + контакт/телефон; лінк менеджера до оператора
 settings.js   — «Налаштування» (/settings, admin): списки отримувачів алертів/звітів + час звітів (app_state; request_users/контакт/ID + пікер часу)
