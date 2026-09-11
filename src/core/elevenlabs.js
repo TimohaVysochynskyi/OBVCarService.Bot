@@ -53,6 +53,45 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
   );
 }
 
+// ⚠️ ElevenLabs НЕ віддає ЖОДНОГО поля з грошима — перевірено наживо 11.09.2026 на цьому
+// акаунті: ні /v1/user, ні /v1/user/subscription, ні /v1/usage/character-stats. Є тільки
+// кредити. Тому сума в доларах — ЗАВЖДИ ОЦІНКА: залишок кредитів × курс нижче.
+//
+// КАЛІБРУВАННЯ 11.09.2026: дашборд ElevenLabs показував $5.85 при 16 063 кредитах залишку
+// (character_limit 37 291 − character_count 21 228) → 5.85 / 16.063 × 1000 = 0.3642 за 1000.
+// Було 0.22 — тобто бот показував $3.53 замість $5.85, суму в 1.65 раза МЕНШУ за реальну.
+// Для власника це виглядало так, ніби він обманює клієнта, коли називав правильне число.
+//
+// ЯК ПЕРЕКАЛІБРУВАТИ, коли число знову розійдеться з дашбордом:
+//     новий курс = (сума з дашборду) ÷ (залишок кредитів) × 1000
+// Залишок кредитів видно і в /health, і в алерті про низький баланс — тобто обидва числа
+// для перерахунку завжди під рукою, лізти в API не треба.
+const DEFAULT_USD_PER_1000_CREDITS = 0.3642;
+
+// Поріг «низький баланс». ⚠️ Прив'язаний до курсу вище: $3.31 ≈ 9 100 кредитів ≈ 27 хв розмов
+// (Scribe STT — 330 кредитів/хв) ≈ 25 середніх дзвінків запасу. Міняючи курс, ОБОВ'ЯЗКОВО
+// перерахуй і поріг: інакше попередження тихо почне приходити раніше або пізніше, ніж задумано,
+// і про закінчення кредитів дізнаються вже по зіпсованій якості розшифровок.
+const DEFAULT_MIN_BALANCE_USD = 3.31;
+
+const envNumber = (name, fallback) => {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+// ЄДИНЕ місце, де кредити перетворюються на долари. Раніше та сама формула стояла двома копіями —
+// в алерті інжесту і на екрані /health, — тож вони могли розійтися між собою й показувати
+// користувачу різні суми за той самий баланс.
+function creditsToUsd(credits) {
+  const amount = Number(credits);
+  if (!Number.isFinite(amount) || amount <= 0) return 0;
+  return (amount / 1000) * envNumber('ELEVENLABS_USD_PER_1000_CREDITS', DEFAULT_USD_PER_1000_CREDITS);
+}
+
+function minBalanceUsd() {
+  return envNumber('ELEVENLABS_MIN_BALANCE_USD', DEFAULT_MIN_BALANCE_USD);
+}
+
 // Remaining ElevenLabs balance (credits). The subscription endpoint returns character_count /
 // character_limit (unified credits) — remaining = limit - count. Needs the API key to have the
 // `user_read` permission; without it the endpoint 401s (reason 'missing_permission'), which the
@@ -276,4 +315,12 @@ async function transcribeDiarized(audioBlob, managerName, { audioPath } = {}) {
   return { transcript, segments };
 }
 
-export { transcribeDiarized, sttDiarize, buildTurns, heuristicManager, getElevenLabsBalance };
+export {
+  transcribeDiarized,
+  sttDiarize,
+  buildTurns,
+  heuristicManager,
+  getElevenLabsBalance,
+  creditsToUsd,
+  minBalanceUsd,
+};

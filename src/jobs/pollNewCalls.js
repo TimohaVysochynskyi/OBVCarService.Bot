@@ -1,6 +1,6 @@
 import { getCheckpoint, setCheckpoint, getAudioArchiveStats, deleteOldErrorLog } from '../core/store.js';
 import { checkBotAlive } from '../core/liveness.js';
-import { getElevenLabsBalance } from '../core/elevenlabs.js';
+import { getElevenLabsBalance, creditsToUsd, minBalanceUsd } from '../core/elevenlabs.js';
 import { freeSpaceMb, storageRoot } from '../core/audioStore.js';
 import { describeError, appError } from '../core/errors.js';
 import { NOTICES } from '../core/errorTexts.js';
@@ -28,9 +28,8 @@ async function checkElevenLabsBalance() {
   // balance, and treating it as "low" would fire a false alarm.
   if (!balance.ok) return;
 
-  const usdPer1000 = Number(process.env.ELEVENLABS_USD_PER_1000_CREDITS || 0.22);
-  const minUsd = Number(process.env.ELEVENLABS_MIN_BALANCE_USD || 2);
-  const remainingUsd = (balance.remainingCredits / 1000) * usdPer1000;
+  const remainingUsd = creditsToUsd(balance.remainingCredits);
+  const minUsd = minBalanceUsd();
 
   await alertOnce('elevenlabs_balance_state', {
     active: remainingUsd < minUsd,

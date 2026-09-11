@@ -9,7 +9,7 @@ import {
   getAudioArchiveStats,
 } from '../core/store.js';
 import { listCallsForPeriod } from '../core/binotel.js';
-import { getElevenLabsBalance } from '../core/elevenlabs.js';
+import { getElevenLabsBalance, creditsToUsd, minBalanceUsd } from '../core/elevenlabs.js';
 import { freeSpaceMb } from '../core/audioStore.js';
 import { fetchOk } from '../core/http.js';
 import { classify } from '../core/errors.js';
@@ -114,9 +114,8 @@ async function checkElevenLabs() {
     if (balance.reason === 'unauthorized') return { status: FAIL, detail: HEALTH.byCode('ELV-AUTH') };
     return { status: WARN, detail: HEALTH.elevenUnknown };
   }
-  const usdPer1000 = Number(process.env.ELEVENLABS_USD_PER_1000_CREDITS || 0.22);
-  const minUsd = Number(process.env.ELEVENLABS_MIN_BALANCE_USD || 2);
-  const usd = (balance.remainingCredits / 1000) * usdPer1000;
+  const usd = creditsToUsd(balance.remainingCredits);
+  const minUsd = minBalanceUsd();
   return {
     status: usd < minUsd ? WARN : OK,
     detail: HEALTH.elevenBalance(usd.toFixed(2), balance.remainingCredits),
