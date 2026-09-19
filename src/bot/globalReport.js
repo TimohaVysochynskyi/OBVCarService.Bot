@@ -48,7 +48,7 @@ async function sendGlobalReport(ctx) {
 }
 
 function registerGlobalReport(bot) {
-  bot.command('global-report', sendGlobalReport);
+  bot.command('globalreport', sendGlobalReport);
 }
 
 export { registerGlobalReport, sendGlobalReport, ALL };

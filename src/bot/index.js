@@ -133,7 +133,7 @@ const CMD = {
   myreport: { command: 'myreport', description: '📊 Моя статистика' },
   log: { command: 'log', description: '🩺 Журнал інцидентів' },
   health: { command: 'health', description: '🩺 Перевірка стану' },
-  globalReport: { command: 'global-report', description: '📊 Звіт за весь період' },
+  globalReport: { command: 'globalreport', description: '📊 Звіт за весь період' },
 };
 
 function commandsForRole(role) {

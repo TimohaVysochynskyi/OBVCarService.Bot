@@ -72,7 +72,7 @@ function featureOf(ctx) {
       settings: 'settings',
       log: 'logs',
       health: 'health',
-      'global-report': 'global_report',
+      globalreport: 'global_report',
       myreport: 'stats_self',
     };
     return map[cmd] ?? 'menu';
