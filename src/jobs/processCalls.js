@@ -150,7 +150,9 @@ async function transcribeClassifyAndSave(call, roster) {
   if (classification.isSuccess !== true) {
     try {
       blocker = await detectDealBlocker(transcript, segments, managerName);
-      if (blocker.blocker !== NO_BLOCKER) {
+      // Рецензента збило — це «не перевірено», а не «чисто»: лишаємо NULL, беклог вирішить пізніше.
+      if (blocker.unchecked) blocker = { blocker: null, quote: null };
+      else if (blocker.blocker !== NO_BLOCKER) {
         console.log(`[processCalls]   ${call.generalCallId} deal blocker: ${blocker.blocker} — «${blocker.quote?.slice(0, 70)}»`);
       }
     } catch (err) {

@@ -111,6 +111,25 @@ async function clearIngestFailureAlerts() {
   if (wasFailing) await sendAlert(NOTICES.ingestRecovered, { icon: '✅' });
 }
 
+// Чекпоінт відступає НАЗАД на це вікно, замість ставати рівно на момент прогону.
+//
+// ⚠️ Без відступу дзвінки тихо губились, і це заміряно: звірка нашої БД проти Binotel за 35 днів
+// (19.09.2026) показала 582 дзвінки з 624 — БРАКУВАЛО 42. Механізм: Binotel не показує дзвінок у
+// list-of-calls-for-period, поки той ТРИВАЄ. Прогін о 16:00 не бачить розмову, що почалась о
+// 15:59:49 і ще йде, після чого чекпоінт стає на 16:00 — а наступне вікно починається вже після
+// її СТАРТУ, тож про неї не спитають ніколи. Підтверджено на конкретних дзвінках: 6867494436
+// (старт 15:59:49, 93с), 6853318718 (старт 12:44:45, 144с), 6850691158 (старт 08:43:38, 184с).
+//
+// 15 хв = рівно період cron, тож кожне вікно перекриває попереднє: у дзвінка є ~30 хв від старту,
+// щоб завершитись і потрапити в лістинг. Повторне сканування нічого не коштує - дублікати
+// відсікає callExists у processChunk, а зайвий лістинг Binotel це один запит.
+const DEFAULT_OVERLAP_MIN = 15;
+
+function checkpointOverlapMs() {
+  const minutes = Number(process.env.POLL_OVERLAP_MIN || DEFAULT_OVERLAP_MIN);
+  return (Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_OVERLAP_MIN) * 60_000;
+}
+
 // Uses a persisted checkpoint instead of a fixed "last N minutes" window, so a delayed or
 // skipped cron run never creates a gap - the next run just picks up exactly where the last
 // one left off. Falls back to POLL_WINDOW_MINUTES only on the very first run ever.
@@ -125,7 +144,8 @@ async function pollNewCalls() {
 
     console.log(`[poll] checkpoint: ${checkpoint ? checkpoint.toISOString() : '(none, using default window)'}`);
     await processCallsForRange(start, end);
-    await setCheckpoint(end);
+    // НЕ end, а end мінус перекриття - інакше дзвінок, що тривав у цю мить, не спитають ніколи.
+    await setCheckpoint(new Date(end.getTime() - checkpointOverlapMs()));
     // A completed pass is the only proof Binotel is actually answering again.
     await noteBinotelUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
     // ...і водночас доказ, що причина падінь прогону (яка б вона не була) зникла.

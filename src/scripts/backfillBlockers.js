@@ -67,12 +67,20 @@ async function main() {
   let noSlot = 0;
   let outOfScope = 0;
   let failed = 0;
+  let unchecked = 0;
 
   for (let i = 0; i < calls.length; i += 1) {
     const c = calls[i];
     const who = displayName(c.managerName) || c.managerName || '—';
     try {
       const r = await detectDealBlocker(c.transcript, c.segments, who);
+      if (r.unchecked) {
+        // Нічого не пишемо: рядок лишається NULL і потрапить у наступний прогін.
+        unchecked += 1;
+        console.warn(`[backfillBlockers] ${i + 1}/${calls.length} ${c.generalCallId} — не перевірено (збій рецензента), лишається на потім`);
+        if (i < calls.length - 1) await new Promise((r2) => setTimeout(r2, PAUSE_MS));
+        continue;
+      }
       await setCallBlocker(c.generalCallId, { blocker: r.blocker, quote: r.quote });
       if (r.blocker === NO_BLOCKER) {
         clean += 1;
@@ -98,6 +106,7 @@ async function main() {
   console.log(`  черга (СТО забите): ${noSlot}`);
   console.log(`  профіль (не наше):  ${outOfScope}`);
   console.log(`  помилки (повторити): ${failed}`);
+  console.log(`  не перевірено (лишились NULL): ${unchecked}`);
   console.log(`  у БД тепер: черга ${after.noSlot}, профіль ${after.outOfScope}, не перевірено ${after.unchecked}`);
 
   // Cached report findings were produced when blocked calls still counted as ordinary failed deals;

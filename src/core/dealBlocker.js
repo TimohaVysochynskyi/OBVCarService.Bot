@@ -215,8 +215,14 @@ async function detectDealBlocker(transcript, segments, managerName) {
       return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
     }
   } catch (err) {
-    console.error(`[dealBlocker] verification failed, rejecting "${blocker}": ${err.message}`);
-    return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+    // ⚠️ Відкинути — правильно (хибний блокер коштує дорожче за пропуск), але ЗАПИСАТИ це як
+    // «блокера немає» — ні: збій зв'язку став би невідрізнюваним від перевіреного факту, і жоден
+    // наступний прогін такий рядок уже не взяв би. Заміряно на прогоні 19.09.2026: 429 від OpenAI
+    // (ліміт 30k токенів/хв ділиться зі звітами) з'їв справжній no_slot саме так.
+    // Тому викликачу кажемо «не перевірено», і обидва лишають у БД NULL — рядок повернеться
+    // в наступний беклог.
+    console.error(`[dealBlocker] verification failed, leaving "${blocker}" unchecked: ${err.message}`);
+    return { blocker: NO_BLOCKER, quote: null, start: null, end: null, unchecked: true };
   }
 
   return { blocker, quote, start: hit.start, end: hit.end };
