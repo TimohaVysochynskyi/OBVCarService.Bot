@@ -85,11 +85,12 @@ function managerTable(manager, months) {
 }
 
 function categoryStrip(manager) {
+  const total = manager.byMonth[ALL] || {};
   return `<div class="cats">
       ${PURPOSE_ORDER.map(
         (p) => `<div class="cat" style="--c:${PURPOSE_COLORS[p]}">
           <span class="cat-icon">${PURPOSE_LABELS[p].icon}</span>
-          <span class="cat-num" data-cat="${p}">0</span>
+          <span class="cat-num" data-cat="${p}">${total[p] || 0}</span>
           <span class="cat-name">${esc(PURPOSE_LABELS[p].plural)}</span>
         </div>`
       ).join('')}
@@ -354,7 +355,7 @@ function renderGlobalReport(report) {
         <div class="big">${totals.hours}</div>
         <div class="cap">${esc(plural(Math.round(totals.hours), 'година', 'години', 'годин'))} розмов</div>
       </div>
-      <p class="lead" style="flex:1 1 320px;margin:0">Стільки часу довелося б прослухати вручну, щоб знати все, що є в цьому звіті — приблизно ${days} ${esc(plural(days, 'робочий день', 'робочі дні', 'робочих днів'))} суцільного прослуховування. Усі ${totals.calls} розмов розшифровано й розібрано автоматично.</p>
+      <p class="lead" style="flex:1 1 320px;margin:0">Стільки часу довелося б прослухати вручну, щоб знати все, що є в цьому звіті — приблизно ${days} ${esc(plural(days, 'робочий день', 'робочі дні', 'робочих днів'))} суцільного прослуховування. Усі ${totals.calls} ${esc(plural(totals.calls, 'розмову', 'розмови', 'розмов'))} розшифровано й розібрано автоматично.</p>
     </div>
   </header>
 
