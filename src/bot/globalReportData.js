@@ -1,4 +1,7 @@
+import { createHash } from 'node:crypto';
 import {
+  getStoredSegment,
+  upsertReportSegment,
   getGlobalTotals,
   getMonthlyPurposeBreakdown,
   getMonthlySalesStats,
@@ -116,6 +119,46 @@ function topFindings(findings, type) {
     }));
 }
 
+const GLOBAL_KIND = 'global';
+
+const dayStart = (d) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+const dayEnd = (d) => new Date(dayStart(d).getTime() + 24 * 3600 * 1000);
+
+function inputHash(findings) {
+  const shape = findings
+    .map((f) => `${f.type}|${f.claim}|${(f.evidence || []).map((e) => `${e.callId}:${e.quote}`).join(',')}`)
+    .join(`
+`);
+  return createHash('sha1').update(shape).digest('hex').slice(0, 16);
+}
+
+async function mergeCached(name, start, end, findings) {
+  const from = dayStart(start);
+  const to = dayEnd(end);
+  const hash = inputHash(findings);
+
+  const stored = await getStoredSegment(name, from, to, GLOBAL_KIND).catch(() => null);
+  if (stored && stored.meta?.inputHash === hash) return stored.findings || [];
+
+  const errors = findings.filter((f) => f.type === 'error');
+  const strengths = findings.filter((f) => f.type === 'strength');
+  const mergedErrors = errors.length ? await mergeFindings(name, errors).catch(() => []) : [];
+  const mergedStrengths = strengths.length ? await mergeFindings(name, strengths).catch(() => []) : [];
+  const merged = [...mergedErrors, ...mergedStrengths];
+
+  await upsertReportSegment({
+    managerName: name,
+    periodStart: from,
+    periodEnd: to,
+    kind: GLOBAL_KIND,
+    findings: merged,
+    candidateCount: findings.length,
+    meta: { inputHash: hash },
+  }).catch((err) => console.error(`[globalReport] кеш зведення не зберігся: ${err.message}`));
+
+  return merged;
+}
+
 const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0, partial: false };
 
 async function collectWithFallback(name, start, end, opts) {
@@ -144,15 +187,11 @@ async function managerFindings(name, start, end, opts) {
     return { ...EMPTY_FINDINGS, analysedDays: collected?.analysedDays || 0, days: collected?.days || 0, partial };
   }
 
-  const errors = collected.findings.filter((f) => f.type === 'error');
-  const strengths = collected.findings.filter((f) => f.type === 'strength');
-
-  const mergedErrors = errors.length ? await mergeFindings(name, errors).catch(() => []) : [];
-  const mergedStrengths = strengths.length ? await mergeFindings(name, strengths).catch(() => []) : [];
+  const merged = await mergeCached(name, start, end, collected.findings);
 
   return {
-    weaknesses: topFindings(mergedErrors, 'error'),
-    strengths: topFindings(mergedStrengths, 'strength'),
+    weaknesses: topFindings(merged, 'error'),
+    strengths: topFindings(merged, 'strength'),
     analysedDays: collected.analysedDays,
     days: collected.days,
     partial,
