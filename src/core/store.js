@@ -501,6 +501,23 @@ async function getCallsMissingPurpose() {
   return rows;
 }
 
+async function getNonSalesCalls({ limit = null, onlyUnlabelled = true } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            call_purpose AS "callPurpose", transcript
+     FROM calls
+     WHERE call_purpose IN ('info','other'${onlyUnlabelled ? '' : ",'personal'"})
+       AND transcript IS NOT NULL AND transcript <> ''
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function setCallPurpose(generalCallId, purpose) {
+  await pool.query('UPDATE calls SET call_purpose = $2 WHERE general_call_id = $1', [generalCallId, purpose]);
+}
+
 // ---- Persisted analytics segments (report_segments) --------------------------------------------
 // Cache/reuse of the report "reduce" per (manager × time segment). See the table comment in
 // migrate(). period_start/period_end are absolute UTC instants (day-bounded, Kyiv, computed by the
@@ -619,7 +636,7 @@ async function getOperators() {
 // analysed → counted as sales for backward-compat). Conversion, avg score and the weakest stage are
 // computed over SALES-relevant calls only, so routine informational calls don't drag the numbers.
 // callCount is the total; salesCount/infoCount give the breakdown shown in the header.
-const SALES_FILTER = `call_purpose IS DISTINCT FROM 'info' AND call_purpose IS DISTINCT FROM 'other'`;
+const SALES_FILTER = `(call_purpose = 'sales' OR call_purpose IS NULL)`;
 
 // "Незакриті угоди" — the СТО could not take the job (src/core/dealBlocker.js). Deliberately NOT
 // gated on call_purpose: measured on live data, blocked calls are usually classified 'info' (the MAP
@@ -649,7 +666,7 @@ async function getOperatorStats(name, start, end) {
     `SELECT
        COUNT(*)::int AS "callCount",
        COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
-       COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
+       COUNT(*) FILTER (WHERE call_purpose IN ('info','other','personal'))::int AS "infoCount",
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
        MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
@@ -740,7 +757,7 @@ async function getBucketedTrend(name, bucket, limit = 8) {
     `SELECT to_char(date_trunc($2, start_time AT TIME ZONE 'Europe/Kyiv'), 'YYYY-MM-DD') AS "bucketStart",
        COUNT(*)::int AS "callCount",
        COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
-       COUNT(*) FILTER (WHERE call_purpose IN ('info','other'))::int AS "infoCount",
+       COUNT(*) FILTER (WHERE call_purpose IN ('info','other','personal'))::int AS "infoCount",
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
        MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
@@ -1546,6 +1563,8 @@ export {
   updateCallFullAnalysis,
   getCallsMissingSegments,
   getCallsMissingPurpose,
+  getNonSalesCalls,
+  setCallPurpose,
   getStoredSegment,
   getLatestManualTail,
   getStoredSegmentsInRange,

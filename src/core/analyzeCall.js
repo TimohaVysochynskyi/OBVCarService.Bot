@@ -25,14 +25,12 @@ const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
 // 'info'/'other' calls contribute NO behaviours (so a routine status update never becomes a
 // "sales mistake"). The purpose is also stored per call (calls.call_purpose) for the report's
 // sales-vs-info numeric breakdown.
-const CALL_PURPOSES = ['sales', 'info', 'other'];
+import { CALL_PURPOSES, PURPOSE_RULES } from './callPurpose.js';
 
 const SYSTEM_PROMPT = `Контекст: менеджер автосервісу (СТО) веде телефонну розмову.
 
 КРОК 1 — визнач ТИП дзвінка (callPurpose):
-- "sales" — Є можливість залучити/записати клієнта чи продати: вхідний запит про послугу/ціну, новий клієнт із проблемою авто, заперечення, допродаж, спроба записати на сервіс.
-- "info" — НЕМАЄ можливості продажу: менеджер лише інформує про статус уже наявного замовлення ("машина готова", "буде готово завтра", "вартість вийшла така"), підтверджує вже наявний запис, або клієнт дзвонить уточнити статус своєї машини. Звичайна сервісна/інформаційна розмова.
-- "other" — службовий/помилковий/спам/не по темі.
+${PURPOSE_RULES}
 
 КРОК 2 — поведінки менеджера (items):
 - Якщо callPurpose НЕ "sales" → поверни items ПОРОЖНІМ. Не оцінюй навички продажу на інформаційному дзвінку.

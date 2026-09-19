@@ -12,6 +12,7 @@ import {
 import { reduceFindingsConsistent, getAnalyzePrompt, MAX_PHRASES } from './analyze.js';
 import { getScoreRubric } from '../core/classifyCall.js';
 import { kyivDaySegments } from './time.js';
+import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
 
 // ============================================================================================
 // Persisted analytics: the report "reduce" per (manager × time segment) is computed ONCE and frozen
@@ -72,7 +73,7 @@ async function segmentMeta(passes) {
 
 function candidateCount(calls) {
   return calls.reduce((n, c) => {
-    if (c.callPurpose === 'info' || c.callPurpose === 'other') return n;
+    if (NON_SALES_PURPOSES.includes(c.callPurpose)) return n;
     return n + (c.behaviors?.items?.length || 0);
   }, 0);
 }

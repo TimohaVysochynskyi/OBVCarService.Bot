@@ -4,6 +4,7 @@ import { fetchOk } from '../core/http.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
+import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
 import {
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
@@ -185,7 +186,7 @@ function buildCandidates(calls) {
   const candidates = [];
   const byId = new Map();
   calls.forEach((c) => {
-    if (c.callPurpose === 'info' || c.callPurpose === 'other') return;
+    if (NON_SALES_PURPOSES.includes(c.callPurpose)) return;
     const items = [...(c.behaviors?.items || []), ...dialogueCandidates(c)];
     items.forEach((it) => {
       if (!it?.quote) return;

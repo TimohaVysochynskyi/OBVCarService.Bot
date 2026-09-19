@@ -12,6 +12,7 @@ import { operatorListKeyboard, operatorLabel } from "./keyboards.js";
 import { displayName, formatPhone } from "./operators.js";
 import { formatDialogue } from "./dialogue.js";
 import { timecodedDialogue } from "../core/dialogueMetrics.js";
+import { NON_SALES_PURPOSES } from "../core/callPurpose.js";
 import { kyivParts, formatKyiv } from "./time.js";
 import { sendLong, withProgress, showScreen } from "./ui.js";
 
@@ -26,7 +27,7 @@ const looksDiarized = (t) => /(^|\n)\s*(Менеджер|Клієнт)\s*:/.test
 // Non-sales calls (info/other) carry no effectiveness score — the ingest deliberately skips
 // scoring them. Show a neutral purpose tag instead of a misleading 👎/бал. Sales calls (and
 // legacy rows with a NULL purpose, treated as sales) keep the success/score display.
-const isNonSales = (p) => p === "other" || p === "info";
+const isNonSales = (p) => NON_SALES_PURPOSES.includes(p);
 
 // The four archive categories (calls.call_purpose; 'none' = NULL, i.e. ingested before purpose
 // detection or MAP failure). Each gets its OWN icon: the picker shows them side by side, so the old
@@ -37,6 +38,7 @@ const isNonSales = (p) => p === "other" || p === "info";
 const CATEGORIES = [
   { key: "sales", icon: "💰", plural: "Угоди", one: "угода" },
   { key: "info", icon: "ℹ️", plural: "Інформаційні", one: "інформаційний" },
+  { key: "personal", icon: "👤", plural: "Особисті", one: "особистий" },
   { key: "other", icon: "⚙️", plural: "Службові", one: "службовий" },
   { key: "none", icon: "❔", plural: "Інші", one: "інший" },
 ];
