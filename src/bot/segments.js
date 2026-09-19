@@ -235,8 +235,8 @@ async function getOrComputeDaySegment(name, start, end, { analyze = true, onComp
   }
   if (!analyze) return null;
   const seg = await analyzeSegment(name, start, end, RANGE_PASSES);
-  if (onComputed) await onComputed();
   if (!seg) return null;
+  if (onComputed) await onComputed();
   await upsertReportSegment({
     managerName: name, periodStart: start, periodEnd: end, kind: DAY_KIND,
     ...seg, analysisVersion: SEGMENT_ANALYSIS_VERSION,
