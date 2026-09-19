@@ -265,6 +265,13 @@ async function processChunk(start, end, roster) {
   }
 }
 
+const DEFAULT_CHUNK_PAUSE_MS = 1500;
+
+function chunkPauseMs() {
+  const ms = Number(process.env.POLL_CHUNK_PAUSE_MS || DEFAULT_CHUNK_PAUSE_MS);
+  return Number.isFinite(ms) && ms >= 0 ? ms : DEFAULT_CHUNK_PAUSE_MS;
+}
+
 async function processCallsForRange(start, end) {
   const roster = await getOperatorRoster();
   const chunks = splitIntoChunks(start, end);
@@ -277,7 +284,13 @@ async function processCallsForRange(start, end) {
     // Binotel's "requests are too frequent" throttling. A short pause between chunks costs nothing
     // next to the per-call transcription/analysis work, but avoids hammering it on a multi-chunk
     // range (backfills; a poll run after downtime).
-    if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, 1500));
+    //
+    // ⚠️ Configurable because a long backfill competes with the LIVE poller for the same Binotel
+    // quota: on 19.09.2026 a 101-chunk run died on code 106 ("requests are too frequent, retry
+    // after 3 sec") after exhausting all three retries. A failed listing deliberately aborts the
+    // whole range instead of being skipped - in the poller, skipping a window and then advancing
+    // the checkpoint is precisely how calls disappear - so pacing is the only safe lever.
+    if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, chunkPauseMs()));
   }
 }
 
