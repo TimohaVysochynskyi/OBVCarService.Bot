@@ -295,7 +295,17 @@ async function collectRangeFindings(
   let ranOutOfTime = false;
   const pause = pauseMs ? () => new Promise((r) => setTimeout(r, pauseMs)) : null;
 
-  const rows = await mapLimit(days, concurrency, async (d) => {
+  const stored = await getStoredSegmentsInRange(name, periodStart, periodEnd, [DAY_KIND]);
+  const fresh = new Map();
+  for (const row of stored) {
+    if ((row.analysisVersion || 0) < SEGMENT_ANALYSIS_VERSION) continue;
+    if (Date.now() - new Date(row.periodEnd).getTime() < RECENT_MS) continue;
+    fresh.set(new Date(row.periodStart).toISOString().slice(0, 10), row);
+  }
+
+  const pending = days.filter((d) => !fresh.has(d.start.toISOString().slice(0, 10)));
+
+  const computed = await mapLimit(pending, concurrency, async (d) => {
     const expired = deadline != null && Date.now() > deadline;
     if (expired) ranOutOfTime = true;
     try {
@@ -307,7 +317,7 @@ async function collectRangeFindings(
     }
   });
 
-  const present = rows.filter(Boolean);
+  const present = [...fresh.values(), ...computed.filter(Boolean)];
   return {
     stats,
     findings: present.flatMap((r) => r.findings || []),
