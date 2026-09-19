@@ -118,10 +118,19 @@ function topFindings(findings, type) {
 
 const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0, partial: false };
 
-async function collectWithFallback(name, start, end, { analyze, concurrency }) {
-  if (!analyze) return { collected: await collectRangeFindings(name, start, end, { analyze: false }), partial: true };
+async function collectWithFallback(name, start, end, opts) {
+  if (!opts.analyze) {
+    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
+    return { collected, partial: true };
+  }
   try {
-    return { collected: await collectRangeFindings(name, start, end, { analyze: true, concurrency }), partial: false };
+    const collected = await collectRangeFindings(name, start, end, {
+      analyze: true,
+      concurrency: opts.concurrency,
+      pauseMs: opts.pauseMs,
+      deadline: opts.deadline,
+    });
+    return { collected, partial: Boolean(collected?.failedDays || collected?.ranOutOfTime) };
   } catch (err) {
     console.error(`[globalReport] аналіз ${name} не завершився (${err.message}); беремо те, що вже пораховано`);
     const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
@@ -129,8 +138,8 @@ async function collectWithFallback(name, start, end, { analyze, concurrency }) {
   }
 }
 
-async function managerFindings(name, start, end, { analyze, concurrency }) {
-  const { collected, partial } = await collectWithFallback(name, start, end, { analyze, concurrency });
+async function managerFindings(name, start, end, opts) {
+  const { collected, partial } = await collectWithFallback(name, start, end, opts);
   if (!collected?.findings?.length) {
     return { ...EMPTY_FINDINGS, analysedDays: collected?.analysedDays || 0, days: collected?.days || 0, partial };
   }
@@ -191,9 +200,17 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
   };
 }
 
-const REPORT_CONCURRENCY = Number(process.env.GLOBAL_REPORT_CONCURRENCY || 2);
+const REPORT_CONCURRENCY = Number(process.env.GLOBAL_REPORT_CONCURRENCY || 1);
+const REPORT_PAUSE_MS = Number(process.env.GLOBAL_REPORT_PAUSE_MS || 1500);
+const REPORT_BUDGET_MS = Number(process.env.GLOBAL_REPORT_BUDGET_MS || 120000);
 
-async function buildGlobalReport({ analyze = true, concurrency = REPORT_CONCURRENCY } = {}) {
+async function buildGlobalReport({
+  analyze = true,
+  concurrency = REPORT_CONCURRENCY,
+  pauseMs = REPORT_PAUSE_MS,
+  budgetMs = REPORT_BUDGET_MS,
+} = {}) {
+  const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
   const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators] = await Promise.all([
     getGlobalTotals(),
     getMonthlyPurposeBreakdown(),
@@ -218,7 +235,12 @@ async function buildGlobalReport({ analyze = true, concurrency = REPORT_CONCURRE
   const managers = [];
   for (const person of people) {
     const monthsMap = byManager.get(person.name) || new Map();
-    const findings = await managerFindings(person.name, start, new Date(end.getTime() + 1000), { analyze, concurrency });
+    const findings = await managerFindings(person.name, start, new Date(end.getTime() + 1000), {
+      analyze,
+      concurrency,
+      pauseMs,
+      deadline,
+    });
     managers.push({
       name: person.name,
       display: displayName(person.name) || person.name,

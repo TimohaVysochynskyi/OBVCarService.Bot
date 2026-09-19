@@ -225,7 +225,7 @@ function enumerateDays(start, end) {
 // One day's analysis: reuse the cached row when it is current, otherwise compute + store it.
 // analyze:false makes this reuse-ONLY (the quarter path) — it returns null instead of paying for an
 // analysis. Self-heals a recent day whose call set changed (a late-ingested call).
-async function getOrComputeDaySegment(name, start, end, { analyze = true } = {}) {
+async function getOrComputeDaySegment(name, start, end, { analyze = true, onComputed = null } = {}) {
   const existing = await getStoredSegment(name, start, end, DAY_KIND);
   if (existing && (existing.analysisVersion || 0) >= SEGMENT_ANALYSIS_VERSION) {
     const recent = Date.now() - new Date(end).getTime() < RECENT_MS;
@@ -235,6 +235,7 @@ async function getOrComputeDaySegment(name, start, end, { analyze = true } = {})
   }
   if (!analyze) return null;
   const seg = await analyzeSegment(name, start, end, RANGE_PASSES);
+  if (onComputed) await onComputed();
   if (!seg) return null;
   await upsertReportSegment({
     managerName: name, periodStart: start, periodEnd: end, kind: DAY_KIND,
@@ -262,7 +263,12 @@ async function mapLimit(items, limit, fn) {
 // Returns { stats, findings, phrases, days, analysedDays, missingDays } or null when the manager has
 // no calls in the period at all. The CALLER (report.js) merges the pooled findings into a single
 // coherent list — see analyze.js: mergeFindings.
-async function collectRangeFindings(name, periodStart, periodEnd, { analyze = true, concurrency = CONCURRENCY } = {}) {
+async function collectRangeFindings(
+  name,
+  periodStart,
+  periodEnd,
+  { analyze = true, concurrency = CONCURRENCY, pauseMs = 0, deadline = null } = {}
+) {
   const stats = await getOperatorStats(name, periodStart, periodEnd);
   if (!stats.callCount) return null;
 
@@ -285,7 +291,22 @@ async function collectRangeFindings(name, periodStart, periodEnd, { analyze = tr
     };
   }
 
-  const rows = await mapLimit(days, concurrency, (d) => getOrComputeDaySegment(name, d.start, d.end, { analyze: true }));
+  let failedDays = 0;
+  let ranOutOfTime = false;
+  const pause = pauseMs ? () => new Promise((r) => setTimeout(r, pauseMs)) : null;
+
+  const rows = await mapLimit(days, concurrency, async (d) => {
+    const expired = deadline != null && Date.now() > deadline;
+    if (expired) ranOutOfTime = true;
+    try {
+      return await getOrComputeDaySegment(name, d.start, d.end, { analyze: !expired, onComputed: pause });
+    } catch (err) {
+      failedDays += 1;
+      console.error(`[segments] ${name} ${d.start.toISOString().slice(0, 10)} не порахувався: ${err.message}`);
+      return null;
+    }
+  });
+
   const present = rows.filter(Boolean);
   return {
     stats,
@@ -293,7 +314,9 @@ async function collectRangeFindings(name, periodStart, periodEnd, { analyze = tr
     phrases: dedupPhrases(present.flatMap((r) => r.phrases || [])),
     days: days.length,
     analysedDays: present.length,
-    missingDays: 0,
+    missingDays: failedDays,
+    failedDays,
+    ranOutOfTime,
   };
 }
 

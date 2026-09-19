@@ -7,7 +7,7 @@ async function main() {
   await migrate();
 
   const started = Date.now();
-  const report = await buildGlobalReport({ analyze });
+  const report = await buildGlobalReport({ analyze, budgetMs: 0 });
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
 
   const t = report.totals;
@@ -22,7 +22,7 @@ async function main() {
       `\n${m.display}: дзвінків ${all.calls}, угод ${all.sales}, записів ${all.success}, ` +
         `конверсія ${all.conversion ?? '—'}%, бал ${all.avgScore ?? '—'}`
     );
-    console.log(`  плюси: ${m.strengths.length}, мінуси: ${m.weaknesses.length} (днів проаналізовано ${m.analysedDays}/${m.days})`);
+    console.log(`  плюси: ${m.strengths.length}, мінуси: ${m.weaknesses.length} (днів проаналізовано ${m.analysedDays}/${m.days}${m.partial ? ', покриття НЕПОВНЕ' : ''})`);
     for (const f of m.strengths) console.log(`   + ${f.claim} (${f.examples.length} прикл.)`);
     for (const f of m.weaknesses) console.log(`   − ${f.claim} (${f.examples.length} прикл.)`);
   }
@@ -37,11 +37,16 @@ async function main() {
   console.log('\nСлабкі етапи:');
   for (const s of report.stages) console.log(`  ${String(s.count).padStart(4)}  ${s.stage}`);
 
+  const incomplete = report.managers.filter((m) => m.partial).map((m) => m.display);
   console.log(`\nЗібрано за ${seconds}с`);
+  if (incomplete.length) {
+    console.log(`⚠️ Неповне покриття: ${incomplete.join(', ')} — повтори прогін, він продовжить звідти, де кеш уже є.`);
+    process.exitCode = 1;
+  }
 }
 
 main()
-  .then(() => process.exit(0))
+  .then(() => process.exit(process.exitCode || 0))
   .catch((err) => {
     console.error('[warmGlobalReport] впав:', err);
     process.exit(1);

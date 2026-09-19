@@ -123,8 +123,8 @@ function findingColumn(title, findings, kind, emptyText) {
 }
 
 function partialNote(manager) {
-  if (!manager.partial || !manager.days || manager.analysedDays >= manager.days) return '';
-  return `<p class="warn">Сильні та слабкі сторони зібрані за ${manager.analysedDays} ${plural(manager.analysedDays, 'день', 'дні', 'днів')} із ${manager.days} — решту днів проаналізувати не вдалося, тож картина може бути неповною.</p>`;
+  if (!manager.partial || !manager.days) return '';
+  return `<p class="warn">Сильні та слабкі сторони зібрані за ${manager.analysedDays} ${plural(manager.analysedDays, 'день', 'дні', 'днів')} із ${manager.days} — решту проаналізувати поки не вдалося, тож картина може бути неповною.</p>`;
 }
 
 function managerCard(manager, months) {
