@@ -40,7 +40,33 @@ async function httpError(provider, op, res) {
   err.op = op;
   err.status = res.status;
   err.body = body;
+  const hinted = retryAfterMs(res, body);
+  if (hinted != null) err.retryAfterMs = hinted;
   return err;
+}
+
+// Скільки сервіс САМ просить зачекати. OpenAI на 429 пише це і заголовком `retry-after`, і текстом
+// («Please try again in 1.694s»), і без цього ретрай чекав фіксовані 2с наосліп — а на спільному
+// ліміті 30k токенів/хв це означало здатись за секунду до того, як квота звільнилась.
+// Стеля 60с: зіпсоване або абсурдне значення не має підвішувати хендлер на півгодини.
+const MAX_RETRY_AFTER_MS = 60_000;
+
+function retryAfterMs(res, body) {
+  const header = res?.headers?.get?.('retry-after') ?? res?.headers?.get?.('x-ratelimit-reset-tokens');
+  if (header) {
+    const value = String(header).trim();
+    const seconds = value.endsWith('ms') ? Number(value.slice(0, -2)) / 1000 : Number(value.replace(/s$/, ''));
+    if (Number.isFinite(seconds) && seconds > 0) return Math.min(seconds * 1000, MAX_RETRY_AFTER_MS);
+  }
+  const match = /try again in ([\d.]+)\s*(ms|s)/i.exec(body || '');
+  if (match) {
+    const value = Number(match[1]);
+    if (Number.isFinite(value) && value > 0) {
+      const ms = match[2].toLowerCase() === 'ms' ? value : value * 1000;
+      return Math.min(ms, MAX_RETRY_AFTER_MS);
+    }
+  }
+  return null;
 }
 
 // Ідентифікатор інциденту: 4 символи без 0/O/1/I/L, щоб людина могла продиктувати його голосом

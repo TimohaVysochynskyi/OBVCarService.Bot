@@ -535,7 +535,7 @@ async function runReducePass(managerName, candidates, stats) {
       });
       return parseModelJson(await res.json(), 'openai', 'аналіз дзвінків за період');
     },
-    { attempts: 2, delayMs: 2000, label: `OpenAI reduce ${managerName}` }
+    { attempts: 4, delayMs: 3000, label: `OpenAI reduce ${managerName}` }
   );
 }
 

@@ -262,7 +262,7 @@ async function mapLimit(items, limit, fn) {
 // Returns { stats, findings, phrases, days, analysedDays, missingDays } or null when the manager has
 // no calls in the period at all. The CALLER (report.js) merges the pooled findings into a single
 // coherent list — see analyze.js: mergeFindings.
-async function collectRangeFindings(name, periodStart, periodEnd, { analyze = true } = {}) {
+async function collectRangeFindings(name, periodStart, periodEnd, { analyze = true, concurrency = CONCURRENCY } = {}) {
   const stats = await getOperatorStats(name, periodStart, periodEnd);
   if (!stats.callCount) return null;
 
@@ -285,7 +285,7 @@ async function collectRangeFindings(name, periodStart, periodEnd, { analyze = tr
     };
   }
 
-  const rows = await mapLimit(days, CONCURRENCY, (d) => getOrComputeDaySegment(name, d.start, d.end, { analyze: true }));
+  const rows = await mapLimit(days, concurrency, (d) => getOrComputeDaySegment(name, d.start, d.end, { analyze: true }));
   const present = rows.filter(Boolean);
   return {
     stats,

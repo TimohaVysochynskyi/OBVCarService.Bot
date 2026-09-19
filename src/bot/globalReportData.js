@@ -116,23 +116,37 @@ function topFindings(findings, type) {
     }));
 }
 
-async function managerFindings(name, start, end, { analyze }) {
-  const collected = await collectRangeFindings(name, start, end, { analyze });
-  if (!collected?.findings?.length) return { strengths: [], weaknesses: [], analysedDays: collected?.analysedDays || 0, days: collected?.days || 0 };
+const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0, partial: false };
+
+async function collectWithFallback(name, start, end, { analyze, concurrency }) {
+  if (!analyze) return { collected: await collectRangeFindings(name, start, end, { analyze: false }), partial: true };
+  try {
+    return { collected: await collectRangeFindings(name, start, end, { analyze: true, concurrency }), partial: false };
+  } catch (err) {
+    console.error(`[globalReport] аналіз ${name} не завершився (${err.message}); беремо те, що вже пораховано`);
+    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
+    return { collected, partial: true };
+  }
+}
+
+async function managerFindings(name, start, end, { analyze, concurrency }) {
+  const { collected, partial } = await collectWithFallback(name, start, end, { analyze, concurrency });
+  if (!collected?.findings?.length) {
+    return { ...EMPTY_FINDINGS, analysedDays: collected?.analysedDays || 0, days: collected?.days || 0, partial };
+  }
 
   const errors = collected.findings.filter((f) => f.type === 'error');
   const strengths = collected.findings.filter((f) => f.type === 'strength');
 
-  const [mergedErrors, mergedStrengths] = await Promise.all([
-    errors.length ? mergeFindings(name, errors) : [],
-    strengths.length ? mergeFindings(name, strengths) : [],
-  ]);
+  const mergedErrors = errors.length ? await mergeFindings(name, errors).catch(() => []) : [];
+  const mergedStrengths = strengths.length ? await mergeFindings(name, strengths).catch(() => []) : [];
 
   return {
     weaknesses: topFindings(mergedErrors, 'error'),
     strengths: topFindings(mergedStrengths, 'strength'),
     analysedDays: collected.analysedDays,
     days: collected.days,
+    partial,
   };
 }
 
@@ -177,7 +191,9 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
   };
 }
 
-async function buildGlobalReport({ analyze = true } = {}) {
+const REPORT_CONCURRENCY = Number(process.env.GLOBAL_REPORT_CONCURRENCY || 2);
+
+async function buildGlobalReport({ analyze = true, concurrency = REPORT_CONCURRENCY } = {}) {
   const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators] = await Promise.all([
     getGlobalTotals(),
     getMonthlyPurposeBreakdown(),
@@ -202,7 +218,7 @@ async function buildGlobalReport({ analyze = true } = {}) {
   const managers = [];
   for (const person of people) {
     const monthsMap = byManager.get(person.name) || new Map();
-    const findings = await managerFindings(person.name, start, new Date(end.getTime() + 1000), { analyze });
+    const findings = await managerFindings(person.name, start, new Date(end.getTime() + 1000), { analyze, concurrency });
     managers.push({
       name: person.name,
       display: displayName(person.name) || person.name,

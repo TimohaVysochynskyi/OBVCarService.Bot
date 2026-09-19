@@ -122,6 +122,11 @@ function findingColumn(title, findings, kind, emptyText) {
   return `<section class="col ${kind}"><h3>${esc(title)}</h3>${body}</section>`;
 }
 
+function partialNote(manager) {
+  if (!manager.partial || !manager.days || manager.analysedDays >= manager.days) return '';
+  return `<p class="warn">Сильні та слабкі сторони зібрані за ${manager.analysedDays} ${plural(manager.analysedDays, 'день', 'дні', 'днів')} із ${manager.days} — решту днів проаналізувати не вдалося, тож картина може бути неповною.</p>`;
+}
+
 function managerCard(manager, months) {
   const convSeries = Object.fromEntries(months.map((m) => [m.key, manager.byMonth[m.key]?.conversion ?? null]));
   const scoreSeries = Object.fromEntries(months.map((m) => [m.key, manager.byMonth[m.key]?.avgScore ?? null]));
@@ -135,6 +140,7 @@ function managerCard(manager, months) {
         <figure><figcaption>Конверсія, %</figcaption>${barChart(convSeries, { max: 100, months, suffix: '%' })}</figure>
         <figure><figcaption>Середній бал</figcaption>${barChart(scoreSeries, { max: 10, months, decimals: 1 })}</figure>
       </div>
+      ${partialNote(manager)}
       <div class="cols">
         ${findingColumn('Сильні сторони', manager.strengths, 'plus', 'Стійких сильних патернів за період не набралось.')}
         ${findingColumn('Слабкі місця', manager.weaknesses, 'minus', 'Повторюваних помилок за період не зафіксовано.')}
@@ -318,6 +324,8 @@ function renderGlobalReport(report) {
   .note { font-size: 12px; color: var(--muted); padding: 2px 10px; }
   .when { font-size: 11px; color: var(--muted); padding: 0 10px; }
   .empty { color: var(--muted); font-size: 14px; }
+  .warn { background: #fff6e5; border: 1px solid #f0dcb4; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; color: #7a5a1e; margin: 14px 0 0; }
   .buckets { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .bucket { border: 1px solid var(--line); border-radius: 10px; padding: 14px; text-align: center; }
   .bucket-num { font-size: 30px; font-weight: 700; }
