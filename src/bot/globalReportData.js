@@ -126,7 +126,8 @@ const dayEnd = (d) => new Date(dayStart(d).getTime() + 24 * 3600 * 1000);
 
 function inputHash(findings) {
   const shape = findings
-    .map((f) => `${f.type}|${f.claim}|${(f.evidence || []).map((e) => `${e.callId}:${e.quote}`).join(',')}`)
+    .map((f) => `${f.type}|${f.claim}|${(f.evidence || []).map((e) => `${e.callId}:${e.quote}`).sort().join(',')}`)
+    .sort()
     .join(`
 `);
   return createHash('sha1').update(shape).digest('hex').slice(0, 16);
