@@ -1319,7 +1319,7 @@ async function getPendingCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber", manager_name AS "managerName",
             start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber",
-            client_name AS "clientName", attempts
+            client_name AS "clientName", attempts, last_error AS "lastError"
      FROM pending_calls
      WHERE status = 'pending'
      ORDER BY start_time`
