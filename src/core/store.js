@@ -743,6 +743,82 @@ async function getDeclineReasonCounts() {
   return rows;
 }
 
+const HAS_TEXT = `transcript IS NOT NULL AND transcript <> ''`;
+const KYIV_MONTH = `to_char(start_time AT TIME ZONE 'Europe/Kyiv', 'YYYY-MM')`;
+const IS_PERSON = `manager_name !~ '^[0-9]+$'`;
+
+async function getGlobalTotals() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*)::int AS calls,
+            COALESCE(SUM(duration_sec), 0)::int AS seconds,
+            MIN(start_time) AS "firstCall",
+            MAX(start_time) AS "lastCall",
+            COUNT(DISTINCT manager_name) FILTER (WHERE ${IS_PERSON})::int AS managers
+     FROM calls WHERE ${HAS_TEXT}`
+  );
+  return rows[0];
+}
+
+async function getMonthlyPurposeBreakdown() {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS "managerName", ${KYIV_MONTH} AS month,
+            COALESCE(call_purpose, 'sales') AS purpose, COUNT(*)::int AS count
+     FROM calls WHERE ${HAS_TEXT}
+     GROUP BY 1, 2, 3`
+  );
+  return rows;
+}
+
+async function getMonthlySalesStats() {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS "managerName", ${KYIV_MONTH} AS month,
+            COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS "salesCount",
+            COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
+            COUNT(*) FILTER (WHERE ${SALES_FILTER} AND (${NOT_BLOCKED_FILTER} OR is_success))::int AS "reachableCount",
+            ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
+            COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "blockedNoSlot",
+            COUNT(*) FILTER (WHERE deal_blocker = 'no_parts')::int AS "blockedNoParts",
+            COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "blockedOutOfScope"
+     FROM calls WHERE ${HAS_TEXT}
+     GROUP BY 1, 2`
+  );
+  return rows;
+}
+
+async function getWeakStageCounts() {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS "managerName", weakest_stage AS stage, COUNT(*)::int AS count
+     FROM calls
+     WHERE ${HAS_TEXT} AND ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER} AND weakest_stage IS NOT NULL
+     GROUP BY 1, 2`
+  );
+  return rows;
+}
+
+async function getAllBlockedCalls() {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime", manager_name AS "managerName",
+            deal_blocker AS blocker, deal_blocker_reason AS reason, deal_blocker_quote AS quote,
+            client_number AS "clientNumber", client_name AS "clientName", is_success AS "isSuccess"
+     FROM calls
+     WHERE ${BLOCKED_FILTER}
+     ORDER BY start_time ASC`
+  );
+  return rows;
+}
+
+async function getDeclineCoverage() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE ${SALES_FILTER} AND is_success IS NOT TRUE)::int AS "notBooked",
+            COUNT(*) FILTER (WHERE ${SALES_FILTER} AND is_success IS NOT TRUE AND ${BLOCKED_FILTER})::int AS "notBookedBlocked",
+            COUNT(*) FILTER (WHERE client_decline_reason IS NOT NULL)::int AS "clientExplained",
+            COUNT(*) FILTER (WHERE ${SALES_FILTER} AND is_success IS NOT TRUE AND ${NOT_BLOCKED_FILTER} AND client_decline_reason IS NULL)::int AS "unchecked",
+            COUNT(*) FILTER (WHERE deal_blocker IS NULL AND is_success IS NOT TRUE)::int AS "blockerUnchecked"
+     FROM calls WHERE ${HAS_TEXT}`
+  );
+  return rows[0];
+}
+
 async function setCallBlocker(generalCallId, { blocker, quote = null, reason = null }) {
   await pool.query(
     `UPDATE calls SET deal_blocker = $2, deal_blocker_quote = $3, deal_blocker_reason = $4 WHERE general_call_id = $1`,
@@ -1596,6 +1672,12 @@ export {
   updateCallFullAnalysis,
   getCallsMissingSegments,
   getCallsMissingPurpose,
+  getGlobalTotals,
+  getMonthlyPurposeBreakdown,
+  getMonthlySalesStats,
+  getWeakStageCounts,
+  getAllBlockedCalls,
+  getDeclineCoverage,
   getUnexplainedDeclines,
   setClientDeclineReason,
   getDeclineReasonCounts,

@@ -19,6 +19,7 @@
     "backfill:purpose": "node src/scripts/backfillPurpose.js",
     "backfill:personal": "node src/scripts/backfillPersonal.js",
     "backfill:declines": "node src/scripts/backfillDeclines.js",
+    "warm:global": "node src/scripts/warmGlobalReport.js",
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
     "backfill:audio": "node src/scripts/backfillAudio.js",
