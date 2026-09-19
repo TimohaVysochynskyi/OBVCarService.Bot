@@ -17,6 +17,7 @@ import { registerRoles, openRolesMenu, addByPhoneText } from './roles.js';
 import { registerSettings, openSettings, addRecipientByIdText } from './settings.js';
 import { registerIncidents, openIncidents } from './incidents.js';
 import { registerHealth, openHealth } from './health.js';
+import { registerGlobalReport } from './globalReport.js';
 import { formatPhone } from './operators.js';
 import {
   getUser,
@@ -132,11 +133,12 @@ const CMD = {
   myreport: { command: 'myreport', description: '📊 Моя статистика' },
   log: { command: 'log', description: '🩺 Журнал інцидентів' },
   health: { command: 'health', description: '🩺 Перевірка стану' },
+  globalReport: { command: 'global-report', description: '📊 Звіт за весь період' },
 };
 
 function commandsForRole(role) {
   if (isAdmin(role))
-    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health];
+    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health, CMD.globalReport];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
   return [CMD.menu, CMD.ask]; // mechanic
 }
@@ -235,6 +237,7 @@ registerReportActions(bot);
 registerErrorActions(bot);
 registerIncidents(bot);
 registerHealth(bot, kbState);
+registerGlobalReport(bot);
 
 // A manager saving their own phone number (request_users doesn't return a phone). Last in the
 // contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via

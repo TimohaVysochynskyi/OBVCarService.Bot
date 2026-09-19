@@ -52,6 +52,7 @@ function featureOf(ctx) {
     if (cq === 'set' || cq.startsWith('set:')) return 'settings';
     if (cq === 'log' || cq.startsWith('log:')) return 'logs';
     if (cq === 'health' || cq.startsWith('health:')) return 'health';
+    if (cq === 'greport') return 'global_report';
     if (cq.startsWith('me:')) return 'stats_self';
     return 'menu';
   }
@@ -71,6 +72,7 @@ function featureOf(ctx) {
       settings: 'settings',
       log: 'logs',
       health: 'health',
+      'global-report': 'global_report',
       myreport: 'stats_self',
     };
     return map[cmd] ?? 'menu';
