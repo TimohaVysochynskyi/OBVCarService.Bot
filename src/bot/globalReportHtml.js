@@ -29,19 +29,24 @@ function plural(n, one, few, many) {
   return many;
 }
 
+function share(count, total) {
+  if (!total) return '';
+  const pct = (count / total) * 100;
+  return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
+}
+
 function donut(purposes, total) {
   if (!total) return '';
   const radius = 54;
   const circumference = 2 * Math.PI * radius;
   let offset = 0;
   const arcs = PURPOSE_ORDER.filter((p) => purposes[p]).map((p) => {
-    const share = purposes[p] / total;
-    const length = share * circumference;
-    const arc = `<circle class="arc" r="${radius}" cx="70" cy="70" fill="none" stroke="${PURPOSE_COLORS[p]}" stroke-width="22" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"></circle>`;
+    const length = (purposes[p] / total) * circumference;
+    const arc = `<circle r="${radius}" cx="70" cy="70" fill="none" stroke="${PURPOSE_COLORS[p]}" stroke-width="22" stroke-dasharray="${length.toFixed(2)} ${(circumference - length).toFixed(2)}" stroke-dashoffset="${(-offset).toFixed(2)}"></circle>`;
     offset += length;
     return arc;
   });
-  return `<svg viewBox="0 0 140 140" class="donut" role="img" aria-label="Розподіл дзвінків за категоріями">
+  return `<svg viewBox="0 0 140 140" class="donut" role="img" aria-label="Структура дзвінків">
       <g transform="rotate(-90 70 70)">${arcs.join('')}</g>
       <text x="70" y="66" class="donut-num">${total}</text>
       <text x="70" y="84" class="donut-cap">дзвінків</text>
@@ -52,7 +57,7 @@ function barChart(series, { max, months, suffix = '', decimals = 0 }) {
   if (!months.length) return '';
   const width = 100 / months.length;
   const bars = months
-    .map((m, i) => {
+    .map((m) => {
       const value = series[m.key];
       const height = value == null || !max ? 0 : Math.max(2, (value / max) * 100);
       const label = value == null ? '—' : value.toFixed(decimals) + suffix;
@@ -97,6 +102,15 @@ function categoryStrip(manager) {
     </div>`;
 }
 
+function monthTabs(months) {
+  return `<div class="tabs">${[{ key: ALL, title: 'Весь період' }, ...months]
+    .map(
+      (m, i) =>
+        `<button type="button" class="tab${i === 0 ? ' on' : ''}" data-month="${esc(m.key)}">${esc(m.title)}</button>`
+    )
+    .join('')}</div>`;
+}
+
 function findingBlock(finding, kind) {
   const examples = finding.examples
     .map(
@@ -107,11 +121,18 @@ function findingBlock(finding, kind) {
       </li>`
     )
     .join('');
+  const count = finding.examples.length;
+  const details = count
+    ? `<details>
+        <summary>Переглянути приклади<span class="cnt">${count}</span></summary>
+        <ul class="examples">${examples}</ul>
+      </details>`
+    : '';
   return `<article class="finding ${kind}">
       <h4>${esc(finding.claim)}</h4>
       ${finding.why ? `<p class="why">${esc(finding.why)}</p>` : ''}
       ${finding.action ? `<p class="action">${esc(finding.action)}</p>` : ''}
-      <ul class="examples">${examples}</ul>
+      ${details}
     </article>`;
 }
 
@@ -133,6 +154,7 @@ function managerCard(manager, months) {
 
   return `<section class="card manager" data-manager="${esc(manager.name)}">
       <h2>${esc(manager.display)}</h2>
+      ${monthTabs(months)}
       ${categoryStrip(manager)}
       <h3 class="sub">Динаміка по угодах</h3>
       ${managerTable(manager, months)}
@@ -218,7 +240,7 @@ function stagesSection(stages) {
     )
     .join('');
   return `<section class="card">
-      <h2>Де втрачаються угоди</h2>
+      <h2>Над чим варто попрацювати</h2>
       <p class="lead">Найслабший етап розмови, визначений для кожної угоди окремо.</p>
       <ul class="reasons">${items}</ul>
     </section>`;
@@ -230,10 +252,10 @@ function methodSection(report) {
       <h2>Як це рахується</h2>
       <ul>
         <li><b>Конверсія</b> — записи поділені на угоди, з яких прибрані ті, що СТО не могло взяти. Менеджера не оцінюють за роботу, якої сервіс не міг прийняти.</li>
-        <li><b>Відмов СТО — ${report.declines.serviceTotal}, а незакритих угод — ${d.notBooked ?? 0}</b>, і ці числа не мусять збігатися. Коли менеджер одразу каже «таким не займаємось», система бачить довідку, а не угоду. У таблицю відмов такі дзвінки все одно входять: це втрачений клієнт незалежно від того, як розмову позначили.</li>
-        <li><b>Цитати</b> не переказані. Кожна — дослівний рядок із розмови, знайдений у записі повторно вже кодом; те, що не знайшлося, у звіт не потрапляє.</li>
-        <li><b>Сильні та слабкі сторони</b> рахуються за весь період, а не за місяць: патерн вимагає щонайменше двох прикладів, а в окремі місяці угод надто мало.</li>
-        <li>У звіт увійшли дзвінки з розшифровкою. Кілька секундних дзвінків без мови до підрахунків не входять.</li>
+        <li><b>Відмов СТО — ${report.declines.serviceTotal}, а незакритих угод — ${d.notBooked ?? 0}</b>, і ці числа не мусять збігатися. Коли менеджер одразу каже «таким не займаємось», система визначає такий дзвінок як звернення без можливості запису, а не як угоду. Проте у таблицю відмов такі дзвінки все одно заносяться: це втрачений клієнт незалежно від причини відмови.</li>
+        <li><b>Приклади діалогів</b> не переказані. Кожен — дослівний рядок із розмови, знайдений у записі повторно вже кодом; те, що не знайшлося, у звіт не потрапляє.</li>
+        <li><b>Сильні та слабкі сторони</b> рахуються за весь період, а не за місяць: умови розрахунків потребують щонайменше двох прикладів.</li>
+        <li>У звіт потрапляють лише дзвінки, у яких справді відбулася розмова. Кілька секундних зʼєднань без мови до підрахунків не входять.</li>
       </ul>
     </section>`;
 }
@@ -241,15 +263,17 @@ function methodSection(report) {
 function renderGlobalReport(report) {
   const { totals, months, managers, declines } = report;
   const days = Math.round(totals.hours / WORK_DAY_HOURS);
-  const monthButtons = [{ key: ALL, title: 'Весь період' }, ...months]
+
+  const managerTabs = managers
     .map(
       (m, i) =>
-        `<button type="button" class="tab${i === 0 ? ' on' : ''}" data-month="${esc(m.key)}">${esc(m.title)}</button>`
+        `<button type="button" class="mtab${i === 0 ? ' on' : ''}" data-manager="${esc(m.name)}">${esc(m.display)}</button>`
     )
     .join('');
 
   const legend = PURPOSE_ORDER.map(
-    (p) => `<li><i style="background:${PURPOSE_COLORS[p]}"></i>${esc(PURPOSE_LABELS[p].plural)} — <b>${totals.purposes[p] || 0}</b></li>`
+    (p) =>
+      `<li><i style="background:${PURPOSE_COLORS[p]}"></i>${esc(PURPOSE_LABELS[p].plural)} — <b>${totals.purposes[p] || 0}</b> <span class="pct">(${share(totals.purposes[p] || 0, totals.calls)})</span></li>`
   ).join('');
 
   return `<!doctype html>
@@ -264,6 +288,7 @@ function renderGlobalReport(report) {
     --plus: #2f7d58; --minus: #b4453a; --accent: #1d4ed8;
   }
   * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--ink);
     font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
   .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
@@ -282,12 +307,17 @@ function renderGlobalReport(report) {
   .legend { list-style: none; margin: 0; padding: 0; }
   .legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
-  .tabs { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 5;
+  .legend .pct { color: var(--muted); }
+  .mtabs { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 5;
     background: var(--bg); padding: 10px 0; margin-bottom: 8px; }
-  .tab { border: 1px solid var(--line); background: var(--card); color: var(--ink);
-    border-radius: 999px; padding: 7px 14px; font-size: 14px; cursor: pointer; }
+  .mtab { border: 1px solid var(--line); background: var(--card); color: var(--ink);
+    border-radius: 999px; padding: 9px 18px; font-size: 15px; font-weight: 600; cursor: pointer; }
+  .mtab.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+  .tab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink);
+    border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
   .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 4px 0 8px; }
+  .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 14px; }
   .cat { border: 1px solid var(--line); border-left: 4px solid var(--c); border-radius: 10px;
     padding: 10px 8px; text-align: center; }
   .cat-icon { display: block; font-size: 15px; }
@@ -317,7 +347,13 @@ function renderGlobalReport(report) {
   .finding.minus { border-left: 4px solid var(--minus); }
   .finding h4 { margin: 0 0 6px; font-size: 15px; }
   .why, .action { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
-  .examples { list-style: none; margin: 8px 0 0; padding: 0; }
+  details summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-top: 8px;
+    list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::before { content: "\\25B8"; font-size: 11px; }
+  details[open] summary::before { content: "\\25BE"; }
+  .cnt { background: #eef0f4; color: var(--muted); border-radius: 999px; padding: 0 7px; font-size: 11px; }
+  .examples { list-style: none; margin: 10px 0 0; padding: 0; }
   .examples li { margin-bottom: 8px; }
   blockquote { margin: 0; padding: 6px 10px; background: #f7f8fa; border-left: 3px solid var(--line);
     border-radius: 0 6px 6px 0; font-size: 14px; }
@@ -368,14 +404,14 @@ function renderGlobalReport(report) {
   </header>
 
   <section class="card">
-    <h2>На що йде телефонна лінія</h2>
+    <h2>Структура дзвінків</h2>
     <div class="mix">
       ${donut(totals.purposes, totals.calls)}
       <ul class="legend">${legend}</ul>
     </div>
   </section>
 
-  <div class="tabs">${monthButtons}</div>
+  <div class="mtabs">${managerTabs}</div>
 
   ${managers.map((m) => managerCard(m, months)).join('')}
 
@@ -389,28 +425,37 @@ function renderGlobalReport(report) {
 (function () {
   var DATA = ${json(Object.fromEntries(managers.map((m) => [m.name, m.byMonth])))};
   var ALL = ${json(ALL)};
-  var tabs = document.querySelectorAll('.tab');
-  var cats = ['sales', 'info', 'other', 'personal'];
+  var CATS = ${json(PURPOSE_ORDER)};
 
-  function apply(month) {
-    document.querySelectorAll('.manager').forEach(function (card) {
-      var bucket = (DATA[card.dataset.manager] || {})[month] || {};
-      cats.forEach(function (c) {
-        var el = card.querySelector('[data-cat="' + c + '"]');
-        if (el) el.textContent = bucket[c] || 0;
-      });
-      card.querySelectorAll('[data-month]').forEach(function (el) {
-        el.classList.toggle('sel', month !== ALL && el.dataset.month === month);
-      });
+  function applyMonth(card, month) {
+    var bucket = (DATA[card.dataset.manager] || {})[month] || {};
+    CATS.forEach(function (c) {
+      var el = card.querySelector('[data-cat="' + c + '"]');
+      if (el) el.textContent = bucket[c] || 0;
     });
-    tabs.forEach(function (t) { t.classList.toggle('on', t.dataset.month === month); });
+    card.querySelectorAll('[data-month]').forEach(function (el) {
+      if (el.classList.contains('tab')) el.classList.toggle('on', el.dataset.month === month);
+      else el.classList.toggle('sel', month !== ALL && el.dataset.month === month);
+    });
   }
 
-  tabs.forEach(function (t) {
-    t.addEventListener('click', function () { apply(t.dataset.month); });
+  var cards = document.querySelectorAll('.manager');
+  cards.forEach(function (card) {
+    card.querySelectorAll('.tab').forEach(function (tab) {
+      tab.addEventListener('click', function () { applyMonth(card, tab.dataset.month); });
+    });
+    applyMonth(card, ALL);
   });
 
-  apply(ALL);
+  var tabs = document.querySelectorAll('.mtab');
+  function showManager(name) {
+    cards.forEach(function (card) { card.hidden = card.dataset.manager !== name; });
+    tabs.forEach(function (tab) { tab.classList.toggle('on', tab.dataset.manager === name); });
+  }
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () { showManager(tab.dataset.manager); });
+  });
+  if (tabs.length) showManager(tabs[0].dataset.manager);
 })();
 </script>
 </body>
