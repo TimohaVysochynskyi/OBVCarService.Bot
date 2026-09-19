@@ -12,7 +12,7 @@ import {
   getOperators,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
-import { BLOCKER_LABELS, BLOCKER_COLUMNS, DEAL_BLOCKERS } from '../core/dealBlocker.js';
+import { BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES, DEAL_BLOCKERS } from '../core/dealBlocker.js';
 import { reasonLabel, reasonSide } from '../core/declineReasons.js';
 import { displayName, formatPhone } from './operators.js';
 import { collectRangeFindings } from './segments.js';
@@ -103,14 +103,38 @@ function buildManagerBuckets(purposeRows, salesRows) {
   return byManager;
 }
 
-function topFindings(findings, type) {
+const IS_LETTER = /\p{L}/u;
+
+function withoutName(text, name) {
+  if (!text || !name || !text.includes(name)) return text;
+  const letter = (ch) => ch !== undefined && IS_LETTER.test(ch);
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith(name, i) && !letter(text[i - 1]) && !letter(text[i + name.length])) {
+      i += name.length;
+      continue;
+    }
+    out += text[i];
+    i += 1;
+  }
+  const stripped = out
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.:;!?])/g, '$1')
+    .replace(/^[\s,;:.!?—–-]+/, '')
+    .trim();
+  if (!stripped) return text;
+  return stripped[0].toUpperCase() + stripped.slice(1);
+}
+
+function topFindings(findings, type, name) {
   return findings
     .filter((f) => f.type === type)
     .slice(0, TOP_N)
     .map((f) => ({
-      claim: f.claim,
-      why: f.why,
-      action: f.action,
+      claim: withoutName(f.claim, name),
+      why: withoutName(f.why, name),
+      action: withoutName(f.action, name),
       examples: (f.evidence || []).slice(0, TOP_N).map((e) => ({
         quote: e.quote,
         note: e.note || null,
@@ -190,9 +214,11 @@ async function managerFindings(name, start, end, opts) {
 
   const merged = await mergeCached(name, start, end, collected.findings);
 
+  const display = displayName(name) || name;
+
   return {
-    weaknesses: topFindings(merged, 'error'),
-    strengths: topFindings(merged, 'strength'),
+    weaknesses: topFindings(merged, 'error', display),
+    strengths: topFindings(merged, 'strength', display),
     analysedDays: collected.analysedDays,
     days: collected.days,
     partial,
@@ -211,6 +237,7 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
       manager: displayName(call.managerName) || call.managerName,
       bucket: call.blocker,
       bucketLabel: BLOCKER_COLUMNS[call.blocker] || call.blocker,
+      bucketTitle: BLOCKER_TITLES[call.blocker] || call.blocker,
       bucketFull: BLOCKER_LABELS[call.blocker] || call.blocker,
       reason: call.reason ? reasonLabel(call.reason) : null,
       quote: call.quote,
@@ -233,6 +260,7 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
   return {
     buckets,
     bucketLabels: Object.fromEntries(DEAL_BLOCKERS.map((b) => [b, BLOCKER_COLUMNS[b]])),
+    bucketTitles: Object.fromEntries(DEAL_BLOCKERS.map((b) => [b, BLOCKER_TITLES[b]])),
     serviceTotal,
     cases,
     reasons,

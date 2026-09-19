@@ -33,7 +33,12 @@ const BLOCKER_LABELS = {
   no_parts: 'Нема деталей — потрібну запчастину не дістати',
   out_of_scope: 'Не обслуговуємо — такої послуги/таких авто не беремо',
 };
-const BLOCKER_COLUMNS = { no_slot: 'Черга', no_parts: 'Деталі', out_of_scope: 'Профіль' };
+const BLOCKER_COLUMNS = { no_slot: 'Черга', no_parts: 'Деталі', out_of_scope: 'Не наш профіль' };
+const BLOCKER_TITLES = {
+  no_slot: 'Немає вільного місця',
+  no_parts: 'Відсутність деталей',
+  out_of_scope: 'Не наш профіль',
+};
 
 const model = () => process.env.OPENAI_BLOCKER_MODEL || 'gpt-4o';
 
@@ -248,4 +253,4 @@ async function detectDealBlocker(transcript, segments, managerName) {
   return { blocker, reason, quote, start: hit.start, end: hit.end };
 }
 
-export { detectDealBlocker, DEAL_BLOCKERS, NO_BLOCKER, BLOCKER_LABELS, BLOCKER_COLUMNS };
+export { detectDealBlocker, DEAL_BLOCKERS, NO_BLOCKER, BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES };
