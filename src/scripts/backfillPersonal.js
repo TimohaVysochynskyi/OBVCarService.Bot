@@ -28,6 +28,7 @@ async function main() {
   const moved = { personal: 0, info: 0, other: 0 };
   let unchanged = 0;
   let failed = 0;
+  let downgraded = 0;
 
   for (let i = 0; i < calls.length; i += 1) {
     const c = calls[i];
@@ -40,10 +41,11 @@ async function main() {
       } else {
         await setCallPurpose(c.generalCallId, verdict.purpose);
         moved[verdict.purpose] += 1;
+        if (verdict.downgraded) downgraded += 1;
         if (verdict.purpose === 'personal') {
           const who = displayName(c.managerName) || c.managerName || '—';
           console.log(
-            `[backfillPersonal] ${i + 1}/${calls.length} ${c.generalCallId} (${who}) ${c.callPurpose} → personal\n    ${verdict.reason}`
+            `[backfillPersonal] ${i + 1}/${calls.length} ${c.generalCallId} (${who}) ${c.callPurpose} → personal\n    «${verdict.evidence}»`
           );
         }
       }
@@ -65,6 +67,7 @@ async function main() {
   console.log(`  → службові:      ${moved.other}`);
   console.log(`  без змін:        ${unchanged}`);
   console.log(`  помилки:         ${failed}`);
+  console.log(`  «особистий» без доказу (відкинуто): ${downgraded}`);
 
   if (failed) process.exitCode = 1;
 }
