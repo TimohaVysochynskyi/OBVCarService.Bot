@@ -18,6 +18,7 @@
     "backfill:analysis": "node src/scripts/backfillAnalysis.js",
     "backfill:purpose": "node src/scripts/backfillPurpose.js",
     "backfill:personal": "node src/scripts/backfillPersonal.js",
+    "backfill:declines": "node src/scripts/backfillDeclines.js",
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
     "backfill:audio": "node src/scripts/backfillAudio.js",

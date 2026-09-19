@@ -116,7 +116,8 @@ function headerText(report) {
     ? `\n\n🚧 *Незакриті не з вини менеджера: ${blocked}*\n` +
       [
         stats.blockedNoSlot ? `• Черга — ${stats.blockedNoSlot} (СТО було забите)` : null,
-        stats.blockedOutOfScope ? `• Профіль — ${stats.blockedOutOfScope} (такого не робимо)` : null,
+        stats.blockedNoParts ? `• Нема деталей — ${stats.blockedNoParts} (запчастину не дістати)` : null,
+        stats.blockedOutOfScope ? `• Не обслуговуємо — ${stats.blockedOutOfScope} (такого не робимо)` : null,
       ]
         .filter(Boolean)
         .join('\n') +

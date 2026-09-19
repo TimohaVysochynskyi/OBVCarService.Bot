@@ -100,7 +100,11 @@ function buildDynamicsText(name, bucket, buckets) {
     // A dash (not 0) when the bucket predates blocker detection - "0 turned away" and "never checked"
     // must not look the same.
     const queueCell = String(b.blockedNoSlot ?? "—").padStart(5);
-    const scopeCell = String(b.blockedOutOfScope ?? "—").padStart(7);
+    const notTaken =
+      b.blockedOutOfScope == null && b.blockedNoParts == null
+        ? null
+        : (b.blockedOutOfScope || 0) + (b.blockedNoParts || 0);
+    const scopeCell = String(notTaken ?? "—").padStart(7);
     rows.push(`${label}${calls} ${convCell} ${scoreCell} ${queueCell} ${scopeCell}`);
   });
   const table = "```\n" + rows.join("\n") + "\n```";
@@ -153,7 +157,7 @@ function buildDynamicsText(name, bucket, buckets) {
     ? Math.round((totalSuccess / totalReachable) * 100)
     : null;
   const totalBlocked = buckets.reduce(
-    (s, b) => s + (b.blockedNoSlot || 0) + (b.blockedOutOfScope || 0),
+    (s, b) => s + (b.blockedNoSlot || 0) + (b.blockedNoParts || 0) + (b.blockedOutOfScope || 0),
     0,
   );
   const scoredBuckets = buckets.filter((b) => b.avgScore != null);

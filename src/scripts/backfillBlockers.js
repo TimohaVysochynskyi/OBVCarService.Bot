@@ -36,11 +36,12 @@ function parseArgs(argv) {
     limit: limitIdx >= 0 ? Number(argv[limitIdx + 1]) : null,
     keepCache: argv.includes('--keep-cache'),
     reset: argv.includes('--reset'),
+    relabel: argv.includes('--relabel'),
   };
 }
 
 async function main() {
-  const { limit, keepCache, reset } = parseArgs(process.argv.slice(2));
+  const { limit, keepCache, reset, relabel } = parseArgs(process.argv.slice(2));
   await migrate();
 
   // --reset re-decides calls that were already decided. Needed when the detection RULES change: the
@@ -56,7 +57,11 @@ async function main() {
     `[backfillBlockers] у БД ${before.total} дзвінків: без блокера ${before.clean}, черга ${before.noSlot}, профіль ${before.outOfScope}, ще не перевірено ${before.unchecked}`
   );
 
-  const calls = await getCallsMissingBlocker({ limit });
+  if (relabel) {
+    console.log('[backfillBlockers] --relabel: перевіряються заново лише вже знайдені відмови, щоб отримати третю категорію і конкретну причину');
+  }
+
+  const calls = await getCallsMissingBlocker({ limit, relabel });
   if (!calls.length) {
     console.log('[backfillBlockers] нічого перевіряти — усі незакриті дзвінки вже перевірені.');
     process.exit(0);
@@ -65,6 +70,7 @@ async function main() {
 
   let clean = 0;
   let noSlot = 0;
+  let noParts = 0;
   let outOfScope = 0;
   let failed = 0;
   let unchecked = 0;
@@ -81,11 +87,12 @@ async function main() {
         if (i < calls.length - 1) await new Promise((r2) => setTimeout(r2, PAUSE_MS));
         continue;
       }
-      await setCallBlocker(c.generalCallId, { blocker: r.blocker, quote: r.quote });
+      await setCallBlocker(c.generalCallId, { blocker: r.blocker, quote: r.quote, reason: r.reason });
       if (r.blocker === NO_BLOCKER) {
         clean += 1;
       } else {
         if (r.blocker === 'no_slot') noSlot += 1;
+        else if (r.blocker === 'no_parts') noParts += 1;
         else outOfScope += 1;
         console.log(
           `[backfillBlockers] ${i + 1}/${calls.length} ${c.generalCallId} (${who}, purpose=${c.callPurpose}) → ${r.blocker}\n    «${r.quote}»`
@@ -104,6 +111,7 @@ async function main() {
   console.log(`  перевірено:        ${clean + noSlot + outOfScope}`);
   console.log(`  без блокера:       ${clean}`);
   console.log(`  черга (СТО забите): ${noSlot}`);
+  console.log(`  нема деталей:       ${noParts}`);
   console.log(`  профіль (не наше):  ${outOfScope}`);
   console.log(`  помилки (повторити): ${failed}`);
   console.log(`  не перевірено (лишились NULL): ${unchecked}`);

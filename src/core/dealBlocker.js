@@ -3,6 +3,7 @@ import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
 import { pseudoSegments } from './analyzeCall.js';
+import { SERVICE_REASON_KEYS, bucketOfReason, reasonsOfBucket, reasonPromptList } from './declineReasons.js';
 
 // "Незакриті угоди" — a deal that did NOT close for a reason that is NOT the manager's fault: the
 // СТО itself could not take the job. Without this, every such call counted as a failed deal and
@@ -23,17 +24,24 @@ import { pseudoSegments } from './analyzeCall.js';
 // not close (~19/day live, 766 rows for the whole history), on ~850-character transcripts.
 
 const NO_BLOCKER = 'none';
-const DEAL_BLOCKERS = ['no_slot', 'out_of_scope'];
+const DEAL_BLOCKERS = ['no_slot', 'no_parts', 'out_of_scope'];
 
 // Full wording for the report; SHORT wording for the dynamics table columns (must stay narrow so the
 // 6-column table still fits a phone screen).
 const BLOCKER_LABELS = {
-  no_slot: 'СТО забите — немає вільного місця/часу',
-  out_of_scope: 'Не наш профіль — такої послуги/таких авто не беремо',
+  no_slot: 'Черга — немає вільного місця/часу',
+  no_parts: 'Нема деталей — потрібну запчастину не дістати',
+  out_of_scope: 'Не обслуговуємо — такої послуги/таких авто не беремо',
 };
-const BLOCKER_COLUMNS = { no_slot: 'Черга', out_of_scope: 'Профіль' };
+const BLOCKER_COLUMNS = { no_slot: 'Черга', no_parts: 'Деталі', out_of_scope: 'Профіль' };
 
 const model = () => process.env.OPENAI_BLOCKER_MODEL || 'gpt-4o';
+
+const REASON_SECTION = DEAL_BLOCKERS.map(
+  (b) => `  ${BLOCKER_COLUMNS[b]} (${b}):
+${reasonPromptList(reasonsOfBucket(b)).replace(/^/gm, '  ')}`
+).join(`
+`);
 
 const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову менеджера автосервісу (СТО) з клієнтом.
 
@@ -45,9 +53,10 @@ const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову
 
 Поверни РІВНО одне значення blocker.
 
-ГОЛОВНИЙ ТЕСТ, який відрізняє дві категорії: «чи взяли б цього клієнта ІНШОГО ДНЯ?»
-- ТАК, взяли б, просто зараз немає коли → "no_slot" (обмеження ТИМЧАСОВЕ).
-- НІ, не взяли б і наступного місяця, ми такого не робимо → "out_of_scope" (обмеження ПОСТІЙНЕ).
+ГОЛОВНИЙ ТЕСТ, який відрізняє категорії: «чому саме не можемо?»
+- Взяли б іншого дня, просто зараз немає коли → "no_slot" (обмеження ТИМЧАСОВЕ).
+- Роботу робимо, але немає потрібної ДЕТАЛІ й дістати її не виходить → "no_parts".
+- Не взяли б і наступного місяця, ми такого не робимо взагалі → "out_of_scope" (обмеження ПОСТІЙНЕ).
 
 1) "no_slot" — ТИМЧАСОВО немає можливості взяти: немає вільного часу, місця чи потрібної людини саме зараз. Послугу СТО в принципі надає.
    Приклади реплік менеджера: «на цьому тижні все забито», «вільних місць немає», «найближче вікно тільки в понеділок», «зараз черга на два тижні», «сьогодні вже не візьмемо, майстри завантажені», «усі підйомники зайняті», «до кінця місяця записів немає», «майстер у відпустці до 10-го», «електрика зараз немає», «у мене вся чотири машини стоїть на розвал».
@@ -56,10 +65,13 @@ const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову
    • не той тип/марка авто: «вантажні не беремо», «з електромобілями не працюємо», «американські не обслуговуємо», «мотоцикли — ні».
    • немає такої послуги: «кузовним ремонтом не займаємось», «фарбування не робимо», «АКПП не ремонтуємо», «шиномонтажу в нас немає».
    • немає обладнання, якого в сервісі взагалі НЕ ІСНУЄ: «у нас немає стенда для цього», «такою діагностикою не займаємось».
-   • потрібної запчастини немає і дістати її неможливо: «на цю модель запчастин не знайти».
    ⚠️ УВАГА: якщо потрібний майстер/спеціаліст просто ВІДСУТНІЙ ЗАРАЗ (хворий, у відпустці, завантажений) — це "no_slot", а НЕ "out_of_scope", бо іншого дня його візьмуть.
 
-3) "${NO_BLOCKER}" — усе інше. ЦЕ ЗНАЧЕННЯ ЗА ЗАМОВЧУВАННЯМ: якщо сумніваєшся — ставь "${NO_BLOCKER}".
+3) "no_parts" — роботу СТО робить, але немає потрібної ЗАПЧАСТИНИ, і швидко дістати її не виходить.
+   Приклади реплік менеджера: «на цю модель запчастин не знайти», «цієї деталі зараз немає», «треба замовляти, чекати два тижні», «оригінал не постачають», «підбирали — не знайшли».
+   ⚠️ Якщо деталь Є і менеджер просто називає ціну чи строк, а клієнт відмовився — це НЕ блокер.
+
+4) "${NO_BLOCKER}" — усе інше. ЦЕ ЗНАЧЕННЯ ЗА ЗАМОВЧУВАННЯМ: якщо сумніваєшся — ставь "${NO_BLOCKER}".
 
 ⚠️ ПАСТКИ МОВИ АВТОСЕРВІСУ (перевірено на реальних розмовах цього СТО — саме тут найчастіше помиляються):
 - «забитий/забито» в автосервісі ЗАЗВИЧАЙ означає ЗАСМІЧЕНИЙ вузол, а не завантажений сервіс: «радіатори забиті», «фільтр був забитий», «сітка забита», «воно забилося» → це ДІАГНОСТИКА ДЕТАЛІ, blocker="${NO_BLOCKER}". Тільки «у нас усе забито», «забито на сьогодні», «забито на місяць» (про ЗАПИС/ГРАФІК) може бути "no_slot".
@@ -77,6 +89,11 @@ const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову
 - Дзвінок узагалі не про запис: клієнт питає статус своєї машини, менеджер повідомляє, що робота готова, службовий/помилковий дзвінок.
 - Обмеження згадав КЛІЄНТ, а не менеджер (напр. клієнт сам сказав «у вас, мабуть, усе забито»).
 
+ПРИЧИНА (reason):
+- Якщо blocker НЕ "${NO_BLOCKER}" — обери РІВНО одну конкретну причину зі списку, і вона мусить належати обраній категорії:
+${REASON_SECTION}
+- Якщо blocker = "${NO_BLOCKER}" — reason порожній рядок.
+
 ЦИТАТА (quote):
 - Якщо blocker НЕ "${NO_BLOCKER}" — наведи РІВНО ОДИН рядок МЕНЕДЖЕРА, СКОПІЙОВАНИЙ ДОСЛІВНО з транскрипту (той самий текст, без переказу, перекладу чи виправлень), у якому це обмеження прямо сказане.
 - Цитата має САМА ПО СОБІ доводити обмеження. Якщо такого дослівного рядка менеджера немає — ставь blocker "${NO_BLOCKER}" і порожню цитату.
@@ -89,9 +106,10 @@ const SCHEMA = {
     type: 'object',
     properties: {
       blocker: { type: 'string', enum: [...DEAL_BLOCKERS, NO_BLOCKER] },
+      reason: { type: 'string', enum: ['', ...SERVICE_REASON_KEYS] },
       quote: { type: 'string' },
     },
-    required: ['blocker', 'quote'],
+    required: ['blocker', 'reason', 'quote'],
     additionalProperties: false,
   },
 };
@@ -163,7 +181,7 @@ function stripRoleLabel(quote) {
 // manager segment — the counters and the report must never rest on an unverifiable claim.
 async function detectDealBlocker(transcript, segments, managerName) {
   const verifySegments = Array.isArray(segments) && segments.length ? segments : pseudoSegments(transcript);
-  if (!transcript || !verifySegments.length) return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+  if (!transcript || !verifySegments.length) return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };
 
   const raw = await withRetry(
     async () => {
@@ -196,14 +214,16 @@ async function detectDealBlocker(transcript, segments, managerName) {
   );
 
   const blocker = DEAL_BLOCKERS.includes(raw.blocker) ? raw.blocker : NO_BLOCKER;
-  if (blocker === NO_BLOCKER) return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+  if (blocker === NO_BLOCKER) return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };
+
+  const reason = bucketOfReason(raw.reason) === blocker ? raw.reason : null;
 
   const quote = stripRoleLabel(String(raw.quote || ''));
   const hit = quote ? findQuote(verifySegments, quote, { requireRole: 'manager' }) : null;
   if (!hit) {
     // The constraint was asserted but not backed by a real manager line — treat as no blocker.
     console.warn(`[dealBlocker] "${blocker}" dropped: quote not found in a manager segment ("${quote.slice(0, 60)}")`);
-    return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+    return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };
   }
 
   // Adversarial second opinion. A verifier FAILURE must not silently create a blocker, so an error
@@ -212,7 +232,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
     const verdict = await verifyBlocker(transcript, blocker, quote);
     if (!verdict.confirmed) {
       console.log(`[dealBlocker] "${blocker}" rejected by verifier: ${verdict.reason?.slice(0, 120)}`);
-      return { blocker: NO_BLOCKER, quote: null, start: null, end: null };
+      return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };
     }
   } catch (err) {
     // ⚠️ Відкинути — правильно (хибний блокер коштує дорожче за пропуск), але ЗАПИСАТИ це як
@@ -222,10 +242,10 @@ async function detectDealBlocker(transcript, segments, managerName) {
     // Тому викликачу кажемо «не перевірено», і обидва лишають у БД NULL — рядок повернеться
     // в наступний беклог.
     console.error(`[dealBlocker] verification failed, leaving "${blocker}" unchecked: ${err.message}`);
-    return { blocker: NO_BLOCKER, quote: null, start: null, end: null, unchecked: true };
+    return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null, unchecked: true };
   }
 
-  return { blocker, quote, start: hit.start, end: hit.end };
+  return { blocker, reason, quote, start: hit.start, end: hit.end };
 }
 
 export { detectDealBlocker, DEAL_BLOCKERS, NO_BLOCKER, BLOCKER_LABELS, BLOCKER_COLUMNS };

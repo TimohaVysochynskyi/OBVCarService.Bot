@@ -105,6 +105,8 @@ async function migrate() {
     -- manager is not scored down for business the service could not accept.
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS deal_blocker TEXT;
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS deal_blocker_quote TEXT;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS deal_blocker_reason TEXT;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS client_decline_reason TEXT;
 
     -- Local audio archive (src/core/audioStore.js). Recordings used to be streamed from Binotel to
     -- the transcriber and dropped; the client requires them KEPT, so the ingest now saves each file
@@ -642,8 +644,8 @@ const SALES_FILTER = `(call_purpose = 'sales' OR call_purpose IS NULL)`;
 // gated on call_purpose: measured on live data, blocked calls are usually classified 'info' (the MAP
 // sees a refusal, not a sales opportunity), so gating on 'sales' would count almost none of them.
 // NULL-safe: an unchecked row (deal_blocker IS NULL) counts as NOT blocked in both directions.
-const BLOCKED_FILTER = `deal_blocker IN ('no_slot','out_of_scope')`;
-const NOT_BLOCKED_FILTER = `deal_blocker IS DISTINCT FROM 'no_slot' AND deal_blocker IS DISTINCT FROM 'out_of_scope'`;
+const BLOCKED_FILTER = `deal_blocker IN ('no_slot','no_parts','out_of_scope')`;
+const NOT_BLOCKED_FILTER = `(deal_blocker IS NULL OR deal_blocker NOT IN ('no_slot','no_parts','out_of_scope'))`;
 
 // The blocker-aware numbers every screen shares. reachableCount is the CONVERSION DENOMINATOR: deals
 // the manager could actually have closed (sales calls minus the ones the СТО itself turned away), so
@@ -659,6 +661,7 @@ const BLOCKER_COLUMNS_SQL = `
        COUNT(*) FILTER (WHERE ${SALES_FILTER} AND (${NOT_BLOCKED_FILTER} OR is_success))::int AS "reachableCount",
        COUNT(*) FILTER (WHERE ${BLOCKED_FILTER})::int AS "blockedCount",
        COUNT(*) FILTER (WHERE deal_blocker = 'no_slot')::int AS "blockedNoSlot",
+       COUNT(*) FILTER (WHERE deal_blocker = 'no_parts')::int AS "blockedNoParts",
        COUNT(*) FILTER (WHERE deal_blocker = 'out_of_scope')::int AS "blockedOutOfScope"`;
 
 async function getOperatorStats(name, start, end) {
@@ -684,7 +687,7 @@ async function getOperatorStats(name, start, end) {
 async function getBlockedCalls(name, start, end) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
-            deal_blocker AS "blocker", deal_blocker_quote AS "quote",
+            deal_blocker AS "blocker", deal_blocker_quote AS "quote", deal_blocker_reason AS "reason",
             client_number AS "clientNumber", client_name AS "clientName"
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3 AND ${BLOCKED_FILTER}
@@ -696,12 +699,12 @@ async function getBlockedCalls(name, start, end) {
 
 // Calls whose blocker hasn't been decided yet. A CLOSED deal cannot be blocked by definition, so only
 // non-closed calls are checked - that keeps the (gpt-4o) cost proportional to what actually matters.
-async function getCallsMissingBlocker({ limit = null } = {}) {
+async function getCallsMissingBlocker({ limit = null, relabel = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
             call_purpose AS "callPurpose", transcript, segments
      FROM calls
-     WHERE deal_blocker IS NULL AND is_success IS NOT TRUE
+     WHERE ${relabel ? BLOCKED_FILTER : 'deal_blocker IS NULL'} AND is_success IS NOT TRUE
        AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time ASC
      ${limit ? 'LIMIT ' + Number(limit) : ''}`
@@ -709,12 +712,42 @@ async function getCallsMissingBlocker({ limit = null } = {}) {
   return rows;
 }
 
-async function setCallBlocker(generalCallId, { blocker, quote = null }) {
-  await pool.query(`UPDATE calls SET deal_blocker = $2, deal_blocker_quote = $3 WHERE general_call_id = $1`, [
-    generalCallId,
-    blocker,
-    quote,
-  ]);
+async function getUnexplainedDeclines({ limit = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript
+     FROM calls
+     WHERE ${SALES_FILTER} AND is_success IS NOT TRUE AND ${NOT_BLOCKED_FILTER}
+       AND client_decline_reason IS NULL
+       AND transcript IS NOT NULL AND transcript <> ''
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function setClientDeclineReason(generalCallId, reason) {
+  await pool.query('UPDATE calls SET client_decline_reason = $2 WHERE general_call_id = $1', [generalCallId, reason]);
+}
+
+async function getDeclineReasonCounts() {
+  const { rows } = await pool.query(
+    `SELECT 'service' AS side, deal_blocker_reason AS reason, COUNT(*)::int AS count
+     FROM calls WHERE ${BLOCKED_FILTER} AND deal_blocker_reason IS NOT NULL
+     GROUP BY deal_blocker_reason
+     UNION ALL
+     SELECT 'client' AS side, client_decline_reason AS reason, COUNT(*)::int AS count
+     FROM calls WHERE client_decline_reason IS NOT NULL
+     GROUP BY client_decline_reason
+     ORDER BY count DESC`
+  );
+  return rows;
+}
+
+async function setCallBlocker(generalCallId, { blocker, quote = null, reason = null }) {
+  await pool.query(
+    `UPDATE calls SET deal_blocker = $2, deal_blocker_quote = $3, deal_blocker_reason = $4 WHERE general_call_id = $1`,
+    [generalCallId, blocker, quote, reason]
+  );
 }
 
 // Clears every blocker decision so the whole history can be re-judged (npm run backfill:blockers
@@ -1563,6 +1596,9 @@ export {
   updateCallFullAnalysis,
   getCallsMissingSegments,
   getCallsMissingPurpose,
+  getUnexplainedDeclines,
+  setClientDeclineReason,
+  getDeclineReasonCounts,
   getNonSalesCalls,
   setCallPurpose,
   getStoredSegment,
