@@ -129,14 +129,42 @@ function headerText(report) {
     report.reuseOnly && report.coverage?.missing
       ? `\n\n_Аналіз є за ${report.coverage.analysed} з ${report.coverage.days} днів періоду — картина може бути неповною._`
       : '';
-  return (
-    `📊 *Доказовий звіт* — ${displayName(name)}\n` +
-    `${formatKyiv(start)} – ${formatKyiv(end)}\n\n` +
-    `Дзвінків: *${stats.callCount}* (угод: ${sales})\n` +
-    `Записів: *${stats.successCount}* (${rate}%)\n` +
-    `Середній бал: *${stats.avgScore ?? '—'}*\n` +
-    `Найслабший етап: *${stats.topWeakStage ?? '—'}*${blockedBlock}${coverage}`
-  );
+  // Прочерк у рядку нічого не пояснює власнику СТО: він бачить «—» і не знає, це погано, добре
+  // чи просто нічого не сталося. Тому замість порожніх значень — речення про те, ЧОМУ їх немає.
+  const lines = [
+    `📊 *Доказовий звіт* — ${displayName(name)}`,
+    `${formatKyiv(start)} – ${formatKyiv(end)}`,
+    '',
+    `Дзвінків за період: *${stats.callCount}*, з них угод: *${sales}*.`,
+  ];
+
+  if (!sales) {
+    lines.push(
+      '',
+      '_Жодної угоди за цей період не було — усі розмови інформаційні або службові._',
+      '_Оцінювати роботу з продажу тут немає на чому._'
+    );
+  } else if (!reachable) {
+    lines.push(
+      '',
+      '_Усі угоди періоду СТО взяти не могло, тож конверсію рахувати немає з чого._'
+    );
+  } else {
+    lines.push(`Записались: *${stats.successCount}* з ${reachable} (${rate}%).`);
+    lines.push(
+      stats.avgScore == null
+        ? 'Середній бал розмови: ще не порахований.'
+        : `Середній бал розмови: *${stats.avgScore}* з 10.`
+    );
+    lines.push(
+      stats.topWeakStage
+        ? `Найслабший етап: *${stats.topWeakStage}*.`
+        : 'Найслабший етап: не визначився.'
+    );
+  }
+
+  return lines.join(`
+`) + blockedBlock + coverage;
 }
 
 // Subheader shown before a block's findings when a report has more than one non-empty block

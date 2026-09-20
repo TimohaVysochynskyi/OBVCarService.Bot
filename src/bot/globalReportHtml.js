@@ -4,6 +4,10 @@ import { ALL } from './globalReportData.js';
 const PURPOSE_ORDER = ['sales', 'info', 'other', 'personal'];
 const PURPOSE_COLORS = { sales: '#2f7d58', info: '#3b6fb0', other: '#8a7a3f', personal: '#8c5aa8' };
 const WORK_DAY_HOURS = 8;
+const MONTH_NAMES = [
+  'січень', 'лютий', 'березень', 'квітень', 'травень', 'червень',
+  'липень', 'серпень', 'вересень', 'жовтень', 'листопад', 'грудень',
+];
 
 const esc = (value) =>
   String(value ?? '')
@@ -27,6 +31,19 @@ function formatDateShort(iso) {
   const d = new Date(iso);
   return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${pad2(d.getFullYear() % 100)}`;
 }
+
+function monthKey(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+}
+
+function monthTitle(key) {
+  const [year, m] = key.split('-');
+  return `${MONTH_NAMES[Number(m) - 1]} ${year}`;
+}
+
+const shortMonth = (title) => title.split(' ')[0].slice(0, 3);
 
 function plural(n, one, few, many) {
   const mod10 = n % 10;
@@ -71,7 +88,7 @@ function barChart(series, { max, months, suffix = '', decimals = 0 }) {
       return `<div class="bar-slot" data-month="${esc(m.key)}" style="width:${width}%">
           <div class="bar-val">${esc(label)}</div>
           <div class="bar" style="height:${height.toFixed(1)}%"></div>
-          <div class="bar-cap">${esc(m.title.split(' ')[0].slice(0, 3))}</div>
+          <div class="bar-cap">${esc(shortMonth(m.title))}</div>
         </div>`;
     })
     .join('');
@@ -79,19 +96,24 @@ function barChart(series, { max, months, suffix = '', decimals = 0 }) {
 }
 
 function managerTable(manager, months) {
-  const head = months.map((m) => `<th data-month="${esc(m.key)}">${esc(m.title.split(' ')[0])}</th>`).join('');
+  const head = months
+    .map(
+      (m) =>
+        `<th data-month="${esc(m.key)}"><span class="mfull">${esc(m.title.split(' ')[0])}</span><span class="mshort">${esc(shortMonth(m.title))}</span></th>`
+    )
+    .join('');
   const row = (label, pick) =>
     `<tr><th scope="row">${esc(label)}</th>${months
       .map((m) => `<td data-month="${esc(m.key)}">${esc(pick(manager.byMonth[m.key] || {}))}</td>`)
       .join('')}<td class="total">${esc(pick(manager.byMonth[ALL] || {}))}</td></tr>`;
 
-  return `<table class="grid">
+  return `<table class="grid deals">
       <thead><tr><th scope="col"></th>${head}<th scope="col" class="total">Разом</th></tr></thead>
       <tbody>
         ${row('Угод', (b) => b.sales ?? 0)}
         ${row('Записів', (b) => b.success ?? 0)}
         ${row('Конверсія', (b) => (b.conversion == null ? '—' : b.conversion + '%'))}
-        ${row('Середній бал', (b) => (b.avgScore == null ? '—' : b.avgScore))}
+        ${row('Бал', (b) => (b.avgScore == null ? '—' : b.avgScore))}
       </tbody>
     </table>`;
 }
@@ -110,12 +132,16 @@ function categoryStrip(manager) {
     </div>`;
 }
 
-function monthTabs(months) {
-  const buttons = [...months, { key: ALL, title: 'Весь період' }].map(
-    (m) => `<button type="button" class="tab${m.key === ALL ? ' on' : ''}" data-month="${esc(m.key)}">${esc(m.title)}</button>`
-  );
-  return `<div class="tabs">${buttons.join('')}</div>`;
+function tabStrip(items, { cls, attr, activeKey }) {
+  return `<div class="tabs">${items
+    .map(
+      (m) =>
+        `<button type="button" class="${cls}${m.key === activeKey ? ' on' : ''}" ${attr}="${esc(m.key)}">${esc(m.title)}</button>`
+    )
+    .join('')}</div>`;
 }
+
+const withAllLast = (months) => [...months, { key: ALL, title: 'Весь період' }];
 
 function findingBlock(finding, kind) {
   const examples = finding.examples
@@ -160,7 +186,7 @@ function managerCard(manager, months) {
 
   return `<section class="card manager" data-manager="${esc(manager.name)}">
       <h2>${esc(manager.display)}</h2>
-      ${monthTabs(months)}
+      ${tabStrip(withAllLast(months), { cls: 'tab', attr: 'data-month', activeKey: ALL })}
       ${categoryStrip(manager)}
       <h3 class="sub">Динаміка по угодах</h3>
       ${managerTable(manager, months)}
@@ -200,36 +226,41 @@ function declineSection(declines) {
         .join('')
     : '<li class="empty">Причини ще не розмічені.</li>';
 
+  const caseMonths = [...new Set(declines.cases.map((c) => monthKey(c.at)).filter(Boolean))]
+    .sort()
+    .map((key) => ({ key, title: monthTitle(key) }));
+
   const cases = declines.cases.length
     ? declines.cases
         .map(
-          (c) => `<tr>
-          <td class="nowrap">${esc(formatDateShort(c.at))}</td>
-          <td>${esc(c.bucketLabel)}</td>
-          <td>${esc(c.reason || '—')}</td>
-          <td>${esc(c.clientName || 'Невідомо')}<br><span class="phone">${esc(c.clientPhone || '—')}</span></td>
-          <td>${esc(c.manager)}</td>
-          <td class="quote">${esc(c.quote || '')}</td>
+          (c) => `<tr data-dm="${esc(monthKey(c.at))}">
+          <td class="nowrap" data-label="Дата">${esc(formatDateShort(c.at))}</td>
+          <td data-label="Причина">${esc(c.reason || c.bucketLabel || '—')}</td>
+          <td data-label="Клієнт">${esc(c.clientName || 'Невідомо')}<br><span class="phone">${esc(c.clientPhone || '—')}</span></td>
+          <td data-label="Менеджер">${esc(c.manager)}</td>
+          <td class="quote" data-label="Слова менеджера">${esc(c.quote || '')}</td>
         </tr>`
         )
         .join('')
-    : '<tr><td colspan="6" class="empty">Жодного випадку не зафіксовано.</td></tr>';
+    : '<tr><td colspan="5" class="empty">Жодного випадку не зафіксовано.</td></tr>';
 
   const cov = declines.coverage || {};
-  return `<section class="card">
+  const notBooked = cov.notBooked ?? 0;
+  return `<section class="card declines">
       <h2>Найбільш поширені причини відмов від обслуговування</h2>
-      <p class="lead">За період не закрилося ${cov.notBooked ?? 0} ${plural(cov.notBooked ?? 0, 'угода', 'угоди', 'угод')}. Частину з них СТО взяти не могло — не було вільного місця, потрібної деталі або такої послуги взагалі. В решті випадків сервіс міг виконати роботу, але клієнт вирішив інакше.</p>
+      <p class="lead">За період не закрилося ${notBooked} ${plural(notBooked, 'угода', 'угоди', 'угод')}. Частину з них СТО взяти не могло — не було вільного місця, потрібної деталі або такої послуги взагалі. В решті випадків сервіс міг виконати роботу, але клієнт вирішив інакше.</p>
       <h3 class="sub">Причини відмов</h3>
       <div class="buckets">${buckets}</div>
       <h3 class="sub">Часті причини</h3>
       <ul class="reasons">${reasons}</ul>
       <h3 class="sub">Кому відмовили — можна передзвонити</h3>
+      ${caseMonths.length ? tabStrip(withAllLast(caseMonths), { cls: 'dtab', attr: 'data-dm', activeKey: ALL }) : ''}
       <div class="scroll">
         <table class="grid cases">
           <colgroup>
-            <col class="c-date"><col class="c-cat"><col class="c-reason"><col class="c-client"><col class="c-mgr"><col>
+            <col class="c-date"><col class="c-reason"><col class="c-client"><col class="c-mgr"><col>
           </colgroup>
-          <thead><tr><th>Дата</th><th>Категорія</th><th>Причина</th><th>Клієнт</th><th>Менеджер</th><th>Слова менеджера</th></tr></thead>
+          <thead><tr><th>Дата</th><th>Причина</th><th>Клієнт</th><th>Менеджер</th><th>Слова менеджера</th></tr></thead>
           <tbody>${cases}</tbody>
         </table>
       </div>
@@ -300,7 +331,8 @@ function renderGlobalReport(report) {
   * { box-sizing: border-box; }
   [hidden] { display: none !important; }
   body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; }
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    -webkit-text-size-adjust: 100%; }
   .wrap { max-width: 960px; margin: 0 auto; padding: 16px; }
   h1 { font-size: 26px; margin: 0 0 4px; }
   h2 { font-size: 20px; margin: 0 0 12px; }
@@ -316,7 +348,7 @@ function renderGlobalReport(report) {
   .donut-cap { text-anchor: middle; font-size: 11px; fill: var(--muted); }
   .legend { list-style: none; margin: 0; padding: 0; }
   .legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-  .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
   .legend .pct { color: var(--muted); }
   .mtabs { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 30;
     background: var(--bg); padding: 10px 0; margin-bottom: 8px; }
@@ -324,9 +356,9 @@ function renderGlobalReport(report) {
     border-radius: 999px; padding: 9px 18px; font-size: 15px; font-weight: 600; cursor: pointer; }
   .mtab.on { background: var(--ink); border-color: var(--ink); color: #fff; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
-  .tab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink);
+  .tab, .dtab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink);
     border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
-  .tab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab.on, .dtab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 14px; }
   .cat { position: relative; border: 1px solid var(--line); border-left: 4px solid var(--c);
     border-radius: 10px; padding: 10px 8px; text-align: center; }
@@ -336,9 +368,8 @@ function renderGlobalReport(report) {
   .tip { position: absolute; top: 6px; right: 6px; }
   .tip > summary { list-style: none; cursor: pointer; width: 18px; height: 18px; border-radius: 50%;
     border: 1px solid var(--line); color: var(--muted); font-size: 11px; font-weight: 700;
-    display: flex; align-items: center; justify-content: center; margin: 0; }
-  .tip > summary::-webkit-details-marker { display: none; }
-  .tip > summary::before { content: none; }
+    display: flex; align-items: center; justify-content: center; margin: 0; padding: 0; }
+  .tip > summary::-webkit-details-marker, .tip > summary::marker { display: none; content: ""; }
   .tip[open] > summary { background: var(--ink); border-color: var(--ink); color: #fff; }
   .tipbox { position: absolute; right: 0; top: 24px; width: 230px; text-align: left;
     background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px;
@@ -351,6 +382,7 @@ function renderGlobalReport(report) {
   table.grid thead th { color: var(--muted); font-weight: 600; }
   .total { font-weight: 700; }
   td.sel, th.sel { background: #eef4ff; }
+  .mshort { display: none; }
   .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 16px; }
   figure { margin: 0; }
   figcaption { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
@@ -369,11 +401,11 @@ function renderGlobalReport(report) {
   .finding.minus { border-left: 4px solid var(--minus); }
   .finding h4 { margin: 0 0 6px; font-size: 15px; }
   .why, .action { margin: 0 0 6px; font-size: 14px; color: var(--muted); }
-  details summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-top: 8px;
+  .finding details > summary { cursor: pointer; font-size: 13px; color: var(--accent); margin-top: 8px;
     list-style: none; display: inline-flex; align-items: center; gap: 6px; }
-  details summary::-webkit-details-marker { display: none; }
-  details summary::before { content: "\\25B8"; font-size: 11px; }
-  details[open] summary::before { content: "\\25BE"; }
+  .finding details > summary::-webkit-details-marker { display: none; }
+  .finding details > summary::before { content: "\\25B8"; font-size: 11px; }
+  .finding details[open] > summary::before { content: "\\25BE"; }
   .cnt { background: #eef0f4; color: var(--muted); border-radius: 999px; padding: 0 7px; font-size: 11px; }
   .examples { list-style: none; margin: 10px 0 0; padding: 0; }
   .examples li { margin-bottom: 10px; }
@@ -392,30 +424,60 @@ function renderGlobalReport(report) {
   .bucket-name { color: var(--muted); font-size: 13px; }
   ul.reasons { list-style: none; margin: 0; padding: 0; }
   ul.reasons li { display: grid; grid-template-columns: minmax(120px, 1fr) 2fr 44px;
-    gap: 10px; align-items: center; padding: 5px 0; font-size: 14px; }
-  .reason-bar { background: #eef0f4; border-radius: 999px; height: 10px; overflow: hidden; }
+    grid-template-areas: "name bar num"; gap: 10px; align-items: center; padding: 5px 0; font-size: 14px; }
+  .reason-name { grid-area: name; }
+  .reason-bar { grid-area: bar; background: #eef0f4; border-radius: 999px; height: 10px; overflow: hidden; }
   .reason-bar i { display: block; height: 100%; background: #9db4dd; }
   li.service .reason-bar i { background: #d79a93; }
-  .reason-num { text-align: right; font-variant-numeric: tabular-nums; }
-  .scroll { overflow-x: auto; }
-  table.cases { table-layout: fixed; min-width: 800px; }
+  .reason-num { grid-area: num; text-align: right; font-variant-numeric: tabular-nums; }
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  table.cases { table-layout: fixed; min-width: 720px; }
   table.cases th, table.cases td { text-align: left; vertical-align: top; font-size: 13px; }
   table.cases thead th { white-space: nowrap; }
   table.cases .quote { color: var(--muted); }
   table.cases .nowrap, table.cases .phone { white-space: nowrap; }
-  .c-date { width: 74px; } .c-cat { width: 116px; } .c-reason { width: 180px; }
-  .c-client { width: 170px; } .c-mgr { width: 104px; }
+  table.cases td::before { display: none; }
+  .c-date { width: 78px; } .c-reason { width: 190px; } .c-client { width: 178px; } .c-mgr { width: 108px; }
   .phone { color: var(--muted); font-size: 12px; }
   .fine { font-size: 13px; color: var(--muted); margin-top: 12px; }
   .method ul { margin: 0; padding-left: 18px; }
   .method li { margin-bottom: 8px; font-size: 14px; }
   footer { color: var(--muted); font-size: 12px; text-align: center; padding: 8px 0 24px; }
-  @media (max-width: 720px) {
+
+  @media (max-width: 760px) {
+    .wrap { padding: 12px; }
+    .card { padding: 14px; border-radius: 12px; }
+    h1 { font-size: 21px; }
+    h2 { font-size: 18px; }
+    .hero .big { font-size: 34px; }
     .cols, .charts, .buckets { grid-template-columns: 1fr; }
     .cats { grid-template-columns: repeat(2, 1fr); }
-    .tipbox { width: 210px; }
-    h1 { font-size: 22px; }
-    .hero .big { font-size: 36px; }
+    .mtab { padding: 8px 14px; font-size: 14px; }
+
+    .mfull { display: none; }
+    .mshort { display: inline; }
+    table.grid.deals { font-size: 13px; }
+    table.grid.deals th, table.grid.deals td { padding: 7px 2px; }
+    table.grid.deals th[scope="row"] { font-size: 12px; }
+
+    .scroll { overflow-x: visible; }
+    table.cases { display: block; min-width: 0; table-layout: auto; }
+    table.cases colgroup, table.cases thead { display: none; }
+    table.cases tbody, table.cases tr, table.cases td { display: block; width: auto; }
+    table.cases tr { border: 1px solid var(--line); border-radius: 10px;
+      padding: 10px 12px; margin-bottom: 10px; }
+    table.cases td { border: 0; padding: 4px 0; font-size: 14px; }
+    table.cases td::before { display: block; content: attr(data-label); color: var(--muted);
+      font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+    table.cases td.quote { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 8px; }
+    table.cases td:empty { display: none; }
+
+    ul.reasons li { grid-template-columns: 1fr auto;
+      grid-template-areas: "name num" "bar bar"; gap: 4px 10px; }
+    .reason-bar { height: 8px; }
+
+    .tipbox { width: min(230px, 66vw); }
+    .cat:nth-child(odd) .tipbox { left: 0; right: auto; }
   }
 </style>
 </head>
@@ -486,6 +548,17 @@ function renderGlobalReport(report) {
     tab.addEventListener('click', function () { showManager(tab.dataset.manager); });
   });
   if (tabs.length) showManager(tabs[0].dataset.manager);
+
+  var rows = document.querySelectorAll('tr[data-dm]');
+  var dtabs = document.querySelectorAll('.dtab');
+  function showDeclineMonth(month) {
+    rows.forEach(function (row) { row.hidden = month !== ALL && row.dataset.dm !== month; });
+    dtabs.forEach(function (tab) { tab.classList.toggle('on', tab.dataset.dm === month); });
+  }
+  dtabs.forEach(function (tab) {
+    tab.addEventListener('click', function () { showDeclineMonth(tab.dataset.dm); });
+  });
+  if (dtabs.length) showDeclineMonth(ALL);
 
   document.addEventListener('click', function (event) {
     document.querySelectorAll('.tip[open]').forEach(function (tip) {
