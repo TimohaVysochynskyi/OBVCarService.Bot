@@ -1,6 +1,7 @@
 import { withRetry } from './retry.js';
 import { httpError } from './errors.js';
 import { fetchRaw } from './http.js';
+import { directionOf } from './callDirection.js';
 
 const BASE_URL = process.env.BINOTEL_BASE_URL || 'https://api.binotel.com/api/4.0';
 
@@ -114,6 +115,11 @@ async function listCallsForPeriod(startDate, endDate) {
     // The CLIENT's phone number (the other party on the call, not ours). Raw Binotel shape,
     // e.g. "0971532839" - formatted to +380... on display (bot/operators.js: formatPhone).
     clientNumber: c.externalNumber || null,
+    // Binotel's only direction signal is callType "0"/"1" — there is no literal incoming/outgoing
+    // field anywhere in the REST API (all 19 keys of both list-of-calls-for-period and call-details
+    // checked live on 2026-09-21). Meaning confirmed from transcripts, not from docs: on callType=1
+    // the OTHER side answers first and our manager opens the conversation — i.e. we placed the call.
+    direction: directionOf(c.callType),
     // Whoever the client is called in the CRM (null when unlabelled) - shown in the archive.
     clientName: extractClientName(c),
     // WHO ENDED THE CALL. Binotel documents whoHungUp as part of the apiCallCompleted WEBHOOK, and

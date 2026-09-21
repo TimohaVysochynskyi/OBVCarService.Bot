@@ -188,6 +188,11 @@ async function migrate() {
     -- (new and old). Idempotent: a no-op once applied.
     ALTER TABLE calls DROP COLUMN IF EXISTS call_type;
     ALTER TABLE pending_calls DROP COLUMN IF EXISTS call_type;
+    -- direction: 'in' | 'out' (core/callDirection.js), from Binotel's callType.
+    -- ⚠️ Deliberately NOT named call_type: the two ALTERs above still drop that legacy column on
+    -- every migrate, so a column with that name would be deleted on the next boot.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS direction TEXT;
+    ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS direction TEXT;
 
     -- Historical rows from before the 4-stage taxonomy was unified (Задача 2, 2026-07-23) can carry
     -- the short pre-unification label "закриття" instead of the canonical "закриття угоди"
@@ -357,8 +362,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -382,6 +387,7 @@ async function saveCall(call) {
       call.audioStatus ?? null,
       call.dealBlocker ?? null,
       call.dealBlockerQuote ?? null,
+      call.direction ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -985,7 +991,7 @@ async function getCallByGeneralId(generalCallId) {
             duration_sec AS "durationSec", transcript, is_success AS "isSuccess",
             weakest_stage AS "weakestStage", communication_score AS "communicationScore",
             call_purpose AS "callPurpose", client_number AS "clientNumber",
-            client_name AS "clientName", segments, audio_path AS "audioPath"
+            client_name AS "clientName", segments, audio_path AS "audioPath", direction
      FROM calls WHERE general_call_id = $1`,
     [generalCallId]
   );
@@ -1078,6 +1084,22 @@ async function clearAllReportSegments() {
 // name for a row that already exists but was ingested before those fields were captured. Each column
 // is guarded by its own `IS NULL`, so it only ever fills a gap and never overwrites a value a fresh
 // ingest already saved - safe to re-run. Returns rowCount (0 = nothing was missing).
+async function updateDirectionIfMissing(generalCallId, direction) {
+  const { rowCount } = await pool.query(
+    'UPDATE calls SET direction = $2::text WHERE general_call_id = $1 AND direction IS NULL AND $2::text IS NOT NULL',
+    [generalCallId, direction ?? null]
+  );
+  return rowCount;
+}
+
+async function getDirectionStats() {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(direction, 'невідомо') AS direction, COUNT(*)::int AS count
+     FROM calls GROUP BY 1 ORDER BY 2 DESC`
+  );
+  return rows;
+}
+
 async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName) {
   // The ::text casts are required, not cosmetic: $2/$3 appear only inside COALESCE and `IS NOT NULL`,
   // neither of which tells Postgres the parameter type, so without them the statement fails outright
@@ -1412,11 +1434,11 @@ async function deleteKbDoc(id) {
 
 async function upsertPending(call, errorMessage) {
   await pool.query(
-    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, client_name, attempts, status, last_error, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 1, 'pending', $8, now())
+    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, client_name, direction, attempts, status, last_error, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', $9, now())
      ON CONFLICT (general_call_id) DO UPDATE SET
        attempts = pending_calls.attempts + 1,
-       last_error = $8,
+       last_error = $9,
        updated_at = now()`,
     [
       call.generalCallId,
@@ -1426,6 +1448,7 @@ async function upsertPending(call, errorMessage) {
       call.durationSec,
       call.clientNumber ?? null,
       call.clientName ?? null,
+      call.direction ?? null,
       errorMessage || null,
     ]
   );
@@ -1445,7 +1468,7 @@ async function getPendingCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber", manager_name AS "managerName",
             start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber",
-            client_name AS "clientName", attempts, last_error AS "lastError"
+            client_name AS "clientName", direction, attempts, last_error AS "lastError"
      FROM pending_calls
      WHERE status = 'pending'
      ORDER BY start_time`
@@ -1702,6 +1725,8 @@ export {
   deleteCallsByExtension,
   clearAllReportSegments,
   updateClientInfoIfMissing,
+  updateDirectionIfMissing,
+  getDirectionStats,
   getSalesCallsWithSegments,
   updateCallScore,
   getBlockedCalls,

@@ -13,6 +13,7 @@ import { displayName, formatPhone } from "./operators.js";
 import { formatDialogue } from "./dialogue.js";
 import { timecodedDialogue } from "../core/dialogueMetrics.js";
 import { NON_SALES_PURPOSES } from "../core/callPurpose.js";
+import { DIRECTION_LABELS } from "../core/callDirection.js";
 import { kyivParts, formatKyiv } from "./time.js";
 import { sendLong, withProgress, showScreen } from "./ui.js";
 
@@ -179,7 +180,9 @@ function registerArchive(bot) {
     // The internal Binotel call id is deliberately NOT shown: it looks like a phone number and was
     // read as one. The client's actual phone leads instead, and "Ім'я" is whatever the CRM has them
     // labelled as ("Невідомо" when nobody ever named them).
+    const dir = DIRECTION_LABELS[c.direction];
     const header =
+      `${dir ? `${dir.icon} ${dir.title} дзвінок — ${dir.about}` : "Напрямок дзвінка невідомий"}\n` +
       `📞 Телефон: ${c.clientNumber ? formatPhone(c.clientNumber) : "—"}\n` +
       `Клієнт: ${c.clientName || "Невідомо"}\n` +
       `Менеджер: ${displayName(c.managerName) ?? "—"}\n` +
