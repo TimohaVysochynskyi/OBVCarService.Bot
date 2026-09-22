@@ -8,6 +8,7 @@
     "node": ">=20"
   },
   "scripts": {
+    "build:css": "tailwindcss -i tailwind/input.css -o src/bot/site/app.css --minify",
     "poll": "cross-env JOB_TYPE=poll node src/jobs/index.js",
     "bot": "node src/bot/index.js",
     "test:call": "node src/scripts/testSingleCall.js",
@@ -37,6 +38,8 @@
     "unpdf": "^1.6.2"
   },
   "devDependencies": {
-    "cross-env": "^7.0.3"
+    "@tailwindcss/cli": "^4.3.3",
+    "cross-env": "^7.0.3",
+    "tailwindcss": "^4.3.3"
   }
 }

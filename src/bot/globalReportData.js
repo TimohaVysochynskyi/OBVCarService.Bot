@@ -139,6 +139,12 @@ function topFindings(findings, type, name) {
         quote: e.quote,
         note: e.note || null,
         at: e.startTime || null,
+        // Carried so the published report can cut an audio clip for this exact line. `at` is the
+        // call's own start time (used for the date shown under the quote); `start`/`end` are the
+        // timecodes INSIDE the recording, and only those can address a fragment.
+        callId: e.callId ?? null,
+        start: e.start ?? null,
+        end: e.end ?? null,
       })),
     }));
 }

@@ -1,78 +1,22 @@
-import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { InputFile } from 'grammy';
 import { getRecordingForCall } from '../core/audioStore.js';
+import { ffmpegAvailable, cutMp3 } from '../core/ffmpeg.js';
 
 // Audio evidence for the report: cut a short clip around a quoted line so the owner can listen and
 // verify. Uses SYSTEM ffmpeg (fast, tiny clips). If ffmpeg isn't installed the report still works —
 // it just goes text-only (prepareClips returns an empty map). Clips are cut ONCE per report and can
 // be re-sent to several recipients (scheduled fan-out).
 
-const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 const PAD = Number(process.env.AUDIO_CLIP_PAD_SEC || 3); // seconds of context on each side
 const MAX_CLIPS_PER_FINDING = 3;
 const CAPTION_QUOTE_MAX = 300;
-// Без обмеження часу зависший ffmpeg не давав ні результату, ні помилки: «Розгорнути» просто
-// не завершувалось ніколи. Нарізка секундного фрагмента - справа мілісекунд, тож хвилини вдосталь.
-const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 60_000);
-const PROBE_TIMEOUT_MS = 5_000;
 
 // Stable key so the same (call, timecode) maps to one cut clip across findings/recipients.
 function clipKey(callId, start, end) {
   return `${callId}:${start}:${end}`;
-}
-
-// Cached one-shot preflight: is `ffmpeg` runnable? Cache the promise so we probe at most once.
-let ffmpegProbe = null;
-function ffmpegAvailable() {
-  if (!ffmpegProbe) {
-    ffmpegProbe = new Promise((resolve) => {
-      try {
-        const p = spawn(FFMPEG, ['-version']);
-        // Проба кешується на весь процес, тож її зависання зупинило б усі звіти назавжди.
-        const timer = setTimeout(() => {
-          p.kill('SIGKILL');
-          resolve(false);
-        }, PROBE_TIMEOUT_MS);
-        p.on('error', () => {
-          clearTimeout(timer);
-          resolve(false);
-        });
-        p.on('close', (code) => {
-          clearTimeout(timer);
-          resolve(code === 0);
-        });
-      } catch {
-        resolve(false);
-      }
-    });
-  }
-  return ffmpegProbe;
-}
-
-function runFfmpeg(args) {
-  return new Promise((resolve, reject) => {
-    const p = spawn(FFMPEG, args);
-    let stderr = '';
-    const timer = setTimeout(() => {
-      p.kill('SIGKILL');
-      const err = new Error(`ffmpeg не завершився за ${Math.round(FFMPEG_TIMEOUT_MS / 1000)}с`);
-      err.name = 'TimeoutError';
-      reject(err);
-    }, FFMPEG_TIMEOUT_MS);
-    p.stderr.on('data', (d) => (stderr += d.toString()));
-    p.on('error', (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-    p.on('close', (code) => {
-      clearTimeout(timer);
-      if (code === 0) resolve();
-      else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-300)}`));
-    });
-  });
 }
 
 // Collect the unique (callId,start,end) clips needed by a report — negatives only, capped per
@@ -139,7 +83,7 @@ async function prepareClips(report) {
         const from = Math.max(0, c.start - PAD);
         const dur = Math.max(1, (Number(c.end ?? c.start) - c.start) + 2 * PAD);
         const out = join(dir, `${c.key.replace(/[^\w.-]/g, '_')}.mp3`);
-        await runFfmpeg(['-y', '-ss', String(from), '-i', src, '-t', String(dur), '-c:a', 'libmp3lame', '-q:a', '5', out]);
+        await cutMp3(src, out, from, dur);
         clips.set(c.key, await readFile(out));
       } catch (err) {
         cutFailed += 1;
@@ -184,4 +128,4 @@ async function sendClip(api, chatId, buf, ev, { replyToMessageId } = {}) {
   await api.sendAudio(chatId, new InputFile(buf, `dialog-${ev.callId}.mp3`), extra);
 }
 
-export { prepareClips, clipKey, sendClip, ffmpegAvailable };
+export { prepareClips, clipKey, sendClip };

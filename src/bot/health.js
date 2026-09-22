@@ -14,7 +14,7 @@ import { freeSpaceMb } from '../core/audioStore.js';
 import { fetchOk } from '../core/http.js';
 import { classify } from '../core/errors.js';
 import { HEALTH } from '../core/errorTexts.js';
-import { ffmpegAvailable } from './audioClip.js';
+import { ffmpegAvailable } from '../core/ffmpeg.js';
 import { showScreen } from './ui.js';
 import { formatKyiv } from './time.js';
 

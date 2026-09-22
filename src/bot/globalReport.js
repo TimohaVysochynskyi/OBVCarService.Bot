@@ -1,30 +1,36 @@
 import { InputFile } from 'grammy';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildGlobalReport, ALL } from './globalReportData.js';
-import { renderGlobalReport } from './globalReportHtml.js';
+import { buildSite, zipSite } from './globalReportBundle.js';
 import { withProgress } from './ui.js';
 
 const NOTICE = '⏳ Звіт за весь період готується. Перший раз це займає кілька хвилин.';
 
-function fileName(report) {
+function periodLabel(report) {
   const from = report.period.start.slice(0, 10).split('-').reverse().join('.');
   const to = report.period.end.slice(0, 10).split('-').reverse().join('.');
-  return `Звіт по дзвінках ${from} - ${to}.html`;
+  return `${from} - ${to}`;
 }
 
-function caption(report) {
+function caption(report, built) {
   const t = report.totals;
   const lines = [
-    `📊 Звіт за весь період`,
+    '📊 Звіт за весь період',
     `${t.calls} дзвінків · ${t.hours} год розмов · ${t.managers} менеджери`,
     '',
     `Угоди ${t.purposes.sales} · інформаційні ${t.purposes.info} · службові ${t.purposes.other} · особисті ${t.purposes.personal}`,
     `Відмов СТО: ${report.declines.serviceTotal}`,
-    '',
-    'Файл відкривається у браузері, працює без інтернету.',
   ];
+
+  if (built.audio.files) {
+    lines.push(`Аудіо-фрагментів під прикладами: ${built.audio.files}`);
+  } else if (built.clips.wanted) {
+    lines.push('Аудіо-фрагменти цього разу не вирізались — у звіті лишився тільки текст цитат.');
+  }
+
+  lines.push('', 'Розпакуйте архів і відкрийте index.html — усе всередині, інтернет не потрібен.');
   return lines.join('\n');
 }
 
@@ -35,13 +41,18 @@ async function sendGlobalReport(ctx) {
     notice: NOTICE,
   });
 
-  const html = renderGlobalReport(report);
-  const dir = await mkdtemp(join(tmpdir(), 'obv-global-'));
-  const path = join(dir, 'report.html');
+  // The site is written to its permanent home (REPORT_SITE_DIR) — that is what a web server will
+  // serve later, and what lets the next build reuse the audio clips instead of re-cutting them.
+  // Only the zip handed to Telegram is temporary.
+  const built = await buildSite(report);
 
+  const dir = await mkdtemp(join(tmpdir(), 'obv-global-'));
+  const zipPath = join(dir, 'report.zip');
   try {
-    await writeFile(path, html, 'utf8');
-    await ctx.api.sendDocument(chatId, new InputFile(path, fileName(report)), { caption: caption(report) });
+    await zipSite(built.dir, zipPath);
+    await ctx.api.sendDocument(chatId, new InputFile(zipPath, `Звіт по дзвінках ${periodLabel(report)}.zip`), {
+      caption: caption(report, built),
+    });
   } finally {
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }

@@ -9,4 +9,5 @@ data/
 report.html
 report_*.html
 report*.json
+report-site/
 .vscode/

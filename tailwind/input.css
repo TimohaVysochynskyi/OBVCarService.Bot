@@ -1,0 +1,153 @@
+/* Source for the report's stylesheet. Build it with `npm run build:css`; the OUTPUT
+   (src/bot/site/app.css) is committed, because the VPS deploys with --omit=dev and has no
+   Tailwind CLI. Re-run the build after changing any class in globalReportHtml.js. */
+
+@import "tailwindcss";
+
+@source "../src/bot/globalReportHtml.js";
+@source "../src/bot/site/app.js";
+
+@theme {
+  --color-canvas: #f4f5f7;
+  --color-card: #ffffff;
+  --color-ink: #1d2126;
+  --color-muted: #667085;
+  --color-line: #e4e7ec;
+  --color-accent: #1d4ed8;
+  --color-plus: #2f7d58;
+  --color-minus: #b4453a;
+  --color-track: #eef1f5;
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+}
+
+@layer base {
+  /* The report is a light document on purpose: it gets printed and forwarded as often as it is
+     read on screen, and a dark variant would have to be maintained twice for no one's benefit. */
+  html {
+    color-scheme: light;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--color-canvas);
+    color: var(--color-ink);
+  }
+
+  [hidden] {
+    display: none !important;
+  }
+}
+
+@layer components {
+  /* --- things utilities genuinely cannot express ----------------------------------------- */
+
+  /* A <details> is used twice with opposite intent: the "i" badge (a popover, no marker) and the
+     examples disclosure (wants a marker). Scoping the arrow to .disclosure keeps it off the badge
+     — the unscoped rule used to win on specificity and shoved the letter sideways. */
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary {
+    list-style: none;
+  }
+  .disclosure > summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 6px;
+    transition: transform 0.15s ease;
+  }
+  details[open] > .disclosure-marker::before,
+  .disclosure[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  /* The open "i" badge fills in and its letter turns white. This styles a child by the PARENT's
+     [open] state, which no utility can express — and without it nothing shows which badge is open. */
+  [data-tip][open] > summary {
+    background: var(--color-ink);
+    border-color: var(--color-ink);
+    color: #fff;
+  }
+
+  /* A table that becomes a card per row on a phone. Horizontal scrolling through an 800px table on
+     a 360px screen is unusable, and the header row is what carries the meaning, so each cell
+     reprints its own header from data-label. */
+  @media (max-width: 767px) {
+    .cards-on-mobile,
+    .cards-on-mobile tbody,
+    .cards-on-mobile tr,
+    .cards-on-mobile td {
+      display: block;
+      width: auto;
+    }
+    .cards-on-mobile thead,
+    .cards-on-mobile colgroup {
+      display: none;
+    }
+    .cards-on-mobile tr {
+      border: 1px solid var(--color-line);
+      border-radius: 0.625rem;
+      padding: 0.625rem 0.75rem;
+      margin-bottom: 0.625rem;
+    }
+    .cards-on-mobile td {
+      border: 0;
+      padding: 0.25rem 0;
+      text-align: left;
+    }
+    .cards-on-mobile td::before {
+      content: attr(data-label);
+      display: block;
+      font-size: 0.6875rem;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+    }
+    .cards-on-mobile td:empty {
+      display: none;
+    }
+  }
+
+  /* Charts are inline SVG (no library, no network), so their strokes live here rather than as
+     utilities on every generated element. */
+  .chart-grid {
+    stroke: var(--color-line);
+    stroke-width: 1;
+  }
+  .chart-line {
+    fill: none;
+    stroke-width: 2.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+  }
+  .chart-axis {
+    font-size: 10px;
+    fill: var(--color-muted);
+  }
+}
+
+@layer utilities {
+  /* The report is printed. Keep every disclosure open on paper, drop the interactive chrome, and
+     never split a finding across a page break. */
+  @media print {
+    .no-print {
+      display: none !important;
+    }
+    details {
+      display: block !important;
+    }
+    details > summary {
+      display: none !important;
+    }
+    details > *:not(summary) {
+      display: block !important;
+    }
+    .break-avoid {
+      break-inside: avoid;
+    }
+    body {
+      background: #fff;
+    }
+  }
+}
