@@ -8,3 +8,4 @@ data/
 # тому лежить тільки локально і в git не потрапляє.
 report.html
 report_*.html
+report*.json
