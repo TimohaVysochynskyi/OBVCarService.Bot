@@ -3,6 +3,7 @@ import { ALL } from './globalReportData.js';
 
 const PURPOSE_ORDER = ['sales', 'info', 'other', 'personal'];
 const PURPOSE_COLORS = { sales: '#2f7d58', info: '#3b6fb0', other: '#8a7a3f', personal: '#8c5aa8' };
+const MANAGER_COLORS = ['#2f7d58', '#3b6fb0', '#b5603a', '#8c5aa8', '#4f7a8c'];
 const WORK_DAY_HOURS = 8;
 const MONTH_NAMES = [
   'січень', 'лютий', 'березень', 'квітень', 'травень', 'червень',
@@ -93,6 +94,121 @@ function barChart(series, { max, months, suffix = '', decimals = 0 }) {
     })
     .join('');
   return `<div class="chart">${bars}</div>`;
+}
+
+const CMP_METRICS = [
+  {
+    key: 'conv',
+    title: 'Конверсія',
+    hint: 'Скільки угод дійшло до запису. Відсоток рахується лише від тих угод, які СТО могло взяти, тож черга й відсутні деталі менеджеру в мінус не йдуть. На кількох угодах відсоток стрибає — тому поруч завжди видно, від скількох він рахувався.',
+  },
+  {
+    key: 'score',
+    title: 'Середній бал розмови',
+    hint: 'Оцінка того, ЯК менеджер веде діалог: вітання, виявлення потреби, робота із запереченнями, перебивання клієнта й довгі паузи. Шкала — від 1 до 10, ставиться кожній розмові-угоді окремо.',
+  },
+  {
+    key: 'sales',
+    title: 'Угод',
+    hint: 'Скільки розмов узагалі давали можливість записати клієнта. Це навантаження: у менеджера з трьома угодами і в менеджера з пʼятдесятьма однакові відсотки означають різне.',
+  },
+];
+
+function lineChart(managers, months, key, { max, suffix = '', title }) {
+  if (!months.length) return '';
+  const W = 340;
+  const H = 180;
+  const L = 42;
+  const R = 12;
+  const T = 14;
+  const B = 34;
+  const iw = W - L - R;
+  const ih = H - T - B;
+  const n = months.length;
+  const px = (i) => (n === 1 ? L + iw / 2 : L + (i / (n - 1)) * iw);
+  const py = (v) => T + ih - (Math.min(Math.max(v, 0), max) / max) * ih;
+
+  const grid = [0, max / 2, max]
+    .map(
+      (t) =>
+        `<line x1="${L}" y1="${py(t).toFixed(1)}" x2="${W - R}" y2="${py(t).toFixed(1)}" class="gl"/>` +
+        `<text x="${L - 6}" y="${(py(t) + 3.5).toFixed(1)}" class="ax ax-y">${esc(String(Math.round(t)) + suffix)}</text>`
+    )
+    .join('');
+
+  const xlabels = months
+    .map((m, i) => `<text x="${px(i).toFixed(1)}" y="${H - 10}" class="ax ax-x">${esc(shortMonth(m.title))}</text>`)
+    .join('');
+
+  const series = managers
+    .map((manager, mi) => {
+      const color = MANAGER_COLORS[mi % MANAGER_COLORS.length];
+      const pts = months
+        .map((mo, i) => ({ i, v: (manager.byMonth[mo.key] || {})[key] }))
+        .filter((p) => p.v != null);
+      if (!pts.length) return '';
+      const path = pts.map((p) => `${px(p.i).toFixed(1)},${py(p.v).toFixed(1)}`).join(' ');
+      const line = pts.length > 1 ? `<polyline class="ln" points="${path}" stroke="${color}"/>` : '';
+      const dots = pts
+        .map((p) => `<circle cx="${px(p.i).toFixed(1)}" cy="${py(p.v).toFixed(1)}" r="3.5" fill="${color}"/>`)
+        .join('');
+      return line + dots;
+    })
+    .join('');
+
+  return `<figure class="lc">
+      <figcaption>${esc(title)}</figcaption>
+      <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${grid}${series}${xlabels}</svg>
+    </figure>`;
+}
+
+function compareSection(report) {
+  const { managers, months } = report;
+  if (managers.length < 2) return '';
+
+  const rows = (metric) =>
+    managers
+      .map(
+        (m, i) => `<div class="cmp-row" data-cmp="${esc(metric)}" data-manager="${esc(m.name)}">
+          <span class="cmp-name">${esc(m.display)}</span>
+          <span class="cmp-track"><span class="cmp-bar" style="--c:${MANAGER_COLORS[i % MANAGER_COLORS.length]}"></span></span>
+          <span class="cmp-val"></span>
+          <span class="cmp-sub"></span>
+        </div>`
+      )
+      .join('');
+
+  const blocks = CMP_METRICS.map(
+    (metric) => `<div class="cmp">
+      <h3 class="cmp-h">${esc(metric.title)}
+        <details class="tip"><summary title="Як це рахується">i</summary><div class="tipbox"><b>${esc(metric.title)}</b><br>${esc(metric.hint)}</div></details>
+      </h3>
+      ${rows(metric.key)}
+    </div>`
+  ).join('');
+
+  const convPeak = Math.max(
+    20,
+    ...managers.flatMap((m) => months.map((mo) => (m.byMonth[mo.key] || {}).conversion || 0))
+  );
+  const convMax = Math.ceil(convPeak / 20) * 20;
+
+  const legendItems = managers
+    .map((m, i) => `<li><i style="background:${MANAGER_COLORS[i % MANAGER_COLORS.length]}"></i>${esc(m.display)}</li>`)
+    .join('');
+
+  return `<section class="card compare">
+    <h2>Порівняння менеджерів</h2>
+    <p class="lead">Ті самі показники поруч: видно, хто веде, а хто відстає. Стовпчики перебудовуються під обраний місяць і щоразу шикуються від кращого до гіршого. Графіки нижче показують не поточний стан, а рух — чи росте кожен із місяця в місяць.</p>
+    ${tabStrip(withAllLast(months), { cls: 'ctab', attr: 'data-cm', activeKey: ALL })}
+    <div class="cmp-grid">${blocks}</div>
+    <h3 class="sub">Як змінюється з місяця в місяць</h3>
+    <div class="charts">
+      ${lineChart(managers, months, 'conversion', { max: convMax, suffix: '%', title: 'Конверсія по місяцях' })}
+      ${lineChart(managers, months, 'avgScore', { max: 10, title: 'Середній бал по місяцях' })}
+    </div>
+    <ul class="legend lc-legend">${legendItems}</ul>
+  </section>`;
 }
 
 function managerTable(manager, months) {
@@ -392,6 +508,27 @@ function renderGlobalReport(report) {
   .bar-slot.sel .bar { background: var(--accent); }
   .bar-val { font-size: 11px; color: var(--muted); }
   .bar-cap { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .cmp-grid { display: grid; gap: 20px; }
+  .cmp-h { position: relative; display: flex; align-items: center; gap: 8px;
+    font-size: 15px; margin: 0 0 12px; }
+  .cmp-h .tip { position: relative; top: auto; right: auto; }
+  .cmp-h .tipbox { left: 0; right: auto; }
+  .cmp-row { display: grid; grid-template-columns: 110px 1fr 58px;
+    grid-template-areas: "name track val" "name sub sub"; align-items: center;
+    gap: 2px 10px; margin-bottom: 10px; }
+  .cmp-name { grid-area: name; font-size: 14px; font-weight: 600; }
+  .cmp-track { grid-area: track; background: var(--line); border-radius: 999px;
+    height: 14px; overflow: hidden; }
+  .cmp-bar { display: block; height: 100%; width: 0; background: var(--c); border-radius: 999px; }
+  .cmp-val { grid-area: val; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cmp-sub { grid-area: sub; font-size: 12px; color: var(--muted); }
+  .lc svg { width: 100%; height: auto; display: block; }
+  .lc .gl { stroke: var(--line); stroke-width: 1; }
+  .lc .ln { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
+  .lc .ax { font-size: 10px; fill: var(--muted); }
+  .lc .ax-y { text-anchor: end; }
+  .lc .ax-x { text-anchor: middle; }
+  .lc-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 13px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
   .col h3 { font-size: 15px; margin: 0 0 10px; }
   .col.plus h3 { color: var(--plus); }
@@ -452,6 +589,9 @@ function renderGlobalReport(report) {
     .hero .big { font-size: 34px; }
     .cols, .charts, .buckets { grid-template-columns: 1fr; }
     .cats { grid-template-columns: repeat(2, 1fr); }
+    .cmp-row { grid-template-columns: 88px 1fr 50px; gap: 2px 8px; }
+    .cmp-name { font-size: 13px; }
+    .cmp-val { font-size: 14px; }
     .mtab { padding: 8px 14px; font-size: 14px; }
 
     .mfull { display: none; }
@@ -503,6 +643,8 @@ function renderGlobalReport(report) {
     </div>
   </section>
 
+  ${compareSection(report)}
+
   <div class="mtabs">${managerTabs}</div>
 
   ${managers.map((m) => managerCard(m, months)).join('')}
@@ -538,6 +680,63 @@ function renderGlobalReport(report) {
     });
     applyMonth(card, ALL);
   });
+
+  var CMP = {
+    conv: {
+      get: function (b) { return b.conversion; },
+      fmt: function (v) { return v + '%'; },
+      sub: function (b) {
+        if (!b.reachable) return 'угод, які можна було взяти, не було';
+        return 'записались ' + (b.success || 0) + ' з ' + b.reachable;
+      },
+      top: null
+    },
+    score: {
+      get: function (b) { return b.avgScore; },
+      fmt: function (v) { return String(v); },
+      sub: function (b) { return b.avgScore == null ? 'бал ще не рахувався' : 'з 10'; },
+      top: 10
+    },
+    sales: {
+      get: function (b) { return b.sales; },
+      fmt: function (v) { return String(v); },
+      sub: function (b) { return (b.calls || 0) + ' дзвінків усього'; },
+      top: null
+    }
+  };
+
+  function applyCompare(month) {
+    Object.keys(CMP).forEach(function (key) {
+      var metric = CMP[key];
+      var rows = [].slice.call(document.querySelectorAll('[data-cmp="' + key + '"]'));
+      if (!rows.length) return;
+      var items = rows.map(function (row) {
+        var bucket = (DATA[row.dataset.manager] || {})[month] || {};
+        return { row: row, bucket: bucket, value: metric.get(bucket) };
+      });
+      var max = metric.top || items.reduce(function (n, x) { return Math.max(n, x.value || 0); }, 0);
+      items.forEach(function (x) {
+        var width = x.value == null || !max ? 0 : Math.max(2, (x.value / max) * 100);
+        x.row.querySelector('.cmp-bar').style.width = width.toFixed(1) + '%';
+        x.row.querySelector('.cmp-val').textContent = x.value == null ? '—' : metric.fmt(x.value);
+        x.row.querySelector('.cmp-sub').textContent = metric.sub(x.bucket);
+      });
+      items.sort(function (a, b) {
+        return (b.value == null ? -1 : b.value) - (a.value == null ? -1 : a.value);
+      });
+      var parent = rows[0].parentNode;
+      items.forEach(function (x) { parent.appendChild(x.row); });
+    });
+    document.querySelectorAll('.ctab').forEach(function (tab) {
+      tab.classList.toggle('on', tab.dataset.cm === month);
+    });
+  }
+
+  var ctabs = document.querySelectorAll('.ctab');
+  ctabs.forEach(function (tab) {
+    tab.addEventListener('click', function () { applyCompare(tab.dataset.cm); });
+  });
+  if (ctabs.length) applyCompare(ALL);
 
   var tabs = document.querySelectorAll('.mtab');
   function showManager(name) {

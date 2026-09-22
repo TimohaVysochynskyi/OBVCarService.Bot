@@ -158,8 +158,11 @@ function inputHash(findings) {
 }
 
 async function mergeCached(name, start, end, findings) {
+  // The row is keyed by inputHash alone: mergeFindings depends only on the manager and the findings,
+  // so the period adds nothing. It used to end at dayEnd(end), which moves the moment a new call is
+  // ingested -- every single report then missed the cache and re-merged. Pinned to the first day.
   const from = dayStart(start);
-  const to = dayEnd(end);
+  const to = dayEnd(start);
   const hash = inputHash(findings);
 
   const stored = await getStoredSegment(name, from, to, GLOBAL_KIND).catch(() => null);
