@@ -65,6 +65,9 @@ function runFfmpeg(args) {
 
 // Cut [from, from+duration] out of `src` into `out` as mp3. Sources are already 32 kbps mono, so
 // re-encoding costs nothing and guarantees a clean, seekable clip.
+// ⚠️ `-f mp3` is not redundant: ffmpeg picks the container from the output EXTENSION, so writing to
+// a temporary name like `clip.mp3.part` — which is how the caller avoids leaving a half-written
+// file behind — fails with "Invalid argument" unless the format is stated outright.
 async function cutMp3(src, out, from, duration) {
   await runFfmpeg([
     '-y',
@@ -73,6 +76,7 @@ async function cutMp3(src, out, from, duration) {
     '-t', String(duration),
     '-c:a', 'libmp3lame',
     '-q:a', '5',
+    '-f', 'mp3',
     out,
   ]);
 }
