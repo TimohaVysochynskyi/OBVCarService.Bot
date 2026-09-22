@@ -11,12 +11,12 @@
 
 Схема БД створюється сама при першому старті (`migrate()` / `migrateKb()`) — **ніяких ручних seed-кроків немає**.
 
-## Крок 1 — Node.js 20+, git і ffmpeg
+## Крок 1 — Node.js 20+, git, ffmpeg і zip
 
 Підключись по SSH (PuTTY: Host = IP, Port 22, логін+пароль). Перевір, що є:
 
 ```bash
-node -v; git --version; ffmpeg -version | head -1
+node -v; git --version; ffmpeg -version | head -1; zip -v | head -2
 ```
 
 Якщо Node немає або версія < 20 — постав Node 20 з NodeSource:
@@ -35,6 +35,8 @@ sudo dnf install -y "https://mirrors.rpmfusion.org/free/el/rpmfusion-free-releas
 sudo dnf install -y ffmpeg
 ffmpeg -version | head -1
 ```
+
+**zip** потрібен для `/globalreport`: звіт віддається архівом (`index.html` + `assets/` + `audio/`), бо це вже не один файл. Зазвичай стоїть; якщо ні — `sudo dnf install -y zip`. Без нього команда звіту впаде з помилкою (на відміну від ffmpeg, деградувати тут нема куди — архів або є, або його немає).
 
 > Без ffmpeg бот НЕ падає — доказовий звіт просто йде текстом без аудіо-кліпів (preflight-перевірка в `src/bot/audioClip.js`). Якщо ffmpeg не на PATH — вкажи шлях у `.env`: `FFMPEG_PATH=/usr/bin/ffmpeg`.
 
