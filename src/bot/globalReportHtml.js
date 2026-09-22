@@ -171,8 +171,8 @@ function compareSection(report) {
       .map(
         (m, i) => `<div class="cmp-row" data-cmp="${esc(metric)}" data-manager="${esc(m.name)}">
           <span class="cmp-name">${esc(m.display)}</span>
-          <span class="cmp-track"><span class="cmp-bar" style="--c:${MANAGER_COLORS[i % MANAGER_COLORS.length]}"></span></span>
           <span class="cmp-val"></span>
+          <span class="cmp-track"><span class="cmp-bar" style="--c:${MANAGER_COLORS[i % MANAGER_COLORS.length]}"></span></span>
           <span class="cmp-sub"></span>
         </div>`
       )
@@ -199,7 +199,7 @@ function compareSection(report) {
 
   return `<section class="card compare">
     <h2>Порівняння менеджерів</h2>
-    <p class="lead">Ті самі показники поруч: видно, хто веде, а хто відстає. Стовпчики перебудовуються під обраний місяць і щоразу шикуються від кращого до гіршого. Графіки нижче показують не поточний стан, а рух — чи росте кожен із місяця в місяць.</p>
+    <p class="lead">Ті самі показники поруч: видно, хто веде, а хто відстає. Порядок менеджерів скрізь однаковий, тож при перемиканні місяця рядки не стрибають. Графіки нижче показують не поточний стан, а рух — чи росте кожен із місяця в місяць.</p>
     ${tabStrip(withAllLast(months), { cls: 'ctab', attr: 'data-cm', activeKey: ALL })}
     <div class="cmp-grid">${blocks}</div>
     <h3 class="sub">Як змінюється з місяця в місяць</h3>
@@ -466,15 +466,14 @@ function renderGlobalReport(report) {
   .legend li { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
   .legend i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
   .legend .pct { color: var(--muted); }
-  .mtabs { display: flex; gap: 8px; flex-wrap: wrap; position: sticky; top: 0; z-index: 30;
-    background: var(--bg); padding: 10px 0; margin-bottom: 8px; }
+  .mtabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 0 14px; }
   .mtab { border: 1px solid var(--line); background: var(--card); color: var(--ink);
     border-radius: 999px; padding: 9px 18px; font-size: 15px; font-weight: 600; cursor: pointer; }
   .mtab.on { background: var(--ink); border-color: var(--ink); color: #fff; }
   .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
-  .tab, .dtab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink);
+  .tab, .dtab, .ctab { border: 1px solid var(--line); background: #fafbfc; color: var(--ink);
     border-radius: 999px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
-  .tab.on, .dtab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .tab.on, .dtab.on, .ctab.on { background: var(--accent); border-color: var(--accent); color: #fff; }
   .cats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0 0 14px; }
   .cat { position: relative; border: 1px solid var(--line); border-left: 4px solid var(--c);
     border-radius: 10px; padding: 10px 8px; text-align: center; }
@@ -508,27 +507,31 @@ function renderGlobalReport(report) {
   .bar-slot.sel .bar { background: var(--accent); }
   .bar-val { font-size: 11px; color: var(--muted); }
   .bar-cap { font-size: 11px; color: var(--muted); margin-top: 4px; }
-  .cmp-grid { display: grid; gap: 20px; }
+  .cmp-grid { display: grid; gap: 14px; }
+  .cmp { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   .cmp-h { position: relative; display: flex; align-items: center; gap: 8px;
-    font-size: 15px; margin: 0 0 12px; }
+    font-size: 15px; margin: 0 0 14px; }
   .cmp-h .tip { position: relative; top: auto; right: auto; }
   .cmp-h .tipbox { left: 0; right: auto; }
-  .cmp-row { display: grid; grid-template-columns: 110px 1fr 58px;
-    grid-template-areas: "name track val" "name sub sub"; align-items: center;
-    gap: 2px 10px; margin-bottom: 10px; }
+  .cmp-row { display: grid; grid-template-columns: 1fr auto;
+    grid-template-areas: "name val" "track track" "sub sub";
+    align-items: baseline; gap: 4px 10px; }
+  .cmp-row + .cmp-row { margin-top: 14px; }
   .cmp-name { grid-area: name; font-size: 14px; font-weight: 600; }
-  .cmp-track { grid-area: track; background: var(--line); border-radius: 999px;
-    height: 14px; overflow: hidden; }
+  .cmp-val { grid-area: val; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .cmp-track { grid-area: track; background: #eef1f5; border-radius: 999px;
+    height: 10px; overflow: hidden; }
   .cmp-bar { display: block; height: 100%; width: 0; background: var(--c); border-radius: 999px; }
-  .cmp-val { grid-area: val; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
   .cmp-sub { grid-area: sub; font-size: 12px; color: var(--muted); }
+  .lc { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   .lc svg { width: 100%; height: auto; display: block; }
   .lc .gl { stroke: var(--line); stroke-width: 1; }
   .lc .ln { fill: none; stroke-width: 2.5; stroke-linejoin: round; stroke-linecap: round; }
   .lc .ax { font-size: 10px; fill: var(--muted); }
   .lc .ax-y { text-anchor: end; }
   .lc .ax-x { text-anchor: middle; }
-  .lc-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 12px; font-size: 13px; }
+  .lc-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; font-size: 13px; }
+  .compare .charts { margin-top: 12px; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
   .col h3 { font-size: 15px; margin: 0 0 10px; }
   .col.plus h3 { color: var(--plus); }
@@ -589,9 +592,8 @@ function renderGlobalReport(report) {
     .hero .big { font-size: 34px; }
     .cols, .charts, .buckets { grid-template-columns: 1fr; }
     .cats { grid-template-columns: repeat(2, 1fr); }
-    .cmp-row { grid-template-columns: 88px 1fr 50px; gap: 2px 8px; }
-    .cmp-name { font-size: 13px; }
-    .cmp-val { font-size: 14px; }
+    .cmp, .lc { padding: 12px 13px; }
+    .cmp-val { font-size: 16px; }
     .mtab { padding: 8px 14px; font-size: 14px; }
 
     .mfull { display: none; }
@@ -643,11 +645,11 @@ function renderGlobalReport(report) {
     </div>
   </section>
 
-  ${compareSection(report)}
-
   <div class="mtabs">${managerTabs}</div>
 
   ${managers.map((m) => managerCard(m, months)).join('')}
+
+  ${compareSection(report)}
 
   ${declineSection(declines)}
   ${stagesSection(report.stages)}
@@ -721,11 +723,6 @@ function renderGlobalReport(report) {
         x.row.querySelector('.cmp-val').textContent = x.value == null ? '—' : metric.fmt(x.value);
         x.row.querySelector('.cmp-sub').textContent = metric.sub(x.bucket);
       });
-      items.sort(function (a, b) {
-        return (b.value == null ? -1 : b.value) - (a.value == null ? -1 : a.value);
-      });
-      var parent = rows[0].parentNode;
-      items.forEach(function (x) { parent.appendChild(x.row); });
     });
     document.querySelectorAll('.ctab').forEach(function (tab) {
       tab.classList.toggle('on', tab.dataset.cm === month);
