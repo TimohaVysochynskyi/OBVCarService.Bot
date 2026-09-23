@@ -200,12 +200,21 @@ async function mergeCached(name, start, end, findings) {
 
 const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0, partial: false };
 
+// A swallowed failure here is indistinguishable from "this manager has no patterns": the report
+// renders, the cards are empty, and nothing anywhere says why. That is exactly how a broken SQL
+// column list once produced a whole report with zero findings and no error. Still non-fatal — the
+// rest of the report is worth having — but never silent again.
+const reuseFailed = (name) => (err) => {
+  console.error(`[globalReport] кеш аналізу для ${name} не прочитався: ${err.message}`);
+  return null;
+};
+
 async function collectWithFallback(name, start, end, opts) {
   if (!opts.analyze) {
     // Reuse-only. `partial` used to be hardcoded true here, which printed "покриття неповне" even
     // when every day of the period was already cached — a warning about nothing, on the one path
     // that is guaranteed to cost nothing. It is partial only if days are genuinely missing.
-    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
+    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(reuseFailed(name));
     return { collected, partial: !collected || Boolean(collected.missingDays) };
   }
   try {
@@ -218,7 +227,7 @@ async function collectWithFallback(name, start, end, opts) {
     return { collected, partial: Boolean(collected?.failedDays || collected?.ranOutOfTime) };
   } catch (err) {
     console.error(`[globalReport] аналіз ${name} не завершився (${err.message}); беремо те, що вже пораховано`);
-    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
+    const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(reuseFailed(name));
     return { collected, partial: true };
   }
 }

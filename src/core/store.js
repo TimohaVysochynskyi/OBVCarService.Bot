@@ -741,8 +741,10 @@ async function getOperatorStats(name, start, end) {
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
        MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
+       ,
        -- Introduction: counted only on this manager's OWN line, where a missing one is a service
-       -- defect and not an attribution gap (core/managerIntro.js).
+       -- defect and not an attribution gap (core/managerIntro.js). ⚠️ The comma belongs HERE:
+       -- BLOCKER_COLUMNS_SQL above deliberately ends WITHOUT one, so appending to it needs its own.
        COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_name IS NOT NULL)::int AS "introChecked",
        COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_name IS FALSE)::int AS "introNoName",
        COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_company IS FALSE)::int AS "introNoCompany"
