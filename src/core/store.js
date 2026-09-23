@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { PERSONAL_OPERATORS } from './phoneLines.js';
 
 const { Pool } = pg;
 
@@ -194,6 +195,12 @@ async function migrate() {
     ALTER TABLE calls ADD COLUMN IF NOT EXISTS direction TEXT;
     ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS direction TEXT;
 
+    -- Did the manager introduce himself: his own name, and the service's name (core/managerIntro.js).
+    -- Two columns rather than one JSONB field because the whole point of them is to be COUNTED per
+    -- manager and per month. NULL = not decided yet, which is exactly what the backfill selects on.
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS intro_name BOOLEAN;
+    ALTER TABLE calls ADD COLUMN IF NOT EXISTS intro_company BOOLEAN;
+
     -- Historical rows from before the 4-stage taxonomy was unified (Задача 2, 2026-07-23) can carry
     -- the short pre-unification label "закриття" instead of the canonical "закриття угоди"
     -- (core/stages.js: SALES_STAGES) - classifyCall's schema enum has only ever allowed the full
@@ -362,8 +369,8 @@ const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction, intro_name, intro_company)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -388,6 +395,8 @@ async function saveCall(call) {
       call.dealBlocker ?? null,
       call.dealBlockerQuote ?? null,
       call.direction ?? null,
+      call.introName ?? null,
+      call.introCompany ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -461,11 +470,12 @@ async function updateCallAnalysis(generalCallId, { transcript, segments, behavio
 // historical re-analysis backfill (src/scripts/backfillAnalysis.js) when it re-transcribes a call
 // via ElevenLabs and re-classifies it — unlike updateCallAnalysis, this ALSO replaces is_success/
 // weakest_stage/communication_score (null for non-sales calls, matching a fresh ingest's saveCall).
-async function updateCallFullAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose, isSuccess, weakestStage, communicationScore }) {
+async function updateCallFullAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose, isSuccess, weakestStage, communicationScore, introName, introCompany }) {
   await pool.query(
     `UPDATE calls SET transcript = COALESCE($2, transcript),
        segments = $3::jsonb, behaviors = $4::jsonb, analysis_version = $5, call_purpose = $6,
-       is_success = $7, weakest_stage = $8, communication_score = $9
+       is_success = $7, weakest_stage = $8, communication_score = $9,
+       intro_name = COALESCE($10, intro_name), intro_company = COALESCE($11, intro_company)
      WHERE general_call_id = $1`,
     [
       generalCallId,
@@ -477,8 +487,60 @@ async function updateCallFullAnalysis(generalCallId, { transcript, segments, beh
       isSuccess ?? null,
       weakestStage ?? null,
       communicationScore ?? null,
+      introName ?? null,
+      introCompany ?? null,
     ]
   );
+}
+
+// --- Did the manager introduce himself (core/managerIntro.js) ---------------------------------
+
+// Personal extensions only - see that module's header for why a shared line cannot be measured this
+// way. Derived from the same map the ingest attributes calls with, so the two can't drift apart.
+const PERSONAL_EXTENSIONS = Object.keys(PERSONAL_OPERATORS);
+
+// Calls whose introduction hasn't been decided yet. NULL (not false) is the "not checked" marker, so
+// re-running the backfill never re-does settled rows.
+async function getCallsMissingIntro({ limit = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            internal_number AS "internalNumber", transcript, segments
+     FROM calls
+     WHERE intro_name IS NULL AND ${HAS_TEXT}
+     ORDER BY start_time ASC${limit ? ` LIMIT ${Number(limit)}` : ''}`
+  );
+  return rows;
+}
+
+async function updateCallIntro(generalCallId, { name, company }) {
+  await pool.query('UPDATE calls SET intro_name = $2, intro_company = $3 WHERE general_call_id = $1', [
+    generalCallId,
+    name === true,
+    company === true,
+  ]);
+}
+
+// Per manager x month: how often the introduction actually happened, split by direction. Restricted
+// to the personal extensions, where "whose call this is" is known from the number itself, so a
+// missing introduction is a service defect rather than an attribution problem.
+async function getIntroBreakdown() {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS "manager", ${KYIV_MONTH} AS month,
+            COUNT(*) FILTER (WHERE intro_name IS NOT NULL)::int AS checked,
+            COUNT(*) FILTER (WHERE intro_name IS NOT NULL AND direction = 'in')::int AS "checkedIn",
+            COUNT(*) FILTER (WHERE intro_name IS NOT NULL AND direction = 'out')::int AS "checkedOut",
+            COUNT(*) FILTER (WHERE intro_name)::int AS "withName",
+            COUNT(*) FILTER (WHERE intro_company)::int AS "withCompany",
+            COUNT(*) FILTER (WHERE intro_name AND intro_company)::int AS "withBoth",
+            COUNT(*) FILTER (WHERE intro_name AND direction = 'in')::int AS "withNameIn",
+            COUNT(*) FILTER (WHERE intro_name AND direction = 'out')::int AS "withNameOut"
+     FROM calls
+     WHERE ${HAS_TEXT} AND internal_number = ANY($1)
+       AND manager_name IS NOT NULL AND manager_name <> ''
+     GROUP BY 1, 2`,
+    [PERSONAL_EXTENSIONS]
+  );
+  return rows;
 }
 
 // All calls still missing ElevenLabs timecodes (segments IS NULL) but with a stored transcript -
@@ -679,10 +741,15 @@ async function getOperatorStats(name, start, end) {
        COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS "successCount",
        ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore",
        MODE() WITHIN GROUP (ORDER BY weakest_stage) FILTER (WHERE ${SALES_FILTER} AND ${NOT_BLOCKED_FILTER}) AS "topWeakStage",${BLOCKER_COLUMNS_SQL}
+       -- Introduction: counted only on this manager's OWN line, where a missing one is a service
+       -- defect and not an attribution gap (core/managerIntro.js).
+       COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_name IS NOT NULL)::int AS "introChecked",
+       COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_name IS FALSE)::int AS "introNoName",
+       COUNT(*) FILTER (WHERE internal_number = ANY($4) AND intro_company IS FALSE)::int AS "introNoCompany"
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3
        AND transcript IS NOT NULL AND transcript <> ''`,
-    [name, start, end]
+    [name, start, end, PERSONAL_EXTENSIONS]
   );
   return rows[0];
 }
@@ -1080,6 +1147,14 @@ async function getActiveOperatorsInRange(start, end) {
      GROUP BY manager_name ORDER BY n DESC, manager_name`,
     [start, end]
   );
+  // A manager who took NO calls still gets a report. Zero is a reading, not an absence: without this
+  // a manager who stopped working simply vanishes from the daily reports, and nobody notices when.
+  // The roster is the closed set of real managers (PERSONAL_OPERATORS), not every name the calls
+  // table has ever seen — otherwise anyone who ever left would draw zeros forever.
+  const seen = new Set(rows.map((r) => r.name));
+  for (const name of Object.values(PERSONAL_OPERATORS)) {
+    if (!seen.has(name)) rows.push({ name, n: 0 });
+  }
   return rows;
 }
 
@@ -1745,6 +1820,9 @@ export {
   updateCallTranscript,
   updateCallAnalysis,
   updateCallFullAnalysis,
+  getCallsMissingIntro,
+  updateCallIntro,
+  getIntroBreakdown,
   getCallsMissingSegments,
   getCallsMissingPurpose,
   getGlobalTotals,

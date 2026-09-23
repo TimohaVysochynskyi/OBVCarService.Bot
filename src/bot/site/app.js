@@ -218,6 +218,53 @@
     applyLines(ALL);
   }
 
+  // --- did the manager introduce himself -----------------------------------------------------
+  function ratio(part, whole) {
+    return whole ? Math.round((part / whole) * 100) : 0;
+  }
+
+  function applyIntro(month) {
+    var cards = document.querySelectorAll('[data-intro-card]');
+    each(cards, function (card) {
+      var byMonth = (DATA.intro || {})[card.dataset.introCard] || {};
+      var b = byMonth[month] || {};
+      var checked = b.checked || 0;
+
+      card.querySelector('[data-intro-sub]').innerHTML = checked
+        ? '<b>' + checked + '</b> ' + plural(checked, 'дзвінок', 'дзвінки', 'дзвінків') + ' на своєму номері'
+        : 'за цей місяць дзвінків не було';
+
+      each(card.querySelectorAll('[data-intro-bar]'), function (bar) {
+        var field = bar.dataset.introBar === 'name' ? 'withName' : 'withCompany';
+        var value = b[field] || 0;
+        bar.style.width = ratio(value, checked) + '%';
+      });
+      each(card.querySelectorAll('[data-intro-pct]'), function (cell) {
+        var field = cell.dataset.introPct === 'name' ? 'withName' : 'withCompany';
+        var value = b[field] || 0;
+        cell.textContent = checked ? value + ' з ' + checked + ' · ' + ratio(value, checked) + '%' : '—';
+      });
+
+      // The direction split is about the NAME only: it is the part a manager controls on every call,
+      // incoming or outgoing, so it is the one worth comparing between the two.
+      card.querySelector('[data-intro-dir]').textContent = checked
+        ? 'імʼя: вхідні ' + (b.withNameIn || 0) + ' з ' + (b.checkedIn || 0) +
+          ' · вихідні ' + (b.withNameOut || 0) + ' з ' + (b.checkedOut || 0)
+        : '';
+    });
+    select(document.querySelectorAll('[data-intro-tab]'), month, 'introTab');
+  }
+
+  function initIntro() {
+    if (!document.querySelector('[data-intro-card]')) return;
+    each(document.querySelectorAll('[data-intro-tab]'), function (tab) {
+      tab.addEventListener('click', function () {
+        applyIntro(tab.dataset.introTab);
+      });
+    });
+    applyIntro(ALL);
+  }
+
   // --- refusals table ------------------------------------------------------------------------
   function initDeclineTabs() {
     var tabs = document.querySelectorAll('[data-decline-tab]');
@@ -352,6 +399,7 @@
     initMonthTabs();
     initCompare();
     initLines();
+    initIntro();
     initDeclineTabs();
     initTips();
     initClips();

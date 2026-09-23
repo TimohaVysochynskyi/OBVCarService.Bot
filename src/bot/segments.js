@@ -162,7 +162,10 @@ function dedupPhrases(list) {
 // null when the manager has no calls in the whole period.
 async function assembleReport(name, periodStart, periodEnd) {
   const stats = await getOperatorStats(name, periodStart, periodEnd);
-  if (!stats.callCount) return null;
+  // A period with NO calls still produces a report, with zeros. Zero is a reading, not an absence:
+  // a manager who stopped working used to just disappear from the daily reports, and that silence
+  // looked identical to "nothing to flag". Costs nothing - there is nothing to analyse.
+  if (!stats.callCount) return { name, stats, blocks: [], phrases: [], start: periodStart, end: periodEnd };
 
   const slots = await getReportTimes();
   const segs = enumerateSegments(periodStart, periodEnd, slots);
@@ -270,9 +273,13 @@ async function collectRangeFindings(
   { analyze = true, concurrency = CONCURRENCY, pauseMs = 0, deadline = null } = {}
 ) {
   const stats = await getOperatorStats(name, periodStart, periodEnd);
-  if (!stats.callCount) return null;
-
   const days = enumerateDays(periodStart, periodEnd);
+  // Same rule as the daily path: an empty period is reported as zeros, not withheld. missingDays
+  // stays 0 - nothing went unanalysed, there was simply nothing to analyse.
+  if (!stats.callCount) {
+    return { stats, findings: [], phrases: [], days: days.length, analysedDays: 0, missingDays: 0 };
+  }
+
   let missingDays = 0;
 
   if (!analyze) {

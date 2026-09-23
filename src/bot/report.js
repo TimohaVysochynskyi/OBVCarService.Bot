@@ -123,6 +123,23 @@ function headerText(report) {
         .join('\n') +
       `\n_Ці дзвінки не враховані в конверсії._`
     : '';
+  // Did he introduce himself? A counted fact from the DB, like the blocker block above, so it is
+  // shown from a SINGLE case rather than waiting for MIN_EVIDENCE. Only his own line is counted —
+  // on a shared handset a missing introduction is already visible as an unattributed call
+  // (core/managerIntro.js explains why).
+  const introChecked = stats.introChecked ?? 0;
+  const noName = stats.introNoName ?? 0;
+  const noCompany = stats.introNoCompany ?? 0;
+  const introBlock =
+    introChecked && (noName || noCompany)
+      ? `\n\n🙋 *Не представився* (зі своїх ${introChecked} дзвінків)\n` +
+        [
+          noName ? `• не назвав своє імʼя — ${noName}` : null,
+          noCompany ? `• не назвав сервіс — ${noCompany}` : null,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      : '';
   // Reuse-only periods (quarter) must not pretend to be complete: say how many days actually carry
   // an analysis, so nobody reads "no patterns" as "no problems".
   const coverage =
@@ -138,7 +155,11 @@ function headerText(report) {
     `Дзвінків за період: *${stats.callCount}*, з них угод: *${sales}*.`,
   ];
 
-  if (!sales) {
+  if (!stats.callCount) {
+    // Distinct from "no deals": saying "усі розмови інформаційні" when there were NO conversations
+    // at all would be a plain falsehood, and it hides exactly what this line exists to show.
+    lines.push('', '_Жодного дзвінка за цей період не було._');
+  } else if (!sales) {
     lines.push(
       '',
       '_Жодної угоди за цей період не було — усі розмови інформаційні або службові._',
@@ -164,7 +185,7 @@ function headerText(report) {
   }
 
   return lines.join(`
-`) + blockedBlock + coverage;
+`) + blockedBlock + introBlock + coverage;
 }
 
 // Subheader shown before a block's findings when a report has more than one non-empty block

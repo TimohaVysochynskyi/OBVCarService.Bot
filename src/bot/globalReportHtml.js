@@ -195,7 +195,7 @@ function categoryTable(purposes, directions, total) {
           <span class="mr-2 inline-block h-3 w-3 shrink-0 rounded-sm align-middle" style="background:${PURPOSE_COLORS[p]}"></span>${esc(PURPOSE_LABELS[p].plural)}
         </th>
         <td class="border-l border-line px-2 py-2 text-right font-semibold tabular-nums">${count}</td>
-        <td class="border-l border-line px-2 py-2 text-right tabular-nums text-muted">${esc(share(count, total))}</td>
+        <td class="border-l border-line px-2 py-2 text-right tabular-nums">${esc(share(count, total))}</td>
         <td class="border-l border-line px-2 py-2 text-right tabular-nums">${dir.incoming}</td>
         <td class="border-l border-line px-2 py-2 text-right tabular-nums">${dir.outgoing}</td>
       </tr>`;
@@ -219,7 +219,7 @@ function categoryTable(purposes, directions, total) {
         <tr class="border-t-2 border-line font-bold">
           <th scope="row" class="py-2 pr-2 text-left">Разом</th>
           <td class="border-l border-line px-2 py-2 text-right tabular-nums">${total}</td>
-          <td class="border-l border-line px-2 py-2 text-right tabular-nums text-muted">100%</td>
+          <td class="border-l border-line px-2 py-2 text-right tabular-nums">100%</td>
           <td class="border-l border-line px-2 py-2 text-right tabular-nums">${totalIn}</td>
           <td class="border-l border-line px-2 py-2 text-right tabular-nums">${totalOut}</td>
         </tr>
@@ -325,6 +325,50 @@ function linesSection(report) {
     ${grid(shared, 'sm:grid-cols-2')}
     ${shared.length && rest.length ? '<div class="h-3"></div>' : ''}
     ${grid(rest, 'sm:grid-cols-2 lg:grid-cols-3')}`;
+}
+
+// --- did the manager introduce himself -------------------------------------------------------
+
+// Green = the standard was met. These bars only ever measure compliance, so one colour is enough and
+// a second would invite reading a meaning into it that isn't there.
+const INTRO_COLOR = '#2f7d58';
+
+function introBar(field, label) {
+  return `<div class="mt-2">
+      <div class="flex items-baseline justify-between gap-2 text-sm">
+        <span class="text-muted">${esc(label)}</span>
+        <span class="tabular-nums" data-intro-pct="${field}"></span>
+      </div>
+      <div class="mt-1 h-2 w-full overflow-hidden rounded-full bg-line">
+        <div class="h-full rounded-full" style="background:${INTRO_COLOR};width:0%" data-intro-bar="${field}"></div>
+      </div>
+    </div>`;
+}
+
+function introCard(manager) {
+  return `<article class="rounded-xl border border-line p-3" data-intro-card="${esc(manager.name)}">
+      <div class="flex items-baseline gap-2">
+        <span class="text-xs uppercase tracking-wide text-muted">Менеджер</span>
+        <span class="font-semibold">${esc(manager.display)}</span>
+      </div>
+      <div class="mt-1 text-sm text-ink" data-intro-sub></div>
+      ${introBar('name', 'назвав своє імʼя')}
+      ${introBar('company', 'назвав сервіс')}
+      <div class="mt-2 text-sm tabular-nums text-muted" data-intro-dir></div>
+    </article>`;
+}
+
+// Numbers are left EMPTY in the markup and filled by app.js, same as the line cards: otherwise the
+// first frame shows all-period figures under a month tab until the script runs.
+function introSection(report) {
+  const intro = report.intro;
+  if (!intro?.managers?.length || !intro.total?.checked) return '';
+  return `<section class="${CARD}">
+    <h2 class="${H2}">Представлення</h2>
+    <p class="${LEAD}">Чи називає менеджер своє імʼя та назву сервісу на початку розмови — і на вхідному дзвінку, і на вихідному. Рахується лише на персональних номерах: на стаціонарних саме представлення й дозволяє визначити, хто взяв слухавку, тож там непредставлені дзвінки вже видно як «None» у розділі «Номери».</p>
+    ${tabStrip(withAllLast(report.months), 'data-intro-tab', ALL)}
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${intro.managers.map(introCard).join('')}</div>
+  </section>`;
 }
 
 // --- manager card ----------------------------------------------------------------------------
@@ -674,6 +718,7 @@ function renderGlobalReport(report) {
         .filter((l) => l.managers?.length)
         .map((l) => [l.number, Object.fromEntries(l.managers.map((m) => [m.name, m.byMonth]))])
     ),
+    intro: Object.fromEntries((report.intro?.managers || []).map((m) => [m.name, m.byMonth])),
   };
 
   return `<!doctype html>
@@ -714,6 +759,8 @@ function renderGlobalReport(report) {
     </div>
     ${linesSection(report)}
   </section>
+
+  ${introSection(report)}
 
   <div class="mb-3 flex flex-wrap gap-2 no-print" role="tablist">${managerTabs}</div>
 

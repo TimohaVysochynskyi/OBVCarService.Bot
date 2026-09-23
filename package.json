@@ -24,6 +24,7 @@
     "warm:global": "node src/scripts/warmGlobalReport.js",
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:direction": "node src/scripts/backfillDirection.js",
+    "backfill:intro": "node src/scripts/backfillIntro.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
     "backfill:audio": "node src/scripts/backfillAudio.js",
     "backfill:blockers": "node src/scripts/backfillBlockers.js",

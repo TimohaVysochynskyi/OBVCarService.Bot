@@ -136,6 +136,11 @@ async function transcribeClassifyAndSave(call, roster) {
     behaviors,
     analysisVersion: behaviors ? ANALYSIS_VERSION : null,
     callPurpose: behaviors?.callPurpose ?? null,
+    // Did he give his name / the service's name (core/managerIntro.js). Left NULL when the analysis
+    // itself failed, which is the marker the (free, rule-based) backfill selects on — so a transient
+    // error means "decided later", never a silent false.
+    introName: behaviors?.intro ? behaviors.intro.name : null,
+    introCompany: behaviors?.intro ? behaviors.intro.company : null,
     isSuccess: classification.isSuccess,
     weakestStage: classification.weakestStage,
     communicationScore: classification.communicationScore,

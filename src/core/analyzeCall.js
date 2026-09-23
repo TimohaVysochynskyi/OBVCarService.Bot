@@ -16,6 +16,7 @@ import { SALES_STAGES } from './stages.js';
 const ANALYSIS_VERSION = 2;
 const MAX_ITEMS = 8; // bound noise/cost; the reduce only needs recurring patterns, not everything
 const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+const NO_INTRO = { name: false, company: false };
 
 // Stage taxonomy is shared with classifyCall (core/stages.js) — one vocabulary everywhere. item.stage
 // is INTERNAL metadata (a hint for the report reduce's clustering); it is NOT shown in the delivered
@@ -26,8 +27,15 @@ const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
 // "sales mistake"). The purpose is also stored per call (calls.call_purpose) for the report's
 // sales-vs-info numeric breakdown.
 import { CALL_PURPOSES, PURPOSE_RULES } from './callPurpose.js';
+// Did he give his name and the service's name? Asked HERE because this request already runs on
+// every call, so the two booleans cost nothing extra. Rules live in one module with the offline
+// rule-based detector that back-fills history, so the two paths can't drift apart.
+import { INTRO_RULES } from './managerIntro.js';
 
 const SYSTEM_PROMPT = `Контекст: менеджер автосервісу (СТО) веде телефонну розмову.
+
+КРОК 0 — чи ПРЕДСТАВИВСЯ менеджер (intro). Заповнюй ЗАВЖДИ, на дзвінку будь-якого типу:
+${INTRO_RULES}
 
 КРОК 1 — визнач ТИП дзвінка (callPurpose):
 ${PURPOSE_RULES}
@@ -50,6 +58,15 @@ const SCHEMA = {
     type: 'object',
     properties: {
       callPurpose: { type: 'string', enum: CALL_PURPOSES },
+      intro: {
+        type: 'object',
+        properties: {
+          name: { type: 'boolean' },
+          company: { type: 'boolean' },
+        },
+        required: ['name', 'company'],
+        additionalProperties: false,
+      },
       items: {
         type: 'array',
         items: {
@@ -65,7 +82,7 @@ const SCHEMA = {
         },
       },
     },
-    required: ['callPurpose', 'items'],
+    required: ['callPurpose', 'intro', 'items'],
     additionalProperties: false,
   },
 };
@@ -92,7 +109,7 @@ function pseudoSegments(transcript) {
 // MANAGER segment (requireRole) — a client line can't be mislabelled as a manager behaviour.
 async function analyzeCallBehaviors(transcript, segments, managerName) {
   const verifySegments = Array.isArray(segments) && segments.length ? segments : pseudoSegments(transcript);
-  if (!transcript || !verifySegments.length) return { version: ANALYSIS_VERSION, callPurpose: 'other', items: [] };
+  if (!transcript || !verifySegments.length) return { version: ANALYSIS_VERSION, callPurpose: 'other', intro: NO_INTRO, items: [] };
 
   const raw = await withRetry(
     async () => {
@@ -117,8 +134,13 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
   );
 
   const callPurpose = CALL_PURPOSES.includes(raw.callPurpose) ? raw.callPurpose : 'other';
+  // Kept for EVERY purpose: an introduction is expected on an info call as much as on a deal.
+  const intro = {
+    name: raw.intro?.name === true,
+    company: raw.intro?.company === true,
+  };
   // Non-sales calls contribute no behaviours to the sales-effectiveness report.
-  if (callPurpose !== 'sales') return { version: ANALYSIS_VERSION, callPurpose, items: [] };
+  if (callPurpose !== 'sales') return { version: ANALYSIS_VERSION, callPurpose, intro, items: [] };
 
   const items = [];
   for (const it of (raw.items || []).slice(0, MAX_ITEMS)) {
@@ -137,7 +159,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
       segIndex: hit.segIndex,
     });
   }
-  return { version: ANALYSIS_VERSION, callPurpose, items };
+  return { version: ANALYSIS_VERSION, callPurpose, intro, items };
 }
 
 export { analyzeCallBehaviors, ANALYSIS_VERSION, CALL_PURPOSES, pseudoSegments };

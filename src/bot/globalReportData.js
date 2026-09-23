@@ -13,6 +13,7 @@ import {
   getLineBreakdown,
   getLineManagerBreakdown,
   getPurposeDirectionSplit,
+  getIntroBreakdown,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
 import { lineInfo, LINE_KINDS } from '../core/phoneLines.js';
@@ -303,6 +304,39 @@ function closeMonths(monthsMap, months) {
   return Object.fromEntries([...monthsMap.entries()]);
 }
 
+// Did the manager introduce himself — per manager, per month, plus an all-period total.
+//
+// ⚠️ Only personal extensions are in these rows (see core/managerIntro.js): on a shared handset a
+// missing introduction is what MAKES the call unattributable, and it is already reported as that
+// line's "None" column. Counting it twice would overstate it, and the attributed calls would be a
+// tautology (they were attributed BECAUSE somebody introduced themselves).
+const INTRO_FIELDS = ['checked', 'checkedIn', 'checkedOut', 'withName', 'withCompany', 'withBoth', 'withNameIn', 'withNameOut'];
+const emptyIntro = () => Object.fromEntries(INTRO_FIELDS.map((f) => [f, 0]));
+
+function buildIntro(rows, months) {
+  const byManager = new Map();
+  for (const row of rows) {
+    if (!byManager.has(row.manager)) byManager.set(row.manager, new Map());
+    const monthsMap = byManager.get(row.manager);
+    const bucket = monthsMap.get(row.month) || emptyIntro();
+    for (const f of INTRO_FIELDS) bucket[f] += row[f] || 0;
+    monthsMap.set(row.month, bucket);
+  }
+
+  const total = emptyIntro();
+  const managers = [];
+  for (const [name, monthsMap] of byManager) {
+    const sum = emptyIntro();
+    for (const bucket of monthsMap.values()) for (const f of INTRO_FIELDS) sum[f] += bucket[f];
+    for (const f of INTRO_FIELDS) total[f] += sum[f];
+    monthsMap.set(ALL, sum);
+    for (const m of months) if (!monthsMap.has(m)) monthsMap.set(m, emptyIntro());
+    managers.push({ name, display: displayName(name) || name, byMonth: Object.fromEntries([...monthsMap.entries()]), total: sum });
+  }
+  managers.sort((a, b) => b.total.checked - a.total.checked);
+  return { managers, total };
+}
+
 const asBucket = (row) => ({
   calls: row.calls,
   incoming: row.incoming,
@@ -406,7 +440,7 @@ async function buildGlobalReport({
   budgetMs = REPORT_BUDGET_MS,
 } = {}) {
   const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
-  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows] =
+  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows, introRows] =
     await Promise.all([
       getGlobalTotals(),
       getMonthlyPurposeBreakdown(),
@@ -419,6 +453,7 @@ async function buildGlobalReport({
       getLineBreakdown(),
       getLineManagerBreakdown(),
       getPurposeDirectionSplit(),
+      getIntroBreakdown(),
     ]);
 
   const months = [...new Set(purposeRows.map((r) => r.month))].sort();
@@ -470,10 +505,11 @@ async function buildGlobalReport({
     months: months.map((m) => ({ key: m, title: monthTitle(m) })),
     lines: buildLines(lineRows, lineManagerRows, months),
     directions: buildDirections(directionRows),
+    intro: buildIntro(introRows, months),
     managers,
     stages: [...stages.entries()].map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count),
     declines: buildDeclines(blockedCalls, reasonRows, coverage),
   };
 }
 
-export { buildGlobalReport, buildLines, monthTitle, ALL, TOP_N };
+export { buildGlobalReport, buildLines, buildIntro, monthTitle, ALL, TOP_N };
