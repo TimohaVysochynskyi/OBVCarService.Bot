@@ -1,6 +1,6 @@
 import { PURPOSE_LABELS } from '../core/callPurpose.js';
 import { LINE_KINDS } from '../core/phoneLines.js';
-import { formatPhone } from './operators.js';
+import { formatPhone, formatLinePhone } from './operators.js';
 import { ALL } from './globalReportData.js';
 
 // Renders the report's index.html. Styles and behaviour are NOT inlined any more — they are
@@ -218,17 +218,54 @@ function categoryTable(purposes, directions, total) {
 // One card per internal number. The shared ("стаціонарні") lines come first: those are the numbers
 // that go into advertising, and the split bar is there so "almost all incoming" reads at a glance
 // rather than having to be worked out from two numbers.
-function lineCard(line) {
-  const total = line.byMonth[ALL] || {};
-  const kind = LINE_KINDS[line.kind] || LINE_KINDS.other;
-  const subtitle = line.name ? `${kind.title} · ${esc(line.name)}` : kind.title;
+// Who actually picked up on a shared line. Only rendered for those: a personal extension has one
+// owner by definition, and a one-row table would be noise. The rows sum to the card's own total,
+// which is the point — the "не розпізнано" row is what closes that gap instead of hiding it.
+function lineManagerTable(line) {
+  if (!line.managers || line.managers.length < 1) return '';
+  const rows = line.managers
+    .map(
+      (m) => `<tr class="border-t border-line${m.unknown ? ' text-muted' : ''}"
+          data-lm-line="${esc(line.number)}" data-lm-name="${esc(m.name)}">
+          <th scope="row" class="py-1 pr-2 text-left font-normal">${esc(m.display)}</th>
+          <td class="py-1 pr-2 text-right tabular-nums" data-lm-in></td>
+          <td class="py-1 pr-2 text-right tabular-nums" data-lm-out></td>
+          <td class="py-1 text-right font-semibold tabular-nums" data-lm-calls></td>
+        </tr>`
+    )
+    .join('');
 
-  return `<article class="rounded-xl border border-line p-3.5" data-line="${esc(line.number)}">
+  return `<div class="mt-4 border-t border-line pt-3">
+      <div class="mb-1.5 text-xs uppercase tracking-wide text-muted">Хто брав слухавку</div>
+      <table class="w-full border-collapse text-sm">
+        <thead class="text-muted">
+          <tr>
+            <th class="pb-1 pr-2 text-left font-semibold">Менеджер</th>
+            <th class="pb-1 pr-2 text-right font-semibold whitespace-nowrap">📥 Вх.</th>
+            <th class="pb-1 pr-2 text-right font-semibold whitespace-nowrap">📤 Вих.</th>
+            <th class="pb-1 text-right font-semibold">Усього</th>
+          </tr>
+        </thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+}
+
+function lineCard(line) {
+  const kind = LINE_KINDS[line.kind] || LINE_KINDS.other;
+  const unknown = line.kind === 'unknown';
+  // The unattributed slice has no extension and no phone — showing an internal key where a number
+  // belongs would read as a sixth line, which is exactly what it is not.
+  const heading = unknown
+    ? `<span class="text-base font-bold uppercase tracking-wide">${esc(kind.title)}</span>`
+    : `<span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
+        ${line.phone ? `<span class="font-medium tabular-nums">${esc(formatLinePhone(line.phone))}</span>` : ''}
+        <span class="text-xs uppercase tracking-wide text-muted">${line.name ? `${kind.title} · ${esc(line.name)}` : kind.title}</span>`;
+
+  return `<article class="rounded-xl border p-3.5 ${unknown ? 'border-dashed border-muted/50 bg-canvas' : 'border-line'}" data-line="${esc(line.number)}">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
-        ${line.phone ? `<span class="font-medium tabular-nums">${esc(formatPhone(line.phone))}</span>` : ''}
-        <span class="text-xs uppercase tracking-wide text-muted">${subtitle}</span>
-        ${tip(`${kind.title} номер ${line.number}`, kind.about)}
+        ${heading}
+        ${tip(unknown ? kind.title : `${kind.title} номер ${line.number}`, kind.about)}
       </div>
       <div class="mt-1 text-sm text-muted" data-line-sub></div>
       <div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-track">
@@ -239,6 +276,7 @@ function lineCard(line) {
         <span>📥 <b data-line-in></b> вхідних</span>
         <span class="text-muted">📤 <span data-line-out></span> вихідних</span>
       </div>
+      ${lineManagerTable(line)}
     </article>`;
 }
 
@@ -247,9 +285,9 @@ function linesSection(report) {
   if (!lines.length) return '';
   const cards = lines.map(lineCard).join('');
   return `<h3 class="${H3}">Номери</h3>
-    <p class="${LEAD}">Скільки дзвінків пройшло через кожен номер і хто їх починав. Стаціонарні номери стоять першими — саме вони йдуть у рекламу, і вхідні на них показують, що реклама приносить.</p>
+    <p class="${LEAD}">Скільки дзвінків надійшло на кожен номер і яку частку вони становлять від усіх дзвінків. Першими показані номери, які використовуються в рекламі.</p>
     ${tabStrip(withAllLast(report.months), 'data-line-tab', ALL)}
-    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${cards}</div>`;
+    <div class="grid gap-3 sm:grid-cols-2">${cards}</div>`;
 }
 
 // --- manager card ----------------------------------------------------------------------------
@@ -594,6 +632,11 @@ function renderGlobalReport(report) {
   const data = {
     managers: Object.fromEntries(managers.map((m) => [m.name, m.byMonth])),
     lines: Object.fromEntries((report.lines || []).map((l) => [l.number, l.byMonth])),
+    lineManagers: Object.fromEntries(
+      (report.lines || [])
+        .filter((l) => l.managers?.length)
+        .map((l) => [l.number, Object.fromEntries(l.managers.map((m) => [m.name, m.byMonth]))])
+    ),
   };
 
   return `<!doctype html>

@@ -75,7 +75,15 @@ const LINE_KINDS = {
   shared: { title: 'Стаціонарний', about: 'Спільна лінія: слухавку бере той, хто вільний. Саме ці номери йдуть у рекламу, тому вхідні на них — головне, за чим тут варто стежити.' },
   personal: { title: 'Персональний', about: 'Особистий номер менеджера. Вихідні з нього — це дзвінки, які він робить сам.' },
   other: { title: 'Інший номер', about: 'Номер, якого немає ні серед стаціонарних, ні серед персональних.' },
+  unknown: {
+    title: 'Не розпізнано',
+    about: 'Дзвінки на стаціонарні номери, у яких менеджер не представився, тож визначити його з розмови не вдалося. ⚠️ Це НЕ окрема лінія: ці дзвінки вже враховані в картках 901 і 902, тут вони зібрані окремо, щоб було видно обсяг.',
+  },
 };
+
+// The key the unattributed slice is filed under. It is not an extension, so it can never collide
+// with a real one.
+const UNKNOWN_LINE = 'unknown';
 
 // What a given extension is, for labelling. Never throws and never guesses: a number we have no
 // configuration for is reported as such rather than silently folded into one of the known kinds.
@@ -93,6 +101,7 @@ export {
   EXCLUDED_EXTENSIONS,
   LINE_KINDS,
   LINE_NUMBERS,
+  UNKNOWN_LINE,
   lineInfo,
   parsePersonalOperators,
 };

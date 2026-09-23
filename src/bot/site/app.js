@@ -9,12 +9,12 @@
 
   function readData() {
     var el = document.getElementById('report-data');
-    if (!el) return { managers: {}, lines: {} };
+    if (!el) return { managers: {}, lines: {}, lineManagers: {} };
     try {
       return JSON.parse(el.textContent);
     } catch (err) {
       console.error('[report] не вдалося прочитати дані сторінки:', err);
-      return { managers: {}, lines: {} };
+      return { managers: {}, lines: {}, lineManagers: {} };
     }
   }
 
@@ -194,6 +194,15 @@
       card.querySelector('[data-line-sub]').textContent = lineSummary(bucket);
       card.querySelector('[data-line-bar-in]').style.width = known ? ((incoming / known) * 100).toFixed(1) + '%' : '0%';
       card.querySelector('[data-line-bar-out]').style.width = known ? ((outgoing / known) * 100).toFixed(1) + '%' : '0%';
+    });
+    // Who answered, inside the shared-line cards. The rows sum to the card's own total, so they
+    // follow the same month as the card they sit in.
+    each(document.querySelectorAll('[data-lm-line]'), function (row) {
+      var perManager = (DATA.lineManagers || {})[row.dataset.lmLine] || {};
+      var bucket = (perManager[row.dataset.lmName] || {})[month] || {};
+      row.querySelector('[data-lm-in]').textContent = bucket.incoming || 0;
+      row.querySelector('[data-lm-out]').textContent = bucket.outgoing || 0;
+      row.querySelector('[data-lm-calls]').textContent = bucket.calls || 0;
     });
     select(document.querySelectorAll('[data-line-tab]'), month, 'lineTab');
   }

@@ -48,4 +48,18 @@ function formatPhone(raw) {
   return String(raw ?? '');
 }
 
-export { displayName, hasAlias, formatPhone, OPERATOR_ALIASES };
+// Format one of OUR OWN line numbers the way the owner writes them and the way they get printed in
+// advertising: "073 473 82 00" — no country code, grouped 3-3-2-2. Deliberately different from
+// formatPhone: that one is for calling a CLIENT back (+380… is what a dialler wants), this one is a
+// number the reader is meant to recognise from a billboard. Anything that is not a 10-digit local
+// number comes back unchanged rather than half-formatted.
+function formatLinePhone(raw) {
+  const d = String(raw ?? '').replace(/\D/g, '');
+  let local = d;
+  if (d.length === 12 && d.startsWith('380')) local = `0${d.slice(3)}`;
+  else if (d.length === 9) local = `0${d}`;
+  if (local.length !== 10 || !local.startsWith('0')) return String(raw ?? '');
+  return `${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6, 8)} ${local.slice(8, 10)}`;
+}
+
+export { displayName, hasAlias, formatPhone, formatLinePhone, OPERATOR_ALIASES };

@@ -784,6 +784,25 @@ async function getLineBreakdown() {
   return rows;
 }
 
+// WHO answered on each line, split by direction. Only the shared lines need this — a personal
+// extension has one owner by definition — but it is cheap to compute for all and it is also where
+// the "не розпізнано" slice comes from: on a shared line the operator is identified from the
+// recording, and when nobody introduced themselves manager_name stays the bare extension number.
+async function getLineManagerBreakdown() {
+  const { rows } = await pool.query(
+    `SELECT internal_number AS "number", manager_name AS "manager", ${KYIV_MONTH} AS month,
+            COUNT(*)::int AS calls,
+            COUNT(*) FILTER (WHERE direction = 'in')::int AS incoming,
+            COUNT(*) FILTER (WHERE direction = 'out')::int AS outgoing,
+            COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS sales,
+            COUNT(*) FILTER (WHERE is_success)::int AS success
+     FROM calls
+     WHERE ${HAS_TEXT} AND internal_number IS NOT NULL AND internal_number <> ''
+     GROUP BY 1, 2, 3`
+  );
+  return rows;
+}
+
 // How each call category splits between incoming and outgoing, for the whole period. Sits next to
 // the donut: the donut says what the line is spent on, this says who started those conversations.
 async function getPurposeDirectionSplit() {
@@ -1731,6 +1750,7 @@ export {
   getGlobalTotals,
   getMonthlyPurposeBreakdown,
   getLineBreakdown,
+  getLineManagerBreakdown,
   getPurposeDirectionSplit,
   getMonthlySalesStats,
   getWeakStageCounts,

@@ -11,10 +11,11 @@ import {
   getDeclineCoverage,
   getOperators,
   getLineBreakdown,
+  getLineManagerBreakdown,
   getPurposeDirectionSplit,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
-import { lineInfo } from '../core/phoneLines.js';
+import { lineInfo, LINE_KINDS, UNKNOWN_LINE } from '../core/phoneLines.js';
 import { BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES, DEAL_BLOCKERS } from '../core/dealBlocker.js';
 import { reasonLabel, reasonSide } from '../core/declineReasons.js';
 import { displayName, formatPhone } from './operators.js';
@@ -289,34 +290,84 @@ const emptyLine = () => ({ calls: 0, incoming: 0, outgoing: 0, sales: 0, success
 // numbers that go on advertising, so they are what the owner opens this block to look at.
 const LINE_ORDER = { shared: 0, personal: 1, other: 2 };
 
-function buildLines(rows, months) {
-  const byNumber = new Map();
+// Fills in every month of the period and adds the all-period total. Months a line was quiet in must
+// still exist as zeros, or the switcher would leave the previous month's numbers on screen when
+// someone clicks a silent one.
+function closeMonths(monthsMap, months) {
+  const total = emptyLine();
+  for (const value of monthsMap.values()) {
+    for (const key of Object.keys(total)) total[key] += value[key] || 0;
+  }
+  monthsMap.set(ALL, total);
+  for (const m of months) if (!monthsMap.has(m)) monthsMap.set(m, emptyLine());
+  return Object.fromEntries([...monthsMap.entries()]);
+}
 
+const asBucket = (row) => ({
+  calls: row.calls,
+  incoming: row.incoming,
+  outgoing: row.outgoing,
+  sales: row.sales,
+  success: row.success,
+});
+
+// On a shared line the operator is identified from the recording, so when nobody introduced
+// themselves manager_name stays the bare extension number. Those calls are the "не розпізнано"
+// slice: they belong to the line they came in on AND are reported separately, because the owner
+// wants to see how much of the line nobody can be credited with.
+const isUnattributed = (row) => row.manager === row.number;
+
+function buildLines(rows, managerRows, months) {
+  const byNumber = new Map();
   for (const row of rows) {
     if (!byNumber.has(row.number)) byNumber.set(row.number, new Map());
-    const bucket = byNumber.get(row.number);
-    bucket.set(row.month, {
-      calls: row.calls,
-      incoming: row.incoming,
-      outgoing: row.outgoing,
-      sales: row.sales,
-      success: row.success,
-    });
+    byNumber.get(row.number).set(row.month, asBucket(row));
   }
+
+  // number -> manager -> month -> bucket, plus the unattributed slice across all lines
+  const perLine = new Map();
+  const unknownMonths = new Map();
+  for (const row of managerRows) {
+    if (!perLine.has(row.number)) perLine.set(row.number, new Map());
+    const managers = perLine.get(row.number);
+    if (!managers.has(row.manager)) managers.set(row.manager, new Map());
+    managers.get(row.manager).set(row.month, asBucket(row));
+
+    if (isUnattributed(row)) {
+      const at = unknownMonths.get(row.month) || emptyLine();
+      for (const key of Object.keys(at)) at[key] += row[key] || 0;
+      unknownMonths.set(row.month, at);
+    }
+  }
+
+  const managerTable = (number) => {
+    const managers = perLine.get(number);
+    if (!managers) return [];
+    return [...managers.entries()]
+      .map(([name, monthsMap]) => {
+        const unknown = name === number;
+        return {
+          name,
+          display: unknown ? LINE_KINDS.unknown.title : displayName(name) || name,
+          unknown,
+          byMonth: closeMonths(monthsMap, months),
+        };
+      })
+      .sort((a, b) => {
+        // The unattributed row always sits last: it is not a person, and keeping it out of the
+        // ranking leaves the actual people comparable at a glance.
+        if (a.unknown !== b.unknown) return a.unknown ? 1 : -1;
+        return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
+      });
+  };
 
   const lines = [];
   for (const [number, monthsMap] of byNumber) {
-    const total = emptyLine();
-    for (const value of monthsMap.values()) {
-      for (const key of Object.keys(total)) total[key] += value[key] || 0;
-    }
-    monthsMap.set(ALL, total);
-    // Months with no calls on this line must still exist, or the switcher would show the previous
-    // month's numbers when someone clicks a quiet one.
-    for (const m of months) if (!monthsMap.has(m)) monthsMap.set(m, emptyLine());
-
     const info = lineInfo(number);
-    lines.push({ ...info, byMonth: Object.fromEntries([...monthsMap.entries()]) });
+    const line = { ...info, byMonth: closeMonths(monthsMap, months) };
+    // Only shared lines render a breakdown — a personal extension has one owner by definition.
+    if (info.kind === 'shared') line.managers = managerTable(number);
+    lines.push(line);
   }
 
   lines.sort((a, b) => {
@@ -324,6 +375,17 @@ function buildLines(rows, months) {
     if (kind) return kind;
     return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
   });
+
+  // Appended last, after sorting: it is a slice of the lines above, not a line of its own.
+  if (unknownMonths.size) {
+    lines.push({
+      number: UNKNOWN_LINE,
+      kind: 'unknown',
+      name: null,
+      phone: null,
+      byMonth: closeMonths(unknownMonths, months),
+    });
+  }
   return lines;
 }
 
@@ -350,7 +412,7 @@ async function buildGlobalReport({
   budgetMs = REPORT_BUDGET_MS,
 } = {}) {
   const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
-  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, directionRows] =
+  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows] =
     await Promise.all([
       getGlobalTotals(),
       getMonthlyPurposeBreakdown(),
@@ -361,6 +423,7 @@ async function buildGlobalReport({
       getDeclineCoverage(),
       getOperators(),
       getLineBreakdown(),
+      getLineManagerBreakdown(),
       getPurposeDirectionSplit(),
     ]);
 
@@ -411,7 +474,7 @@ async function buildGlobalReport({
       purposes: purposeTotals,
     },
     months: months.map((m) => ({ key: m, title: monthTitle(m) })),
-    lines: buildLines(lineRows, months),
+    lines: buildLines(lineRows, lineManagerRows, months),
     directions: buildDirections(directionRows),
     managers,
     stages: [...stages.entries()].map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count),
