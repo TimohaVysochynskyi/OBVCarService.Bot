@@ -9,13 +9,23 @@
 
   function readData() {
     var el = document.getElementById('report-data');
-    if (!el) return { managers: {}, categories: [] };
+    if (!el) return { managers: {}, lines: {} };
     try {
       return JSON.parse(el.textContent);
     } catch (err) {
       console.error('[report] не вдалося прочитати дані сторінки:', err);
-      return { managers: {}, categories: [] };
+      return { managers: {}, lines: {} };
     }
+  }
+
+  // Ukrainian counts: 1 дзвінок, 2 дзвінки, 5 дзвінків. Getting this wrong is the kind of thing a
+  // reader notices immediately in their own language.
+  function plural(n, one, few, many) {
+    var mod10 = n % 10;
+    var mod100 = n % 100;
+    if (mod10 === 1 && mod100 !== 11) return one;
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+    return many;
   }
 
   function each(list, fn) {
@@ -159,6 +169,46 @@
     applyCompare(ALL);
   }
 
+  // --- phone lines ---------------------------------------------------------------------------
+  // The split bar is scaled to the calls whose direction is KNOWN, not to the total: a line with
+  // unclassified calls would otherwise show a bar that does not fill its track, which reads as data
+  // missing rather than as a ratio.
+  function lineSummary(bucket) {
+    var calls = bucket.calls || 0;
+    if (!calls) return 'за цей місяць дзвінків не було';
+    var parts = [calls + ' ' + plural(calls, 'дзвінок', 'дзвінки', 'дзвінків')];
+    if (bucket.sales) parts.push(bucket.sales + ' ' + plural(bucket.sales, 'угода', 'угоди', 'угод'));
+    if (bucket.success) parts.push(bucket.success + ' ' + plural(bucket.success, 'запис', 'записи', 'записів'));
+    return parts.join(' · ');
+  }
+
+  function applyLines(month) {
+    each(document.querySelectorAll('[data-line]'), function (card) {
+      var bucket = (DATA.lines[card.dataset.line] || {})[month] || {};
+      var incoming = bucket.incoming || 0;
+      var outgoing = bucket.outgoing || 0;
+      var known = incoming + outgoing;
+
+      card.querySelector('[data-line-in]').textContent = incoming;
+      card.querySelector('[data-line-out]').textContent = outgoing;
+      card.querySelector('[data-line-sub]').textContent = lineSummary(bucket);
+      card.querySelector('[data-line-bar-in]').style.width = known ? ((incoming / known) * 100).toFixed(1) + '%' : '0%';
+      card.querySelector('[data-line-bar-out]').style.width = known ? ((outgoing / known) * 100).toFixed(1) + '%' : '0%';
+    });
+    select(document.querySelectorAll('[data-line-tab]'), month, 'lineTab');
+  }
+
+  function initLines() {
+    var tabs = document.querySelectorAll('[data-line-tab]');
+    if (!document.querySelector('[data-line]')) return;
+    each(tabs, function (tab) {
+      tab.addEventListener('click', function () {
+        applyLines(tab.dataset.lineTab);
+      });
+    });
+    applyLines(ALL);
+  }
+
   // --- refusals table ------------------------------------------------------------------------
   function initDeclineTabs() {
     var tabs = document.querySelectorAll('[data-decline-tab]');
@@ -292,6 +342,7 @@
     initManagerTabs();
     initMonthTabs();
     initCompare();
+    initLines();
     initDeclineTabs();
     initTips();
     initClips();

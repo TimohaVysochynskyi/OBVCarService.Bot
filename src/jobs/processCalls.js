@@ -1,4 +1,5 @@
 import { callExists, saveCall, upsertPending, markPendingFailed, removePendingCall, getPendingCalls, getOperatorRoster } from '../core/store.js';
+import { SHARED_EXTENSIONS, PERSONAL_OPERATORS, EXCLUDED_EXTENSIONS } from '../core/phoneLines.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 import { storeRecording } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
@@ -14,47 +15,6 @@ import { recordError } from '../core/errorLog.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // stay safely under Binotel's 24h cap on this endpoint
 const MAX_PENDING_ATTEMPTS = Number(process.env.MAX_PENDING_ATTEMPTS || 20);
-
-// Extensions that are physically shared between operators (a common handset), where Binotel
-// can't tell us who actually answered. For these the operator is identified from the recording
-// (see identifyManager). Personal extensions carry a name from Binotel directly.
-const SHARED_EXTENSIONS = (process.env.SHARED_EXTENSIONS || '901,902')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-// Personal extensions are identified by NUMBER, not by whatever name Binotel's employeeData
-// currently reports for them. Binotel's employeeData.name has been observed to (a) go briefly
-// empty for a personal extension (which used to fall through to content-based identification and
-// sometimes misattribute the call to a DIFFERENT manager), and (b) change spelling (e.g. a RU->UK
-// rename in the Binotel dashboard), which would otherwise split one person's history into two
-// manager_name buckets. The extension number is the stable identifier Binotel gives us, so it's
-// the source of truth for which of OUR canonical names a personal-extension call belongs to;
-// employeeName/identifyManager are never consulted for these extensions once mapped here.
-// Format: "ext=Name,ext=Name" via env, merged over the default.
-const DEFAULT_PERSONAL_OPERATORS = { '903': 'Роман', '904': 'Андрій', '905': 'Володимир' };
-function parsePersonalOperators(raw) {
-  const map = { ...DEFAULT_PERSONAL_OPERATORS };
-  for (const pair of (raw || '').split(',').map((s) => s.trim()).filter(Boolean)) {
-    const eq = pair.indexOf('=');
-    if (eq <= 0) continue;
-    const key = pair.slice(0, eq).trim();
-    const val = pair.slice(eq + 1).trim();
-    if (key && val) map[key] = val;
-  }
-  return map;
-}
-const PERSONAL_OPERATORS = parsePersonalOperators(process.env.PERSONAL_OPERATORS);
-
-// Extensions to skip entirely - never transcribed, analyzed or saved. For a number that isn't a
-// salesperson's line (e.g. the director's personal mobile), Binotel carries no employeeData for
-// it, so it used to fall through to content-based identification and could misattribute calls to
-// a real manager by voice match alone, polluting their stats. Comma-separated via env, merged
-// over the default (the director's mobile, ends in -200).
-const EXCLUDED_EXTENSIONS = (process.env.EXCLUDED_EXTENSIONS || '0674738200')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
 
 function splitIntoChunks(start, end) {
   const chunks = [];

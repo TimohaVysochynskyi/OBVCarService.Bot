@@ -765,6 +765,39 @@ async function getGlobalTotals() {
   return rows[0];
 }
 
+// Per-LINE volume, split by direction. The owner is buying advertising on the shared ("стаціонарні")
+// numbers, so incoming vs outgoing on each number is the point of this query — a line that is almost
+// entirely incoming is an advertising line, and its incoming count is what the ads move.
+// Grouped by month as well, because a lifetime total cannot show whether a campaign did anything.
+async function getLineBreakdown() {
+  const { rows } = await pool.query(
+    `SELECT internal_number AS "number", ${KYIV_MONTH} AS month,
+            COUNT(*)::int AS calls,
+            COUNT(*) FILTER (WHERE direction = 'in')::int AS incoming,
+            COUNT(*) FILTER (WHERE direction = 'out')::int AS outgoing,
+            COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS sales,
+            COUNT(*) FILTER (WHERE is_success)::int AS success
+     FROM calls
+     WHERE ${HAS_TEXT} AND internal_number IS NOT NULL AND internal_number <> ''
+     GROUP BY 1, 2`
+  );
+  return rows;
+}
+
+// How each call category splits between incoming and outgoing, for the whole period. Sits next to
+// the donut: the donut says what the line is spent on, this says who started those conversations.
+async function getPurposeDirectionSplit() {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(call_purpose, 'sales') AS purpose,
+            COUNT(*) FILTER (WHERE direction = 'in')::int AS incoming,
+            COUNT(*) FILTER (WHERE direction = 'out')::int AS outgoing,
+            COUNT(*) FILTER (WHERE direction IS NULL)::int AS unknown
+     FROM calls WHERE ${HAS_TEXT}
+     GROUP BY 1`
+  );
+  return rows;
+}
+
 async function getMonthlyPurposeBreakdown() {
   const { rows } = await pool.query(
     `SELECT manager_name AS "managerName", ${KYIV_MONTH} AS month,
@@ -1697,6 +1730,8 @@ export {
   getCallsMissingPurpose,
   getGlobalTotals,
   getMonthlyPurposeBreakdown,
+  getLineBreakdown,
+  getPurposeDirectionSplit,
   getMonthlySalesStats,
   getWeakStageCounts,
   getAllBlockedCalls,

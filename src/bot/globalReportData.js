@@ -10,8 +10,11 @@ import {
   getDeclineReasonCounts,
   getDeclineCoverage,
   getOperators,
+  getLineBreakdown,
+  getPurposeDirectionSplit,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
+import { lineInfo } from '../core/phoneLines.js';
 import { BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES, DEAL_BLOCKERS } from '../core/dealBlocker.js';
 import { reasonLabel, reasonSide } from '../core/declineReasons.js';
 import { displayName, formatPhone } from './operators.js';
@@ -197,8 +200,11 @@ const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0
 
 async function collectWithFallback(name, start, end, opts) {
   if (!opts.analyze) {
+    // Reuse-only. `partial` used to be hardcoded true here, which printed "покриття неповне" even
+    // when every day of the period was already cached — a warning about nothing, on the one path
+    // that is guaranteed to cost nothing. It is partial only if days are genuinely missing.
     const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(() => null);
-    return { collected, partial: true };
+    return { collected, partial: !collected || Boolean(collected.missingDays) };
   }
   try {
     const collected = await collectRangeFindings(name, start, end, {
@@ -277,6 +283,62 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
   };
 }
 
+const emptyLine = () => ({ calls: 0, incoming: 0, outgoing: 0, sales: 0, success: 0 });
+
+// One entry per internal number, with a month breakdown. Ordered shared-first: those are the
+// numbers that go on advertising, so they are what the owner opens this block to look at.
+const LINE_ORDER = { shared: 0, personal: 1, other: 2 };
+
+function buildLines(rows, months) {
+  const byNumber = new Map();
+
+  for (const row of rows) {
+    if (!byNumber.has(row.number)) byNumber.set(row.number, new Map());
+    const bucket = byNumber.get(row.number);
+    bucket.set(row.month, {
+      calls: row.calls,
+      incoming: row.incoming,
+      outgoing: row.outgoing,
+      sales: row.sales,
+      success: row.success,
+    });
+  }
+
+  const lines = [];
+  for (const [number, monthsMap] of byNumber) {
+    const total = emptyLine();
+    for (const value of monthsMap.values()) {
+      for (const key of Object.keys(total)) total[key] += value[key] || 0;
+    }
+    monthsMap.set(ALL, total);
+    // Months with no calls on this line must still exist, or the switcher would show the previous
+    // month's numbers when someone clicks a quiet one.
+    for (const m of months) if (!monthsMap.has(m)) monthsMap.set(m, emptyLine());
+
+    const info = lineInfo(number);
+    lines.push({ ...info, byMonth: Object.fromEntries([...monthsMap.entries()]) });
+  }
+
+  lines.sort((a, b) => {
+    const kind = LINE_ORDER[a.kind] - LINE_ORDER[b.kind];
+    if (kind) return kind;
+    return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
+  });
+  return lines;
+}
+
+function buildDirections(rows) {
+  const out = {};
+  for (const row of rows) {
+    const purpose = CALL_PURPOSES.includes(row.purpose) ? row.purpose : 'other';
+    const at = (out[purpose] ||= { incoming: 0, outgoing: 0, unknown: 0 });
+    at.incoming += row.incoming;
+    at.outgoing += row.outgoing;
+    at.unknown += row.unknown;
+  }
+  return out;
+}
+
 const REPORT_CONCURRENCY = Number(process.env.GLOBAL_REPORT_CONCURRENCY || 1);
 const REPORT_PAUSE_MS = Number(process.env.GLOBAL_REPORT_PAUSE_MS || 1500);
 const REPORT_BUDGET_MS = Number(process.env.GLOBAL_REPORT_BUDGET_MS || 120000);
@@ -288,16 +350,19 @@ async function buildGlobalReport({
   budgetMs = REPORT_BUDGET_MS,
 } = {}) {
   const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
-  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators] = await Promise.all([
-    getGlobalTotals(),
-    getMonthlyPurposeBreakdown(),
-    getMonthlySalesStats(),
-    getWeakStageCounts(),
-    getAllBlockedCalls(),
-    getDeclineReasonCounts(),
-    getDeclineCoverage(),
-    getOperators(),
-  ]);
+  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, directionRows] =
+    await Promise.all([
+      getGlobalTotals(),
+      getMonthlyPurposeBreakdown(),
+      getMonthlySalesStats(),
+      getWeakStageCounts(),
+      getAllBlockedCalls(),
+      getDeclineReasonCounts(),
+      getDeclineCoverage(),
+      getOperators(),
+      getLineBreakdown(),
+      getPurposeDirectionSplit(),
+    ]);
 
   const months = [...new Set(purposeRows.map((r) => r.month))].sort();
   const byManager = buildManagerBuckets(purposeRows, salesRows);
@@ -346,6 +411,8 @@ async function buildGlobalReport({
       purposes: purposeTotals,
     },
     months: months.map((m) => ({ key: m, title: monthTitle(m) })),
+    lines: buildLines(lineRows, months),
+    directions: buildDirections(directionRows),
     managers,
     stages: [...stages.entries()].map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count),
     declines: buildDeclines(blockedCalls, reasonRows, coverage),

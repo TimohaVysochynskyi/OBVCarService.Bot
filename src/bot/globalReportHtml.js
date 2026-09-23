@@ -1,4 +1,5 @@
 import { PURPOSE_LABELS } from '../core/callPurpose.js';
+import { LINE_KINDS } from '../core/phoneLines.js';
 import { ALL } from './globalReportData.js';
 
 // Renders the report's index.html. Styles and behaviour are NOT inlined any more — they are
@@ -62,6 +63,16 @@ function share(count, total) {
   const pct = (count / total) * 100;
   return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
+
+// The owner's own header format: the start without a year, the end with a short one.
+const periodSpan = (from, to) => {
+  const a = new Date(from);
+  const b = new Date(to);
+  return `${pad2(a.getUTCDate())}.${pad2(a.getUTCMonth() + 1)} — ${formatDateShort(b)}`;
+};
+
+const IN_COLOR = '#1d4ed8';
+const OUT_COLOR = '#9aa6b8';
 
 const clock = (seconds) => {
   const s = Math.max(0, Math.round(Number(seconds) || 0));
@@ -155,6 +166,88 @@ function player(example) {
       </div>
       <span data-clip-time class="w-14 shrink-0 text-right text-xs tabular-nums text-muted">${esc(length)}</span>
     </div>`;
+}
+
+// --- call structure ---------------------------------------------------------------------------
+
+// The donut says what the line is spent ON; this table says WHO started those conversations. Both
+// are all-period on purpose — the donut would have to be redrawn in the browser to follow a month
+// switch, and the thing that genuinely needs a time axis is the per-number block below.
+function categoryTable(purposes, directions, total) {
+  const rows = PURPOSE_ORDER.map((p) => {
+    const count = purposes[p] || 0;
+    const dir = directions[p] || { incoming: 0, outgoing: 0 };
+    return `<tr class="border-b border-line last:border-0">
+        <th scope="row" class="py-2 pr-2 text-left font-normal">
+          <span class="mr-2 inline-block h-3 w-3 shrink-0 rounded-sm align-middle" style="background:${PURPOSE_COLORS[p]}"></span>${esc(PURPOSE_LABELS[p].plural)}
+        </th>
+        <td class="py-2 pr-2 text-right font-semibold tabular-nums">${count}</td>
+        <td class="py-2 pr-2 text-right tabular-nums text-muted">${esc(share(count, total))}</td>
+        <td class="py-2 pr-2 text-right tabular-nums">${dir.incoming}</td>
+        <td class="py-2 text-right tabular-nums text-muted">${dir.outgoing}</td>
+      </tr>`;
+  }).join('');
+
+  const totalIn = PURPOSE_ORDER.reduce((n, p) => n + (directions[p]?.incoming || 0), 0);
+  const totalOut = PURPOSE_ORDER.reduce((n, p) => n + (directions[p]?.outgoing || 0), 0);
+
+  return `<table class="w-full min-w-0 border-collapse text-sm">
+      <thead class="text-muted">
+        <tr class="border-b border-line">
+          <th class="py-2 pr-2 text-left font-semibold">Категорія</th>
+          <th class="py-2 pr-2 text-right font-semibold">Усього</th>
+          <th class="py-2 pr-2 text-right font-semibold">Частка</th>
+          <th class="py-2 pr-2 text-right font-semibold whitespace-nowrap">📥 Вхідні</th>
+          <th class="py-2 text-right font-semibold whitespace-nowrap">📤 Вихідні</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+      <tfoot>
+        <tr class="border-t-2 border-line font-semibold">
+          <th scope="row" class="py-2 pr-2 text-left">Разом</th>
+          <td class="py-2 pr-2 text-right tabular-nums">${total}</td>
+          <td class="py-2 pr-2 text-right tabular-nums text-muted">100%</td>
+          <td class="py-2 pr-2 text-right tabular-nums">${totalIn}</td>
+          <td class="py-2 text-right tabular-nums text-muted">${totalOut}</td>
+        </tr>
+      </tfoot>
+    </table>`;
+}
+
+// One card per internal number. The shared ("стаціонарні") lines come first: those are the numbers
+// that go into advertising, and the split bar is there so "almost all incoming" reads at a glance
+// rather than having to be worked out from two numbers.
+function lineCard(line) {
+  const total = line.byMonth[ALL] || {};
+  const kind = LINE_KINDS[line.kind] || LINE_KINDS.other;
+  const subtitle = line.name ? `${kind.title} · ${esc(line.name)}` : kind.title;
+
+  return `<article class="rounded-xl border border-line p-3.5" data-line="${esc(line.number)}">
+      <div class="flex items-center gap-2">
+        <span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
+        <span class="text-xs uppercase tracking-wide text-muted">${subtitle}</span>
+        ${tip(`${kind.title} номер ${line.number}`, kind.about)}
+      </div>
+      <div class="mt-1 text-sm text-muted" data-line-sub></div>
+      <div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-track">
+        <span class="block h-full transition-[width] duration-300" style="background:${IN_COLOR}" data-line-bar-in></span>
+        <span class="block h-full transition-[width] duration-300" style="background:${OUT_COLOR}" data-line-bar-out></span>
+      </div>
+      <div class="mt-2 flex items-baseline justify-between gap-2 text-sm tabular-nums">
+        <span>📥 <b data-line-in></b> вхідних</span>
+        <span class="text-muted">📤 <span data-line-out></span> вихідних</span>
+      </div>
+    </article>`;
+}
+
+function linesSection(report) {
+  const lines = report.lines || [];
+  if (!lines.length) return '';
+  const cards = lines.map(lineCard).join('');
+  return `<h3 class="${H3}">Номери</h3>
+    <p class="${LEAD}">Скільки дзвінків пройшло через кожен номер і хто їх починав. Стаціонарні номери стоять першими — саме вони йдуть у рекламу, і вхідні на них показують, що реклама приносить.</p>
+    ${tabStrip(withAllLast(report.months), 'data-line-tab', ALL)}
+    <div class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">${cards}</div>`;
 }
 
 // --- manager card ----------------------------------------------------------------------------
@@ -496,41 +589,48 @@ function renderGlobalReport(report) {
     )
     .join('');
 
-  const legend = PURPOSE_ORDER.map(
-    (p) =>
-      `<li class="flex items-center gap-2 py-0.5"><i class="h-3 w-3 shrink-0 rounded-sm" style="background:${PURPOSE_COLORS[p]}"></i>${esc(PURPOSE_LABELS[p].plural)} — <b>${totals.purposes[p] || 0}</b> <span class="text-muted">(${share(totals.purposes[p] || 0, totals.calls)})</span></li>`
-  ).join('');
-
-  const data = { managers: Object.fromEntries(managers.map((m) => [m.name, m.byMonth])) };
+  const data = {
+    managers: Object.fromEntries(managers.map((m) => [m.name, m.byMonth])),
+    lines: Object.fromEntries((report.lines || []).map((l) => [l.number, l.byMonth])),
+  };
 
   return `<!doctype html>
 <html lang="uk">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Звіт по дзвінках</title>
+<title>Аналітика дзвінків</title>
 <link rel="stylesheet" href="assets/app.css">
 </head>
 <body class="font-sans text-base leading-relaxed">
-<div class="mx-auto max-w-5xl p-3 sm:p-4">
-  <header class="${CARD}">
-    <h1 class="text-2xl sm:text-3xl font-bold">Звіт по дзвінках</h1>
-    <p class="${LEAD}">${esc(formatDate(report.period.start))} — ${esc(formatDate(report.period.end))} · ${totals.managers} ${esc(plural(totals.managers, 'менеджер', 'менеджери', 'менеджерів'))}</p>
-    <div class="flex flex-wrap items-center gap-5">
-      <div>
-        <div class="text-5xl font-bold leading-none">${totals.hours}</div>
-        <div class="text-muted">${esc(plural(Math.round(totals.hours), 'година', 'години', 'годин'))} розмов</div>
+<div class="mx-auto max-w-7xl p-3 sm:p-4">
+  <header class="${CARD} flex flex-col gap-6 md:flex-row md:items-center md:gap-10">
+    <div class="shrink-0">
+      <h1 class="text-2xl sm:text-3xl font-bold leading-tight">Аналітика дзвінків</h1>
+      <p class="mt-3 leading-snug text-muted">${esc(periodSpan(report.period.start, report.period.end))} <br> ${totals.managers} ${esc(plural(totals.managers, 'менеджер', 'менеджери', 'менеджерів'))}</p>
+    </div>
+    <div class="flex flex-wrap items-center gap-5 md:border-l md:border-line md:pl-10">
+      <div class="shrink-0">
+        <div class="text-4xl font-bold leading-none tabular-nums sm:text-5xl">${totals.hours}</div>
+        <div class="mt-1 text-muted">${esc(plural(Math.round(totals.hours), 'година', 'години', 'годин'))} розмов</div>
       </div>
-      <p class="m-0 flex-1 basis-80 text-muted">Стільки часу довелося б прослухати вручну, щоб знати все, що є в цьому звіті — приблизно ${days} ${esc(plural(days, 'робочий день', 'робочі дні', 'робочих днів'))} суцільного прослуховування. Усі ${totals.calls} ${esc(plural(totals.calls, 'розмову', 'розмови', 'розмов'))} розшифровано й розібрано автоматично.</p>
+      <p class="m-0 min-w-0 flex-1 basis-80 text-muted">
+        <b class="text-ink">${totals.calls} ${esc(plural(totals.calls, 'розмова', 'розмови', 'розмов'))} — автоматично розшифровано та проаналізовано.</b>
+        <br>
+        Щоб прослухати та опрацювати такий обсяг дзвінків вручну, знадобилося б приблизно <b class="text-ink">${days} ${esc(plural(days, 'робочий день', 'робочі дні', 'робочих днів'))} безперервного прослуховування.</b>
+        <br>
+        Усі ${totals.calls} ${esc(plural(totals.calls, 'розмову', 'розмови', 'розмов'))} було автоматично розшифровано, структуровано та проаналізовано, що дозволило отримати повну картину зафіксованих комунікацій без необхідності прослуховувати кожен дзвінок вручну.
+      </p>
     </div>
   </header>
 
   <section class="${CARD}">
-    <h2 class="${H2}">Структура дзвінків</h2>
-    <div class="flex flex-wrap items-center gap-6">
+    <h2 class="${H2}">Категорії дзвінків</h2>
+    <div class="grid items-center gap-6 lg:grid-cols-[auto_minmax(0,1fr)]">
       ${donut(totals.purposes, totals.calls)}
-      <ul class="list-none p-0">${legend}</ul>
+      ${categoryTable(totals.purposes, report.directions || {}, totals.calls)}
     </div>
+    ${linesSection(report)}
   </section>
 
   <div class="mb-3 flex flex-wrap gap-2 no-print" role="tablist">${managerTabs}</div>
