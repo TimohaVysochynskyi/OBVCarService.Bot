@@ -776,7 +776,7 @@ async function getLineBreakdown() {
             COUNT(*) FILTER (WHERE direction = 'in')::int AS incoming,
             COUNT(*) FILTER (WHERE direction = 'out')::int AS outgoing,
             COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS sales,
-            COUNT(*) FILTER (WHERE is_success)::int AS success
+            COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS success
      FROM calls
      WHERE ${HAS_TEXT} AND internal_number IS NOT NULL AND internal_number <> ''
      GROUP BY 1, 2`
@@ -795,7 +795,7 @@ async function getLineManagerBreakdown() {
             COUNT(*) FILTER (WHERE direction = 'in')::int AS incoming,
             COUNT(*) FILTER (WHERE direction = 'out')::int AS outgoing,
             COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS sales,
-            COUNT(*) FILTER (WHERE is_success)::int AS success
+            COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS success
      FROM calls
      WHERE ${HAS_TEXT} AND internal_number IS NOT NULL AND internal_number <> ''
      GROUP BY 1, 2, 3`
