@@ -1,5 +1,6 @@
 import { PURPOSE_LABELS } from '../core/callPurpose.js';
 import { LINE_KINDS } from '../core/phoneLines.js';
+import { formatPhone } from './operators.js';
 import { ALL } from './globalReportData.js';
 
 // Renders the report's index.html. Styles and behaviour are NOT inlined any more — they are
@@ -223,8 +224,9 @@ function lineCard(line) {
   const subtitle = line.name ? `${kind.title} · ${esc(line.name)}` : kind.title;
 
   return `<article class="rounded-xl border border-line p-3.5" data-line="${esc(line.number)}">
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
+        ${line.phone ? `<span class="font-medium tabular-nums">${esc(formatPhone(line.phone))}</span>` : ''}
         <span class="text-xs uppercase tracking-wide text-muted">${subtitle}</span>
         ${tip(`${kind.title} номер ${line.number}`, kind.about)}
       </div>

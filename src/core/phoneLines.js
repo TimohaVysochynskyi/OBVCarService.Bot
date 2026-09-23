@@ -43,6 +43,34 @@ const EXCLUDED_EXTENSIONS = (process.env.EXCLUDED_EXTENSIONS || '0674738200')
   .map((s) => s.trim())
   .filter(Boolean);
 
+// The real phone number behind each extension. Binotel does NOT give this: its per-call
+// `pbxNumberData` is the SIM the call went THROUGH, which for a personal extension happens to equal
+// its own number, but for the shared lines is whichever number the client dialled — measured over
+// ~350 calls, 901 was seen on 0734738200 and 0674572011, never on its own. So the mapping is
+// configuration, like PERSONAL_OPERATORS, and for the same reason: it must not drift with traffic.
+// Format: "ext=number,ext=number" via env, merged over the default.
+const DEFAULT_LINE_NUMBERS = {
+  901: '0754738200',
+  902: '0774738200',
+  903: '0734738200',
+  904: '0504738201',
+  905: '0674572011',
+};
+
+function parseLineNumbers(raw) {
+  const map = { ...DEFAULT_LINE_NUMBERS };
+  for (const pair of (raw || '').split(',').map((s) => s.trim()).filter(Boolean)) {
+    const eq = pair.indexOf('=');
+    if (eq <= 0) continue;
+    const key = pair.slice(0, eq).trim();
+    const val = pair.slice(eq + 1).replace(/[^0-9+]/g, '').trim();
+    if (key && val) map[key] = val;
+  }
+  return map;
+}
+
+const LINE_NUMBERS = parseLineNumbers(process.env.LINE_NUMBERS);
+
 const LINE_KINDS = {
   shared: { title: 'Стаціонарний', about: 'Спільна лінія: слухавку бере той, хто вільний. Саме ці номери йдуть у рекламу, тому вхідні на них — головне, за чим тут варто стежити.' },
   personal: { title: 'Персональний', about: 'Особистий номер менеджера. Вихідні з нього — це дзвінки, які він робить сам.' },
@@ -53,9 +81,10 @@ const LINE_KINDS = {
 // configuration for is reported as such rather than silently folded into one of the known kinds.
 function lineInfo(ext) {
   const number = String(ext ?? '').trim();
-  if (SHARED_EXTENSIONS.includes(number)) return { number, kind: 'shared', name: null };
-  if (PERSONAL_OPERATORS[number]) return { number, kind: 'personal', name: PERSONAL_OPERATORS[number] };
-  return { number, kind: 'other', name: null };
+  const phone = LINE_NUMBERS[number] || null;
+  if (SHARED_EXTENSIONS.includes(number)) return { number, kind: 'shared', name: null, phone };
+  if (PERSONAL_OPERATORS[number]) return { number, kind: 'personal', name: PERSONAL_OPERATORS[number], phone };
+  return { number, kind: 'other', name: null, phone };
 }
 
 export {
@@ -63,6 +92,7 @@ export {
   PERSONAL_OPERATORS,
   EXCLUDED_EXTENSIONS,
   LINE_KINDS,
+  LINE_NUMBERS,
   lineInfo,
   parsePersonalOperators,
 };
