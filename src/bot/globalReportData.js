@@ -334,25 +334,32 @@ function buildLines(rows, managerRows, months) {
 
   }
 
+  // EVERY shared line lists the SAME people, in the same order, even where one of them took no
+  // calls on it. A column that disappears on one card and not the other makes the two impossible to
+  // compare, and "nobody answered here" is itself worth seeing — it reads as a zero, not as absence.
+  const sharedNumbers = [...byNumber.keys()].filter((n) => lineInfo(n).kind === 'shared');
+  const peopleTotals = new Map();
+  for (const number of sharedNumbers) {
+    for (const [name, monthsMap] of perLine.get(number) || []) {
+      if (isUnattributed(name, number)) continue;
+      let total = peopleTotals.get(name) || 0;
+      for (const bucket of monthsMap.values()) total += bucket.calls || 0;
+      peopleTotals.set(name, total);
+    }
+  }
+  const people = [...peopleTotals.entries()].sort((a, b) => b[1] - a[1]).map(([name]) => name);
+
   const managerTable = (number) => {
-    const managers = perLine.get(number);
-    if (!managers) return [];
-    return [...managers.entries()]
-      .map(([name, monthsMap]) => {
-        const unknown = isUnattributed(name, number);
-        return {
-          name,
-          display: unknown ? LINE_KINDS.unknown.title : displayName(name) || name,
-          unknown,
-          byMonth: closeMonths(monthsMap, months),
-        };
-      })
-      .sort((a, b) => {
-        // The unattributed row always sits last: it is not a person, and keeping it out of the
-        // ranking leaves the actual people comparable at a glance.
-        if (a.unknown !== b.unknown) return a.unknown ? 1 : -1;
-        return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
-      });
+    const managers = perLine.get(number) || new Map();
+    const column = (name, unknown) => ({
+      name,
+      display: unknown ? LINE_KINDS.unknown.title : displayName(name) || name,
+      unknown,
+      byMonth: closeMonths(new Map(managers.get(name) || []), months),
+    });
+    // The unattributed column always sits last: it is not a person, and keeping it out of the
+    // ranking leaves the actual people comparable at a glance.
+    return [...people.map((name) => column(name, false)), column(number, true)];
   };
 
   const lines = [];
@@ -469,4 +476,4 @@ async function buildGlobalReport({
   };
 }
 
-export { buildGlobalReport, monthTitle, ALL, TOP_N };
+export { buildGlobalReport, buildLines, monthTitle, ALL, TOP_N };

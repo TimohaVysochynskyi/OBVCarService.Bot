@@ -173,12 +173,14 @@
   // The split bar is scaled to the calls whose direction is KNOWN, not to the total: a line with
   // unclassified calls would otherwise show a bar that does not fill its track, which reads as data
   // missing rather than as a ratio.
+  // Returns markup, not text: the counts are bold so the eye lands on them first. Every value
+  // here is an integer from our own JSON, so there is nothing to escape.
   function lineSummary(bucket) {
     var calls = bucket.calls || 0;
     if (!calls) return 'за цей місяць дзвінків не було';
-    var parts = [calls + ' ' + plural(calls, 'дзвінок', 'дзвінки', 'дзвінків')];
-    if (bucket.sales) parts.push(bucket.sales + ' ' + plural(bucket.sales, 'угода', 'угоди', 'угод'));
-    if (bucket.success) parts.push(bucket.success + ' ' + plural(bucket.success, 'запис', 'записи', 'записів'));
+    var parts = ['<b>' + calls + '</b> ' + plural(calls, 'дзвінок', 'дзвінки', 'дзвінків')];
+    if (bucket.sales) parts.push('<b>' + bucket.sales + '</b> ' + plural(bucket.sales, 'угода', 'угоди', 'угод'));
+    if (bucket.success) parts.push('<b>' + bucket.success + '</b> ' + plural(bucket.success, 'запис', 'записи', 'записів'));
     return parts.join(' · ');
   }
 
@@ -191,7 +193,7 @@
 
       card.querySelector('[data-line-in]').textContent = incoming;
       card.querySelector('[data-line-out]').textContent = outgoing;
-      card.querySelector('[data-line-sub]').textContent = lineSummary(bucket);
+      card.querySelector('[data-line-sub]').innerHTML = lineSummary(bucket);
       card.querySelector('[data-line-bar-in]').style.width = known ? ((incoming / known) * 100).toFixed(1) + '%' : '0%';
       card.querySelector('[data-line-bar-out]').style.width = known ? ((outgoing / known) * 100).toFixed(1) + '%' : '0%';
     });

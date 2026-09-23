@@ -9,7 +9,7 @@ import { ALL } from './globalReportData.js';
 // it is delivered: a zip now, a subdomain later.
 
 const PURPOSE_ORDER = ['sales', 'info', 'other', 'personal'];
-const PURPOSE_COLORS = { sales: '#2f7d58', info: '#3b6fb0', other: '#8a7a3f', personal: '#8c5aa8' };
+const PURPOSE_COLORS = { sales: '#3b6fb0', info: '#2f7d58', other: '#8c5aa8', personal: '#7b5334' };
 const MANAGER_COLORS = ['#2f7d58', '#3b6fb0', '#b5603a', '#8c5aa8', '#4f7a8c'];
 const WORK_DAY_HOURS = 8;
 const MONTH_NAMES = [
@@ -72,8 +72,20 @@ const periodSpan = (from, to) => {
   return `${pad2(a.getUTCDate())}.${pad2(a.getUTCMonth() + 1)} — ${formatDateShort(b)}`;
 };
 
-const IN_COLOR = '#1d4ed8';
-const OUT_COLOR = '#9aa6b8';
+// One meaning per colour inside a card: green is incoming everywhere (arrow and bar), blue is
+// outgoing. Emoji arrows were dropped because every platform draws them differently and they carry
+// no colour of their own, so the split had to be read from the numbers instead of seen.
+const IN_COLOR = '#2f7d58';
+const OUT_COLOR = '#1d4ed8';
+
+function arrow(direction) {
+  const path =
+    direction === 'in'
+      ? 'M13 3 5 11M5 5v6h6' // diagonal down-left, arrowhead in the corner it points at
+      : 'M3 13 11 5M5 5h6v6'; // diagonal up-right
+  const color = direction === 'in' ? IN_COLOR : OUT_COLOR;
+  return `<svg viewBox="0 0 16 16" class="inline-block h-3.5 w-3.5 shrink-0 align-[-0.15em]" aria-hidden="true" style="color:${color}"><path d="${path}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+}
 
 const clock = (seconds) => {
   const s = Math.max(0, Math.round(Number(seconds) || 0));
@@ -182,10 +194,10 @@ function categoryTable(purposes, directions, total) {
         <th scope="row" class="py-2 pr-2 text-left font-normal">
           <span class="mr-2 inline-block h-3 w-3 shrink-0 rounded-sm align-middle" style="background:${PURPOSE_COLORS[p]}"></span>${esc(PURPOSE_LABELS[p].plural)}
         </th>
-        <td class="py-2 pr-2 text-right font-semibold tabular-nums">${count}</td>
-        <td class="py-2 pr-2 text-right tabular-nums text-muted">${esc(share(count, total))}</td>
-        <td class="py-2 pr-2 text-right tabular-nums">${dir.incoming}</td>
-        <td class="py-2 text-right tabular-nums text-muted">${dir.outgoing}</td>
+        <td class="border-l border-line px-2 py-2 text-right font-semibold tabular-nums">${count}</td>
+        <td class="border-l border-line px-2 py-2 text-right tabular-nums text-muted">${esc(share(count, total))}</td>
+        <td class="border-l border-line px-2 py-2 text-right tabular-nums">${dir.incoming}</td>
+        <td class="border-l border-line px-2 py-2 text-right tabular-nums">${dir.outgoing}</td>
       </tr>`;
   }).join('');
 
@@ -194,22 +206,22 @@ function categoryTable(purposes, directions, total) {
 
   return `<div class="-mx-1 max-w-full overflow-x-auto px-1"><table class="w-auto border-collapse text-sm">
       <thead class="text-muted">
-        <tr class="border-b border-line">
-          <th class="py-2 pr-2 text-left font-semibold">Категорія</th>
-          <th class="py-2 pr-2 text-right font-semibold">Усього</th>
-          <th class="py-2 pr-2 text-right font-semibold">Частка</th>
-          <th class="py-2 pr-2 text-right font-semibold whitespace-nowrap">📥 Вхідні</th>
-          <th class="py-2 text-right font-semibold whitespace-nowrap">📤 Вихідні</th>
+        <tr class="border-b border-line font-bold text-ink">
+          <th class="py-2 pr-2 text-left">Категорія</th>
+          <th class="border-l border-line px-2 py-2 text-right">Усього</th>
+          <th class="border-l border-line px-2 py-2 text-right">Частка</th>
+          <th class="border-l border-line px-2 py-2 text-right whitespace-nowrap">${arrow('in')} Вхідні</th>
+          <th class="border-l border-line px-2 py-2 text-right whitespace-nowrap">${arrow('out')} Вихідні</th>
         </tr>
       </thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        <tr class="border-t-2 border-line font-semibold">
+        <tr class="border-t-2 border-line font-bold">
           <th scope="row" class="py-2 pr-2 text-left">Разом</th>
-          <td class="py-2 pr-2 text-right tabular-nums">${total}</td>
-          <td class="py-2 pr-2 text-right tabular-nums text-muted">100%</td>
-          <td class="py-2 pr-2 text-right tabular-nums">${totalIn}</td>
-          <td class="py-2 text-right tabular-nums text-muted">${totalOut}</td>
+          <td class="border-l border-line px-2 py-2 text-right tabular-nums">${total}</td>
+          <td class="border-l border-line px-2 py-2 text-right tabular-nums text-muted">100%</td>
+          <td class="border-l border-line px-2 py-2 text-right tabular-nums">${totalIn}</td>
+          <td class="border-l border-line px-2 py-2 text-right tabular-nums">${totalOut}</td>
         </tr>
       </tfoot>
     </table></div>`;
@@ -228,8 +240,8 @@ const LM_ROWS = [
   { field: 'sales', label: 'Угоди' },
   { field: 'success', label: 'Записи' },
   { field: 'calls', label: 'Усього', strong: true },
-  { field: 'incoming', label: '📥 вхідні', sub: true },
-  { field: 'outgoing', label: '📤 вихідні', sub: true },
+  { field: 'incoming', label: 'вхідні', sub: true, arrow: 'in' },
+  { field: 'outgoing', label: 'вихідні', sub: true, arrow: 'out' },
 ];
 
 function lineManagerTable(line) {
@@ -250,17 +262,18 @@ function lineManagerTable(line) {
       )
       .join('');
     const cls = [
-      row.strong ? 'border-t border-line' : '',
+      row.strong ? 'border-y border-line font-bold' : '',
       row.sub ? 'text-muted' : '',
     ].filter(Boolean).join(' ');
+    const label = row.arrow ? `${arrow(row.arrow)} ${esc(row.label)}` : esc(row.label);
     return `<tr class="${cls}">
-        <th scope="row" class="py-1 pr-2 text-left font-normal whitespace-nowrap${row.sub ? ' pl-3' : ''}">${esc(row.label)}</th>
+        <th scope="row" class="py-1 pr-2 text-left whitespace-nowrap${row.strong ? '' : ' font-normal'}${row.sub ? ' pl-3' : ''}">${label}</th>
         ${cells}
       </tr>`;
   }).join('');
 
   return `<div class="mt-4 border-t border-line pt-3">
-      <div class="mb-1.5 text-xs uppercase tracking-wide text-muted">Хто брав слухавку</div>
+      <div class="mb-1.5 text-xs uppercase tracking-wide text-muted">Розподіл дзвінків</div>
       <div class="-mx-1 overflow-x-auto px-1">
         <table class="w-full border-collapse text-xs sm:text-sm">
           <thead class="text-muted"><tr><th></th>${head}</tr></thead>
@@ -278,17 +291,17 @@ function lineCard(line) {
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
         <span class="text-xs uppercase tracking-wide text-muted">${subtitle}</span>
-        ${line.phone ? `<span class="ml-auto font-medium tabular-nums">${esc(formatLinePhone(line.phone))}</span>` : '<span class="ml-auto"></span>'}
+        ${line.phone ? `<span class="ml-auto font-medium tabular-nums text-muted">${esc(formatLinePhone(line.phone))}</span>` : '<span class="ml-auto"></span>'}
         ${tip(`${kind.title} номер ${line.number}`, kind.about)}
       </div>
-      <div class="mt-1 text-sm text-muted" data-line-sub></div>
+      <div class="mt-1 text-sm text-ink" data-line-sub></div>
       <div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-track">
         <span class="block h-full transition-[width] duration-300" style="background:${IN_COLOR}" data-line-bar-in></span>
         <span class="block h-full transition-[width] duration-300" style="background:${OUT_COLOR}" data-line-bar-out></span>
       </div>
-      <div class="mt-2 flex items-baseline justify-between gap-2 text-sm tabular-nums">
-        <span>📥 <b data-line-in></b> вхідних</span>
-        <span class="text-muted">📤 <span data-line-out></span> вихідних</span>
+      <div class="mt-2 flex items-baseline justify-between gap-2 text-sm tabular-nums text-muted">
+        <span>${arrow('in')} <span data-line-in></span> вхідних</span>
+        <span>${arrow('out')} <span data-line-out></span> вихідних</span>
       </div>
       ${lineManagerTable(line)}
     </article>`;
@@ -305,7 +318,8 @@ function linesSection(report) {
   const grid = (items, cols) =>
     items.length ? `<div class="grid gap-3 ${cols}">${items.map(lineCard).join('')}</div>` : '';
 
-  return `<h3 class="${H3}">Номери</h3>
+  return `<div class="mt-6 border-t border-line pt-5"></div>
+    <h2 class="${H2}">Номери</h2>
     <p class="${LEAD}">Скільки дзвінків надійшло на кожен номер і яку частку вони становлять від усіх дзвінків. Першими показані номери, які використовуються в рекламі.</p>
     ${tabStrip(withAllLast(report.months), 'data-line-tab', ALL)}
     ${grid(shared, 'sm:grid-cols-2')}
