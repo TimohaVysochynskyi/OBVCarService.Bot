@@ -197,12 +197,10 @@
     });
     // Who answered, inside the shared-line cards. The rows sum to the card's own total, so they
     // follow the same month as the card they sit in.
-    each(document.querySelectorAll('[data-lm-line]'), function (row) {
-      var perManager = (DATA.lineManagers || {})[row.dataset.lmLine] || {};
-      var bucket = (perManager[row.dataset.lmName] || {})[month] || {};
-      row.querySelector('[data-lm-in]').textContent = bucket.incoming || 0;
-      row.querySelector('[data-lm-out]').textContent = bucket.outgoing || 0;
-      row.querySelector('[data-lm-calls]').textContent = bucket.calls || 0;
+    each(document.querySelectorAll('[data-lm-field]'), function (cell) {
+      var perManager = (DATA.lineManagers || {})[cell.dataset.lmLine] || {};
+      var bucket = (perManager[cell.dataset.lmName] || {})[month] || {};
+      cell.textContent = bucket[cell.dataset.lmField] || 0;
     });
     select(document.querySelectorAll('[data-line-tab]'), month, 'lineTab');
   }

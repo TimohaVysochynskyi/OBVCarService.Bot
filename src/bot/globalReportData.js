@@ -15,7 +15,7 @@ import {
   getPurposeDirectionSplit,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
-import { lineInfo, LINE_KINDS, UNKNOWN_LINE } from '../core/phoneLines.js';
+import { lineInfo, LINE_KINDS } from '../core/phoneLines.js';
 import { BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES, DEAL_BLOCKERS } from '../core/dealBlocker.js';
 import { reasonLabel, reasonSide } from '../core/declineReasons.js';
 import { displayName, formatPhone } from './operators.js';
@@ -315,7 +315,7 @@ const asBucket = (row) => ({
 // themselves manager_name stays the bare extension number. Those calls are the "не розпізнано"
 // slice: they belong to the line they came in on AND are reported separately, because the owner
 // wants to see how much of the line nobody can be credited with.
-const isUnattributed = (row) => row.manager === row.number;
+const isUnattributed = (manager, number) => manager === number;
 
 function buildLines(rows, managerRows, months) {
   const byNumber = new Map();
@@ -326,18 +326,12 @@ function buildLines(rows, managerRows, months) {
 
   // number -> manager -> month -> bucket, plus the unattributed slice across all lines
   const perLine = new Map();
-  const unknownMonths = new Map();
   for (const row of managerRows) {
     if (!perLine.has(row.number)) perLine.set(row.number, new Map());
     const managers = perLine.get(row.number);
     if (!managers.has(row.manager)) managers.set(row.manager, new Map());
     managers.get(row.manager).set(row.month, asBucket(row));
 
-    if (isUnattributed(row)) {
-      const at = unknownMonths.get(row.month) || emptyLine();
-      for (const key of Object.keys(at)) at[key] += row[key] || 0;
-      unknownMonths.set(row.month, at);
-    }
   }
 
   const managerTable = (number) => {
@@ -345,7 +339,7 @@ function buildLines(rows, managerRows, months) {
     if (!managers) return [];
     return [...managers.entries()]
       .map(([name, monthsMap]) => {
-        const unknown = name === number;
+        const unknown = isUnattributed(name, number);
         return {
           name,
           display: unknown ? LINE_KINDS.unknown.title : displayName(name) || name,
@@ -376,16 +370,9 @@ function buildLines(rows, managerRows, months) {
     return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
   });
 
-  // Appended last, after sorting: it is a slice of the lines above, not a line of its own.
-  if (unknownMonths.size) {
-    lines.push({
-      number: UNKNOWN_LINE,
-      kind: 'unknown',
-      name: null,
-      phone: null,
-      byMonth: closeMonths(unknownMonths, months),
-    });
-  }
+  // The unattributed slice is NOT a line of its own: it lives as a row inside the shared cards it
+  // belongs to. It used to get a card here too, but that invited adding six cards up and landing on
+  // a number that does not exist, so it was dropped on the owner's call.
   return lines;
 }
 

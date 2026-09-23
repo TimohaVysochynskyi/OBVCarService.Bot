@@ -106,7 +106,7 @@ function tip(title, body) {
   // Opening the popover fills the circle and turns the "i" white — the client asked for exactly
   // that, and it is the only sign of WHICH badge is open. It styles a child by the PARENT's [open]
   // state, which utilities cannot express, so the rule lives in the components layer.
-  return `<details data-tip class="relative ml-auto shrink-0 no-print">
+  return `<details data-tip class="relative shrink-0 no-print">
       <summary class="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-line text-[11px] font-bold text-muted select-none transition" title="Пояснення">i</summary>
       <div class="absolute right-0 top-7 z-20 w-56 rounded-xl border border-line bg-white p-3 text-left text-xs leading-relaxed text-muted shadow-lg">
         <b class="text-ink">${esc(title)}</b><br>${esc(body)}
@@ -192,7 +192,7 @@ function categoryTable(purposes, directions, total) {
   const totalIn = PURPOSE_ORDER.reduce((n, p) => n + (directions[p]?.incoming || 0), 0);
   const totalOut = PURPOSE_ORDER.reduce((n, p) => n + (directions[p]?.outgoing || 0), 0);
 
-  return `<table class="w-full min-w-0 border-collapse text-sm">
+  return `<div class="-mx-1 max-w-full overflow-x-auto px-1"><table class="w-auto border-collapse text-sm">
       <thead class="text-muted">
         <tr class="border-b border-line">
           <th class="py-2 pr-2 text-left font-semibold">Категорія</th>
@@ -212,7 +212,7 @@ function categoryTable(purposes, directions, total) {
           <td class="py-2 text-right tabular-nums text-muted">${totalOut}</td>
         </tr>
       </tfoot>
-    </table>`;
+    </table></div>`;
 }
 
 // One card per internal number. The shared ("стаціонарні") lines come first: those are the numbers
@@ -221,51 +221,65 @@ function categoryTable(purposes, directions, total) {
 // Who actually picked up on a shared line. Only rendered for those: a personal extension has one
 // owner by definition, and a one-row table would be noise. The rows sum to the card's own total,
 // which is the point — the "не розпізнано" row is what closes that gap instead of hiding it.
+// Metrics down the side, people across the top — the shape the owner sketched. Incoming/outgoing
+// are sub-rows of "Усього" rather than a second number crammed into every cell: the split matters
+// most on the total, and two figures per cell in a half-width card is unreadable.
+const LM_ROWS = [
+  { field: 'sales', label: 'Угоди' },
+  { field: 'success', label: 'Записи' },
+  { field: 'calls', label: 'Усього', strong: true },
+  { field: 'incoming', label: '📥 вхідні', sub: true },
+  { field: 'outgoing', label: '📤 вихідні', sub: true },
+];
+
 function lineManagerTable(line) {
-  if (!line.managers || line.managers.length < 1) return '';
-  const rows = line.managers
+  if (!line.managers || !line.managers.length) return '';
+
+  const head = line.managers
     .map(
-      (m) => `<tr class="border-t border-line${m.unknown ? ' text-muted' : ''}"
-          data-lm-line="${esc(line.number)}" data-lm-name="${esc(m.name)}">
-          <th scope="row" class="py-1 pr-2 text-left font-normal">${esc(m.display)}</th>
-          <td class="py-1 pr-2 text-right tabular-nums" data-lm-in></td>
-          <td class="py-1 pr-2 text-right tabular-nums" data-lm-out></td>
-          <td class="py-1 text-right font-semibold tabular-nums" data-lm-calls></td>
-        </tr>`
+      (m) =>
+        `<th class="px-1 pb-1 text-right align-bottom font-semibold${m.unknown ? ' text-muted' : ''}">${esc(m.display)}</th>`
     )
     .join('');
 
+  const body = LM_ROWS.map((row) => {
+    const cells = line.managers
+      .map(
+        (m) => `<td class="px-1 py-1 text-right tabular-nums${row.strong ? ' font-semibold' : ''}"
+            data-lm-line="${esc(line.number)}" data-lm-name="${esc(m.name)}" data-lm-field="${row.field}"></td>`
+      )
+      .join('');
+    const cls = [
+      row.strong ? 'border-t border-line' : '',
+      row.sub ? 'text-muted' : '',
+    ].filter(Boolean).join(' ');
+    return `<tr class="${cls}">
+        <th scope="row" class="py-1 pr-2 text-left font-normal whitespace-nowrap${row.sub ? ' pl-3' : ''}">${esc(row.label)}</th>
+        ${cells}
+      </tr>`;
+  }).join('');
+
   return `<div class="mt-4 border-t border-line pt-3">
       <div class="mb-1.5 text-xs uppercase tracking-wide text-muted">Хто брав слухавку</div>
-      <table class="w-full border-collapse text-sm">
-        <thead class="text-muted">
-          <tr>
-            <th class="pb-1 pr-2 text-left font-semibold">Менеджер</th>
-            <th class="pb-1 pr-2 text-right font-semibold whitespace-nowrap">📥 Вх.</th>
-            <th class="pb-1 pr-2 text-right font-semibold whitespace-nowrap">📤 Вих.</th>
-            <th class="pb-1 text-right font-semibold">Усього</th>
-          </tr>
-        </thead>
-        <tbody>${rows}</tbody>
-      </table>
+      <div class="-mx-1 overflow-x-auto px-1">
+        <table class="w-full border-collapse text-xs sm:text-sm">
+          <thead class="text-muted"><tr><th></th>${head}</tr></thead>
+          <tbody>${body}</tbody>
+        </table>
+      </div>
     </div>`;
 }
 
 function lineCard(line) {
   const kind = LINE_KINDS[line.kind] || LINE_KINDS.other;
-  const unknown = line.kind === 'unknown';
-  // The unattributed slice has no extension and no phone — showing an internal key where a number
-  // belongs would read as a sixth line, which is exactly what it is not.
-  const heading = unknown
-    ? `<span class="text-base font-bold uppercase tracking-wide">${esc(kind.title)}</span>`
-    : `<span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
-        ${line.phone ? `<span class="font-medium tabular-nums">${esc(formatLinePhone(line.phone))}</span>` : ''}
-        <span class="text-xs uppercase tracking-wide text-muted">${line.name ? `${kind.title} · ${esc(line.name)}` : kind.title}</span>`;
+  const subtitle = line.name ? `${kind.title} · ${esc(line.name)}` : kind.title;
 
-  return `<article class="rounded-xl border p-3.5 ${unknown ? 'border-dashed border-muted/50 bg-canvas' : 'border-line'}" data-line="${esc(line.number)}">
+  return `<article class="rounded-xl border border-line p-3.5" data-line="${esc(line.number)}">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
-        ${heading}
-        ${tip(unknown ? kind.title : `${kind.title} номер ${line.number}`, kind.about)}
+        <span class="text-xl font-bold tabular-nums">${esc(line.number)}</span>
+        <span class="text-xs uppercase tracking-wide text-muted">${subtitle}</span>
+        ${line.phone ? `<span class="ml-auto font-medium tabular-nums">${esc(formatLinePhone(line.phone))}</span>` : '<span class="ml-auto"></span>'}
+        ${tip(`${kind.title} номер ${line.number}`, kind.about)}
       </div>
       <div class="mt-1 text-sm text-muted" data-line-sub></div>
       <div class="mt-3 flex h-2.5 overflow-hidden rounded-full bg-track">
@@ -281,13 +295,22 @@ function lineCard(line) {
 }
 
 function linesSection(report) {
-  const lines = report.lines || [];
+  const lines = (report.lines || []).filter((l) => l.kind !== 'unknown');
   if (!lines.length) return '';
-  const cards = lines.map(lineCard).join('');
+  // Two grids on purpose: a shared line carries a breakdown table and needs the width, a personal
+  // one is a short card and three fit comfortably across.
+  const shared = lines.filter((l) => l.kind === 'shared');
+  const rest = lines.filter((l) => l.kind !== 'shared');
+
+  const grid = (items, cols) =>
+    items.length ? `<div class="grid gap-3 ${cols}">${items.map(lineCard).join('')}</div>` : '';
+
   return `<h3 class="${H3}">Номери</h3>
     <p class="${LEAD}">Скільки дзвінків надійшло на кожен номер і яку частку вони становлять від усіх дзвінків. Першими показані номери, які використовуються в рекламі.</p>
     ${tabStrip(withAllLast(report.months), 'data-line-tab', ALL)}
-    <div class="grid gap-3 sm:grid-cols-2">${cards}</div>`;
+    ${grid(shared, 'sm:grid-cols-2')}
+    ${shared.length && rest.length ? '<div class="h-3"></div>' : ''}
+    ${grid(rest, 'sm:grid-cols-2 lg:grid-cols-3')}`;
 }
 
 // --- manager card ----------------------------------------------------------------------------
@@ -296,7 +319,7 @@ function categoryStrip(manager) {
   const total = manager.byMonth[ALL] || {};
   const cells = PURPOSE_ORDER.map(
     (p) => `<div class="relative rounded-xl border border-line border-l-4 p-2.5 text-center" style="border-left-color:${PURPOSE_COLORS[p]}">
-        <div class="flex">${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}</div>
+        <div class="flex justify-end">${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}</div>
         <span class="block text-[15px]">${PURPOSE_LABELS[p].icon}</span>
         <span class="block text-xl font-bold" data-cat="${p}">${total[p] || 0}</span>
         <span class="block text-xs text-muted">${esc(PURPOSE_LABELS[p].plural)}</span>
@@ -482,7 +505,7 @@ function compareSection(report) {
 
   const blocks = CMP_METRICS.map(
     (metric) => `<div class="rounded-xl border border-line p-4">
-      <h3 class="mb-3.5 flex items-center gap-2 text-[15px] font-semibold">${esc(metric.title)}${tip(metric.title, metric.hint)}</h3>
+      <h3 class="mb-3.5 flex items-center justify-between gap-2 text-[15px] font-semibold">${esc(metric.title)}${tip(metric.title, metric.hint)}</h3>
       ${rows(metric.key)}
     </div>`
   ).join('');
@@ -671,7 +694,7 @@ function renderGlobalReport(report) {
 
   <section class="${CARD}">
     <h2 class="${H2}">Категорії дзвінків</h2>
-    <div class="grid items-center gap-6 lg:grid-cols-[auto_minmax(0,1fr)]">
+    <div class="flex flex-wrap items-center gap-6">
       ${donut(totals.purposes, totals.calls)}
       ${categoryTable(totals.purposes, report.directions || {}, totals.calls)}
     </div>
