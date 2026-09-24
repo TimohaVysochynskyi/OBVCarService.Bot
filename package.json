@@ -25,6 +25,7 @@
     "normalize:operators": "node src/scripts/normalizeOperators.js",
     "backfill:direction": "node src/scripts/backfillDirection.js",
     "backfill:intro": "node src/scripts/backfillIntro.js",
+    "rescore:intro": "node src/scripts/rescoreIntro.js",
     "backfill:clientnumbers": "node src/scripts/backfillClientNumbers.js",
     "backfill:audio": "node src/scripts/backfillAudio.js",
     "backfill:blockers": "node src/scripts/backfillBlockers.js",

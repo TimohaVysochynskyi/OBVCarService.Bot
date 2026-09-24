@@ -30,7 +30,7 @@ import { CALL_PURPOSES, PURPOSE_RULES } from './callPurpose.js';
 // Did he give his name and the service's name? Asked HERE because this request already runs on
 // every call, so the two booleans cost nothing extra. Rules live in one module with the offline
 // rule-based detector that back-fills history, so the two paths can't drift apart.
-import { INTRO_RULES } from './managerIntro.js';
+import { INTRO_RULES, verifyIntro } from './managerIntro.js';
 
 const SYSTEM_PROMPT = `Контекст: менеджер автосервісу (СТО) веде телефонну розмову.
 
@@ -62,9 +62,11 @@ const SCHEMA = {
         type: 'object',
         properties: {
           name: { type: 'boolean' },
+          nameQuote: { type: 'string' },
           company: { type: 'boolean' },
+          companyQuote: { type: 'string' },
         },
-        required: ['name', 'company'],
+        required: ['name', 'nameQuote', 'company', 'companyQuote'],
         additionalProperties: false,
       },
       items: {
@@ -135,10 +137,10 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
 
   const callPurpose = CALL_PURPOSES.includes(raw.callPurpose) ? raw.callPurpose : 'other';
   // Kept for EVERY purpose: an introduction is expected on an info call as much as on a deal.
-  const intro = {
-    name: raw.intro?.name === true,
-    company: raw.intro?.company === true,
-  };
+  // The model's answer is not taken at face value — verifyIntro re-finds the quoted line in this
+  // call's own manager segments. Measured on live calls: without that check the model said "yes" on
+  // every single one, reading the "Менеджер: <імʼя>" metadata line as the name having been spoken.
+  const intro = verifyIntro(raw.intro, verifySegments, managerName);
   // Non-sales calls contribute no behaviours to the sales-effectiveness report.
   if (callPurpose !== 'sales') return { version: ANALYSIS_VERSION, callPurpose, intro, items: [] };
 

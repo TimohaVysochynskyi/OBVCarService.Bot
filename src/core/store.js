@@ -512,6 +512,24 @@ async function getCallsMissingIntro({ limit = null } = {}) {
   return rows;
 }
 
+// The most recent N calls, whatever their current verdict — the selector for the MODEL pass
+// (npm run rescore:intro), which re-judges rather than fills gaps. Carries the existing verdict so
+// the run can report how far the model and the rules disagree.
+async function getRecentCallsForIntro(limit) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            internal_number AS "internalNumber", start_time AS "startTime", direction,
+            intro_name AS "introName", intro_company AS "introCompany",
+            transcript, segments
+     FROM calls
+     WHERE ${HAS_TEXT}
+     ORDER BY start_time DESC
+     LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
 async function updateCallIntro(generalCallId, { name, company }) {
   await pool.query('UPDATE calls SET intro_name = $2, intro_company = $3 WHERE general_call_id = $1', [
     generalCallId,
@@ -1823,6 +1841,7 @@ export {
   updateCallAnalysis,
   updateCallFullAnalysis,
   getCallsMissingIntro,
+  getRecentCallsForIntro,
   updateCallIntro,
   getIntroBreakdown,
   getCallsMissingSegments,

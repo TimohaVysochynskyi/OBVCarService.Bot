@@ -1,3 +1,5 @@
+import { findQuote } from './quoteMatch.js';
+
 // Did the manager introduce himself? — one boolean per call, in TWO parts: did he give his NAME,
 // and did he name the SERVICE ("OBVCarService"). The owner treats a missing introduction as a
 // defect worth reporting, so it is counted, not judged.
@@ -118,21 +120,62 @@ function detectIntro({ segments, transcript, managerName }) {
   // Cyrillic rescues "Poмaн", but it also mangles genuinely Latin text: "OBV Car Service" would
   // become "овv саr sерviсе" and stop matching anything. Neither form alone covers both.
   const raw = lines.join(' ').toLowerCase();
-  const norm = normalize(raw);
   const stems = nameStems(managerName);
   return {
-    name: hasStem(norm, stems) || hasStem(raw, stems),
-    company: COMPANY_PATTERNS.some((re) => re.test(raw) || re.test(norm)),
+    name: hasStem(normalize(raw), stems) || hasStem(raw, stems),
+    company: companyMatches(raw),
+  };
+}
+
+// Tested against BOTH spellings for the reason above: the raw text catches genuine Latin, the folded
+// text catches Cyrillic written with Latin look-alikes.
+function companyMatches(text) {
+  const raw = String(text || '').toLowerCase();
+  const norm = normalize(raw);
+  return COMPANY_PATTERNS.some((re) => re.test(raw) || re.test(norm));
+}
+
+// The model's answer, checked by CODE before it is believed — the same safeguard the refusal
+// detector and the personal-call classifier use, and it is needed here for a measured reason.
+//
+// ⚠️ MEASURED ON LIVE CALLS: the first version asked only for two booleans, and the model returned
+// name:true on EVERY call — including ones whose entire manager side was "Алло!" and "Да." The cause
+// was the prompt itself: the user message opens with "Менеджер: Роман" as metadata, and the model
+// read the name being present there as the name having been said. So a bare boolean cannot be
+// trusted here; the model must now point at the LINE it heard, and that line is re-found in the
+// call's own MANAGER segments. No line, or a line the manager never said, means false.
+function verifyIntro(raw, segments, managerName) {
+  const check = (claimed, quote, matches) => {
+    if (claimed !== true) return false;
+    const text = String(quote || '').trim();
+    if (!text) return false;
+    if (!findQuote(segments, text, { requireRole: 'manager' })) return false;
+    return matches(text);
+  };
+  const stems = nameStems(managerName);
+  return {
+    // The name must actually be IN the quoted line. The model still decides the hard part — whether
+    // it is self-reference or the manager addressing a client of the same name — but it can no
+    // longer answer "yes" about a line that contains no name at all.
+    name: check(raw?.name, raw?.nameQuote, (t) => hasStem(normalize(t), stems) || hasStem(t.toLowerCase(), stems)),
+    // Deliberately laxer: recognising "Авивикар Сервис" as the company is the one thing the model
+    // can do and the patterns cannot, so requiring a pattern match here would throw away the whole
+    // point. "серв" is the fragment that survived every mangling we measured, so it is the floor.
+    company: check(raw?.company, raw?.companyQuote, (t) => companyMatches(t) || /серв[іи]с/i.test(normalize(t))),
   };
 }
 
 // What the per-call model is told. Deliberately phrased around the SPEECH-TO-TEXT damage documented
 // above: the model is the only one of the two paths that can recognise "Авивикар Сервис" as the
 // company, and it will only do that if it is told to expect the mangling.
-const INTRO_RULES = `- intro.name = чи НАЗВАВ менеджер СВОЄ імʼя ("це Роман", "мене звати Андрій", "Володимир, добрий день"). Клієнтове імʼя чи імʼя колеги — НЕ рахується.
+const INTRO_RULES = `⚠️ Рядок "Менеджер: <імʼя>" над транскриптом — це СЛУЖБОВА примітка від системи, а НЕ репліка. Те, що імʼя написане там, НЕ означає, що менеджер його вимовив. Суди ВИКЛЮЧНО за словами в самому транскрипті.
+- intro.name = чи НАЗВАВ менеджер СВОЄ імʼя ("це Роман", "мене звати Андрій", "Володимир, добрий день"). Клієнтове імʼя чи імʼя колеги — НЕ рахується.
+- intro.nameQuote = ДОСЛІВНИЙ рядок менеджера, у якому він назвався. Якщо такого рядка немає — intro.name = false і nameQuote = "".
+- intro.companyQuote = ДОСЛІВНИЙ рядок менеджера, у якому звучить назва сервісу. Немає — intro.company = false і companyQuote = "".
+- Обидві цитати СКОПІЮЙ дослівно з транскрипту. Вигадану цитату код відкине, і відповідь буде зарахована як "не представився".
 - intro.company = чи назвав менеджер НАЗВУ СЕРВІСУ (OBVCarService — у розмові звучить як "ОБВ Кар Сервіс", "OBV Car Service").
   ⚠️ Розшифровка спотворює цю назву майже завжди. Реальні написання з наших дзвінків: "АБВ Кар Сервіс", "АВВ Кар Сервіс", "ВіВі Кар Сервіс", "Авивикар Сервис", "Адікар Сервіс", "Аудіовікар Сервіс", "ОДВ Карсервис", "Одигикар Сервис", "ЛБВ Карсервіс". Будь-яке таке спотворення, за яким упізнається "…кар сервіс", рахуй ЗА НАЗВУ СЕРВІСУ.
   ⚠️ АЛЕ якщо назву вимовила ІНША сторона (автовідповідач чужої компанії, клієнт) — це НЕ представлення менеджера.
 - Обидва поля стосуються ПОЧАТКУ розмови — і на вхідному, і на вихідному дзвінку.`;
 
-export { detectIntro, INTRO_RULES, COMPANY_PATTERNS, nameStems, normalize, INTRO_TURNS };
+export { detectIntro, verifyIntro, INTRO_RULES, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };
