@@ -1,3 +1,5 @@
+import { definePrompt } from './prompts.js';
+
 const CALL_PURPOSES = ['sales', 'info', 'other', 'personal'];
 
 const NON_SALES_PURPOSES = ['info', 'other', 'personal'];
@@ -29,7 +31,7 @@ const PURPOSE_LABELS = {
   },
 };
 
-const PURPOSE_RULES = `- "sales" — Є можливість залучити/записати клієнта чи продати: вхідний запит про послугу/ціну, новий клієнт із проблемою авто, заперечення, допродаж, спроба записати на сервіс.
+const DEFAULT_PURPOSE_RULES = `- "sales" — Є можливість залучити/записати клієнта чи продати: вхідний запит про послугу/ціну, новий клієнт із проблемою авто, заперечення, допродаж, спроба записати на сервіс.
 - "info" — НЕМАЄ можливості продажу, але розмова про авто чи послуги: менеджер інформує про статус уже наявного замовлення ("машина готова", "буде готово завтра", "вартість вийшла така"), підтверджує вже наявний запис, клієнт уточнює статус своєї машини, або хтось питає технічну пораду без наміру записатись.
 - "other" — РОБОЧА, але не з клієнтом: постачальники й магазини запчастин, колеги та внутрішні узгодження, служби й перевізники, автовідповідач, помилковий набір, спам.
 - "personal" — тема НЕ стосується роботи СТО взагалі: рідні, друзі, побутові справи, домовленості поза роботою.
@@ -37,8 +39,22 @@ const PURPOSE_RULES = `- "sales" — Є можливість залучити/з
 ⚠️ Розмова про авто, запчастини чи ремонт — це НЕ "personal", навіть якщо співрозмовник явно знайомий менеджера і спілкуються вони на "ти". Вирішує ТЕМА, а не тон.
 ⚠️ Якщо в одній розмові є і робоча тема, і особиста — обирай робочу.`;
 
+// The four category NAMES are fixed by the schema and by what is already stored in the database;
+// only the explanation of where the line between them runs is the owner's to tune.
+const purposeRules = definePrompt({
+  key: 'purpose',
+  group: 'call',
+  job: 'map',
+  button: '🗂 Категорія дзвінка',
+  title: '🗂 *Категорія дзвінка*',
+  about:
+    'Як AI вирішує, чим був дзвінок: угода, інформаційний, службовий чи особистий. ' +
+    'Від цього залежить, які дзвінки взагалі оцінюються як продажі — а отже і конверсія.',
+  def: DEFAULT_PURPOSE_RULES,
+});
+
 const isSales = (purpose) => purpose === 'sales' || purpose == null;
 
 const purposeLabel = (purpose) => PURPOSE_LABELS[purpose] || null;
 
-export { CALL_PURPOSES, NON_SALES_PURPOSES, PURPOSE_LABELS, PURPOSE_RULES, isSales, purposeLabel };
+export { CALL_PURPOSES, NON_SALES_PURPOSES, PURPOSE_LABELS, purposeRules, DEFAULT_PURPOSE_RULES, isSales, purposeLabel };

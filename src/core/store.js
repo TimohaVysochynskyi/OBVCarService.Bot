@@ -530,6 +530,65 @@ async function getRecentCallsForIntro(limit) {
   return rows;
 }
 
+// --- Re-processing after a prompt change (bot/reprocess.js) ------------------------------------
+
+// Blocks are cut over ALL calls, newest first, and every job walks the same ordering — so "блок 2"
+// means the same 200 conversations no matter which analysis is being re-run. Each job then skips
+// the calls it does not apply to, and reports how many that was.
+async function countCallsWithText() {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM calls WHERE ${HAS_TEXT}`);
+  return rows[0].n;
+}
+
+// Just enough to decide whether a job applies to a call — no transcript, no segments. Used to price
+// a run before it starts, over the whole scope, without pulling megabytes of JSONB.
+async function getCallHeadsForReprocess({ limit, offset = 0 }) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber",
+            call_purpose AS "callPurpose", is_success AS "isSuccess", deal_blocker AS "dealBlocker"
+     FROM calls
+     WHERE ${HAS_TEXT}
+     ORDER BY start_time DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  return rows;
+}
+
+async function getCallsForReprocess({ limit, offset = 0 }) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            internal_number AS "internalNumber", start_time AS "startTime",
+            call_purpose AS "callPurpose", is_success AS "isSuccess", deal_blocker AS "dealBlocker",
+            transcript, segments
+     FROM calls
+     WHERE ${HAS_TEXT}
+     ORDER BY start_time DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset]
+  );
+  return rows;
+}
+
+// The per-call MAP result only. Deliberately NOT updateCallFullAnalysis: that one also rewrites the
+// transcript and segments, which a prompt change has no business touching.
+async function updateCallMap(generalCallId, { behaviors, analysisVersion, callPurpose, introName, introCompany }) {
+  await pool.query(
+    `UPDATE calls SET behaviors = $2::jsonb, analysis_version = $3, call_purpose = $4,
+       intro_name = COALESCE($5, intro_name), intro_company = COALESCE($6, intro_company)
+     WHERE general_call_id = $1`,
+    [generalCallId, jsonParam(behaviors), analysisVersion ?? null, callPurpose ?? null, introName ?? null, introCompany ?? null]
+  );
+}
+
+async function updateCallClassification(generalCallId, { isSuccess, weakestStage, communicationScore }) {
+  await pool.query(
+    `UPDATE calls SET is_success = $2, weakest_stage = $3, communication_score = $4
+     WHERE general_call_id = $1`,
+    [generalCallId, isSuccess ?? null, weakestStage ?? null, communicationScore ?? null]
+  );
+}
+
 async function updateCallIntro(generalCallId, { name, company }) {
   await pool.query('UPDATE calls SET intro_name = $2, intro_company = $3 WHERE general_call_id = $1', [
     generalCallId,
@@ -1842,6 +1901,11 @@ export {
   updateCallFullAnalysis,
   getCallsMissingIntro,
   getRecentCallsForIntro,
+  countCallsWithText,
+  getCallsForReprocess,
+  getCallHeadsForReprocess,
+  updateCallMap,
+  updateCallClassification,
   updateCallIntro,
   getIntroBreakdown,
   getCallsMissingSegments,
@@ -1933,6 +1997,9 @@ export {
   getErrorLogByIncident,
   summarizeErrorLog,
   deleteOldErrorLog,
+  getState,
+  setState,
+  deleteState,
   getStoredAnalyzePrompt,
   setStoredAnalyzePrompt,
   clearStoredAnalyzePrompt,

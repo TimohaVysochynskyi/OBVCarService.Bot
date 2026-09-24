@@ -1,15 +1,11 @@
 import { withRetry } from '../core/retry.js';
+import { definePrompt } from '../core/prompts.js';
 import { parseModelJson } from '../core/errors.js';
 import { fetchOk } from '../core/http.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
 import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
-import {
-  getStoredAnalyzePrompt,
-  setStoredAnalyzePrompt,
-  clearStoredAnalyzePrompt,
-} from '../core/store.js';
 
 // ============================================================================================
 // REDUCE step of the evidence-first report pipeline.
@@ -43,6 +39,17 @@ const reduceModel = () => process.env.OPENAI_REPORT_MODEL || 'gpt-4o';
 // The tunable GUIDANCE (owner edits it via /prompt). It shapes tone/wording of claim/why/action and
 // the recommended phrases — it does NOT control structure or the evidence rules (code does). Stored
 // in app_state.analyze_prompt; the legacy prose prompt is reset once by migrate().
+const DEFAULT_MERGE = `Тобі дано findings про роботу менеджера {МЕНЕДЖЕР}, порахованi ОКРЕМО за кожен день періоду. Той самий повторюваний патерн тому продубльований кілька разів різними словами.
+Згрупуй findings, що описують ОДНУ І ТУ САМУ поведінку, і для кожної групи дай одне спільне формулювання (claim / why_hurts_booking / action) — як підсумок за ВЕСЬ період.
+Правила: групуй лише справді однакове за суттю (не зливай різні проблеми в одну); у групі мають бути findings одного type; кожен index використай НЕ БІЛЬШЕ ОДНОГО разу; спершу помилки. Не вигадуй нових findings — лише групуй наявні. Максимум {МАКСИМУМ} груп: залиш найважливіші (з найбільшою кількістю доказів), решту відкинь.
+МОВА: пиши claim, why_hurts_booking і action ЛИШЕ українською, незалежно від того, якою мовою звучали розмови. Цитати з розмов не перекладай — вони лишаються як є.
+ТЕРМІНОЛОГІЯ: такі дзвінки називай «угода», НЕ вживай слово «продажний» — воно двозначне.`;
+
+const DEFAULT_VERIFY = `Ти суворий рецензент доказів у звіті про роботу менеджера автосервісу. Для КОЖНОГО finding дано твердження (claim) і пронумеровані цитати з реплік менеджера.
+Визнач, які цитати САМІ ПО СОБІ доводять саме це твердження. Цитата, що нейтральна, загальна, не про те, або лише побічно стосується, — НЕ підтверджує (не включай її).
+ВАЖЛИВО: якщо в доказі є поле "measured" — це ЗАМІР КОДУ з аудіозапису (порядок реплік, таймкоди), тобто встановлений ФАКТ, а не припущення. Для таких доказів не вимагай, щоб перебивання чи пауза були "видні" з самої цитати — цитата тут лише вказує МІСЦЕ в розмові. Оцінюй тільки одне: чи claim справді описує те явище, яке зафіксовано в "measured".
+Будь суворим: краще менше, ніж притягнуте за вуха. Поверни для кожного finding його index і масив "supporting" — індекси (i) цитат, що справді підтверджують claim.`;
+
 const DEFAULT_REPORT_GUIDANCE = `Ти — вимогливий аналітик відділу продажів автосервісу (СТО). Оцінюєш роботу менеджера на дзвінках.
 Успіх дзвінка = клієнт записаний на сервіс або підтвердив дату приїзду.
 
@@ -62,22 +69,41 @@ recommended_phrases: 5 готових ІДЕАЛЬНИХ формулювань 
 
 // Effective guidance = owner's custom text (app_state) or the built-in default. (Function names are
 // kept as *AnalyzePrompt* so the existing /prompt UI wiring in prompt.js / index.js is unchanged.)
-async function getAnalyzePrompt() {
-  return (await getStoredAnalyzePrompt()) || DEFAULT_REPORT_GUIDANCE;
-}
+// ⚠️ storeKey keeps the original app_state row so the owner's existing custom guidance survives.
+const getAnalyzePrompt = definePrompt({
+  key: 'reportGuidance',
+  storeKey: 'analyze_prompt',
+  group: 'report',
+  button: '🧠 Тон і формулювання висновків',
+  title: '🧠 *Тон і формулювання висновків*',
+  about:
+    'Яким тоном AI пише висновки у звіті: саме твердження, чому це шкодить записам, що робити. ' +
+    '⚠️ Правило «мінімум 2 підтверджені приклади» і заборона вигаданих цитат тримає код.',
+  def: DEFAULT_REPORT_GUIDANCE,
+});
 
-async function getAnalyzePromptInfo() {
-  const custom = await getStoredAnalyzePrompt();
-  return { prompt: custom || DEFAULT_REPORT_GUIDANCE, isCustom: Boolean(custom) };
-}
+const mergePrompt = definePrompt({
+  key: 'reportMerge',
+  group: 'report',
+  button: '🧩 Зведення висновків за період',
+  title: '🧩 *Зведення висновків за період*',
+  about:
+    'Як AI зливає денні висновки в один список за весь період. ' +
+    'Підстановки: {МЕНЕДЖЕР} — імʼя, {МАКСИМУМ} — скільки пунктів лишати. ' +
+    '⚠️ Дублікати доказів прибирає код незалежно від цього тексту.',
+  def: DEFAULT_MERGE,
+});
 
-async function setAnalyzePrompt(text) {
-  await setStoredAnalyzePrompt(text);
-}
-
-async function resetAnalyzePrompt() {
-  await clearStoredAnalyzePrompt();
-}
+const verifyPrompt = definePrompt({
+  key: 'reportVerify',
+  group: 'report',
+  button: '🔎 Рецензент доказів',
+  title: '🔎 *Рецензент доказів*',
+  about:
+    'Суворий прохід, що відкидає цитати, які насправді не доводять твердження. ' +
+    '⚠️ Послабите його — у звіт почнуть проходити притягнуті приклади.',
+  def: DEFAULT_VERIFY,
+});
 
 const FINDINGS_SCHEMA = {
   name: 'evidence_findings',
@@ -395,18 +421,9 @@ async function mergeFindings(managerName, findings) {
   const listing = findings
     .map((f, i) => `[${i}] (${f.type}) ${f.claim} | доказів: ${f.evidence?.length || 0}`)
     .join('\n');
-  const system =
-    `Тобі дано findings про роботу менеджера ${managerName}, порахованi ОКРЕМО за кожен день періоду. ` +
-    `Той самий повторюваний патерн тому продубльований кілька разів різними словами.\n` +
-    `Згрупуй findings, що описують ОДНУ І ТУ САМУ поведінку, і для кожної групи дай одне спільне ` +
-    `формулювання (claim / why_hurts_booking / action) — як підсумок за ВЕСЬ період.\n` +
-    `Правила: групуй лише справді однакове за суттю (не зливай різні проблеми в одну); у групі мають ` +
-    `бути findings одного type; кожен index використай НЕ БІЛЬШЕ ОДНОГО разу; спершу помилки. ` +
-    `Не вигадуй нових findings — лише групуй наявні. Максимум ${MAX_PERIOD_FINDINGS} груп: залиш ` +
-    `найважливіші (з найбільшою кількістю доказів), решту відкинь.\n` +
-    `МОВА: пиши claim, why_hurts_booking і action ЛИШЕ українською, незалежно від того, якою мовою звучали розмови. Цитати з розмов не перекладай — вони лишаються як є.
-` +
-    `ТЕРМІНОЛОГІЯ: такі дзвінки називай «угода», НЕ вживай слово «продажний» — воно двозначне.`;
+  const system = (await mergePrompt())
+    .replace('{МЕНЕДЖЕР}', managerName)
+    .replace('{МАКСИМУМ}', String(MAX_PERIOD_FINDINGS));
 
   try {
     const raw = await withRetry(
@@ -450,17 +467,7 @@ async function verifyFindingsRelevance(findings) {
     evidence: f.evidence.map((e, ei) => (e.note ? { i: ei, quote: e.quote, measured: e.note } : { i: ei, quote: e.quote })),
   }));
 
-  const system =
-    `Ти суворий рецензент доказів у звіті про роботу менеджера автосервісу. Для КОЖНОГО finding дано ` +
-    `твердження (claim) і пронумеровані цитати з реплік менеджера.\n` +
-    `Визнач, які цитати САМІ ПО СОБІ доводять саме це твердження. Цитата, що нейтральна, загальна, ` +
-    `не про те, або лише побічно стосується, — НЕ підтверджує (не включай її).\n` +
-    `ВАЖЛИВО: якщо в доказі є поле "measured" — це ЗАМІР КОДУ з аудіозапису (порядок реплік, таймкоди), ` +
-    `тобто встановлений ФАКТ, а не припущення. Для таких доказів не вимагай, щоб перебивання чи пауза ` +
-    `були "видні" з самої цитати — цитата тут лише вказує МІСЦЕ в розмові. Оцінюй тільки одне: чи claim ` +
-    `справді описує те явище, яке зафіксовано в "measured".\n` +
-    `Будь суворим: краще менше, ніж притягнуте за вуха. Поверни для кожного finding його index і ` +
-    `масив "supporting" — індекси (i) цитат, що справді підтверджують claim.`;
+  const system = await verifyPrompt();
 
   let out;
   try {
@@ -645,7 +652,4 @@ export {
   MAX_PHRASES,
   DEFAULT_REPORT_GUIDANCE,
   getAnalyzePrompt,
-  getAnalyzePromptInfo,
-  setAnalyzePrompt,
-  resetAnalyzePrompt,
 };

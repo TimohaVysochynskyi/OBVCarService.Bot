@@ -26,22 +26,14 @@ const NO_INTRO = { name: false, company: false };
 // 'info'/'other' calls contribute NO behaviours (so a routine status update never becomes a
 // "sales mistake"). The purpose is also stored per call (calls.call_purpose) for the report's
 // sales-vs-info numeric breakdown.
-import { CALL_PURPOSES, PURPOSE_RULES } from './callPurpose.js';
+import { CALL_PURPOSES, purposeRules } from './callPurpose.js';
+import { definePrompt } from './prompts.js';
 // Did he give his name and the service's name? Asked HERE because this request already runs on
 // every call, so the two booleans cost nothing extra. Rules live in one module with the offline
 // rule-based detector that back-fills history, so the two paths can't drift apart.
-import { INTRO_RULES, verifyIntro } from './managerIntro.js';
+import { introRules, verifyIntro } from './managerIntro.js';
 
-const SYSTEM_PROMPT = `Контекст: менеджер автосервісу (СТО) веде телефонну розмову.
-
-КРОК 0 — чи ПРЕДСТАВИВСЯ менеджер (intro). Заповнюй ЗАВЖДИ, на дзвінку будь-якого типу:
-${INTRO_RULES}
-
-КРОК 1 — визнач ТИП дзвінка (callPurpose):
-${PURPOSE_RULES}
-
-КРОК 2 — поведінки менеджера (items):
-- Якщо callPurpose НЕ "sales" → поверни items ПОРОЖНІМ. Не оцінюй навички продажу на інформаційному дзвінку.
+const DEFAULT_BEHAVIOUR_RULES = `- Якщо callPurpose НЕ "sales" → поверни items ПОРОЖНІМ. Не оцінюй навички продажу на інформаційному дзвінку.
 - Якщо "sales" → виділи КОНКРЕТНІ поведінки САМЕ МЕНЕДЖЕРА (сильні й слабкі), кожну з ДОСЛІВНОЮ цитатою.
 
 Суворі правила для items (лише для sales-дзвінків):
@@ -50,6 +42,36 @@ ${PURPOSE_RULES}
 - Цитата має САМА ПО СОБІ демонструвати цю поведінку. Якщо рядок нейтральний, загальний або лише побічно стосується — НЕ додавай його. Краще 0 поведінок, ніж притягнута за вуха.
 - type: "strength" або "error". label: коротка назва (3-6 слів). stage: найближчий етап продажу зі списку: ${SALES_STAGES.join(' / ')}.
 - Не вигадуй. Не більше 8 поведінок. Для короткого/тривіального дзвінка їх може бути 0.`;
+
+// Split into three editable parts rather than one blob: the owner usually wants to tune ONE of
+// them (what counts as a deal, what counts as an introduction, what counts as a behaviour), and a
+// single giant text would mean re-reading everything to change one line.
+const behaviourRules = definePrompt({
+  key: 'behaviour',
+  group: 'call',
+  job: 'map',
+  button: '🔍 Сильні й слабкі сторони в розмові',
+  title: '🔍 *Сильні й слабкі сторони в розмові*',
+  about:
+    'Що саме AI виписує з кожного дзвінка-угоди як сильну чи слабку поведінку менеджера. ' +
+    'Саме з цих поведінок потім збираються висновки у звіті. ' +
+    '⚠️ Правило «цитата має бути справжньою реплікою менеджера» тримає код і не редагується.',
+  def: DEFAULT_BEHAVIOUR_RULES,
+});
+
+// Assembled per call so an edit takes effect without a restart.
+async function systemPrompt() {
+  return `Контекст: менеджер автосервісу (СТО) веде телефонну розмову.
+
+КРОК 0 — чи ПРЕДСТАВИВСЯ менеджер (intro). Заповнюй ЗАВЖДИ, на дзвінку будь-якого типу:
+${await introRules()}
+
+КРОК 1 — визнач ТИП дзвінка (callPurpose):
+${await purposeRules()}
+
+КРОК 2 — поведінки менеджера (items):
+${await behaviourRules()}`;
+}
 
 const SCHEMA = {
   name: 'call_behaviors',
@@ -113,6 +135,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
   const verifySegments = Array.isArray(segments) && segments.length ? segments : pseudoSegments(transcript);
   if (!transcript || !verifySegments.length) return { version: ANALYSIS_VERSION, callPurpose: 'other', intro: NO_INTRO, items: [] };
 
+  const system = await systemPrompt();
   const raw = await withRetry(
     async () => {
       const res = await fetchOk('openai', 'аналіз поведінки в дзвінку', 'https://api.openai.com/v1/chat/completions', {
@@ -121,7 +144,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
         body: JSON.stringify({
           model: model(),
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: system },
             {
               role: 'user',
               content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,

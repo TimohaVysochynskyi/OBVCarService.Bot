@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { definePrompt } from './prompts.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { normalize } from './quoteMatch.js';
@@ -8,7 +9,7 @@ const MAX_CHARS = 12000;
 const MIN_EVIDENCE_CHARS = 8;
 const NO_EVIDENCE_NEEDED = ['unclear', 'no_answer'];
 
-const SYSTEM = `Ти аналізуєш телефонну розмову менеджера автосервісу (СТО) з клієнтом.
+const DEFAULT_DECLINE = `Ти аналізуєш телефонну розмову менеджера автосервісу (СТО) з клієнтом.
 
 Відомо: клієнта НЕ записали, і СТО при цьому могло взяти цю роботу. Отже причина на боці клієнта або в тому, як пройшла розмова.
 
@@ -26,6 +27,18 @@ ${reasonPromptList(CLIENT_REASONS)}
 - Для будь-якої причини, крім "unclear" і "no_answer", скопіюй ДОСЛІВНО один рядок із розмови, у якому ця причина звучить. Це може бути репліка як клієнта, так і менеджера.
 - Не переказуй і не перекладай — лише точна копія рядка.
 - Якщо дослівного підтвердження немає — обирай "unclear" і лиши evidence порожнім.`;
+
+const declinePrompt = definePrompt({
+  key: 'decline',
+  group: 'call',
+  job: 'decline',
+  button: '🚶 Чому клієнт не записався',
+  title: '🚶 *Чому клієнт не записався*',
+  about:
+    'Причина, з якої пішов клієнт, якого СТО МОГЛО взяти: ціна, «подумаю», поїхав до інших тощо. ' +
+    '⚠️ Перелік самих причин фіксований кодом — редагується те, як AI між ними обирає.',
+  def: DEFAULT_DECLINE,
+});
 
 const SCHEMA = {
   name: 'client_decline',
@@ -61,7 +74,7 @@ async function classifyClientDecline(transcript) {
         body: JSON.stringify({
           model: model(),
           messages: [
-            { role: 'system', content: SYSTEM },
+            { role: 'system', content: await declinePrompt() },
             { role: 'user', content: text.slice(0, MAX_CHARS) },
           ],
           temperature: 0,

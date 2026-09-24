@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { definePrompt } from './prompts.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 
@@ -8,7 +9,7 @@ import { fetchOk } from './http.js';
 // The model is constrained to return EXACTLY one of those names (or null), which also handles
 // colloquial variants ("Володя" -> "Владимир") and guarantees the result groups cleanly with
 // the personal-extension calls of the same person.
-const SYSTEM_PROMPT = `Це транскрипт телефонної розмови автосервісу. Запис моно: обидва голоси (працівник і клієнт) в одному тексті, без розділення. Дзвінок надійшов на спільний телефон, тому працівник представляється на початку розмови.
+const DEFAULT_IDENTIFY = `Це транскрипт телефонної розмови автосервісу. Запис моно: обидва голоси (працівник і клієнт) в одному тексті, без розділення. Дзвінок надійшов на спільний телефон, тому працівник представляється на початку розмови.
 
 Твоє завдання: визначити, ХТО зі списку відомих операторів вів цю розмову — за тим, як представився САМЕ ПРАЦІВНИК автосервісу (не клієнт).
 
@@ -18,6 +19,18 @@ const SYSTEM_PROMPT = `Це транскрипт телефонної розмо
 - Не вгадуй. Краще null, ніж помилкова атрибуція.`;
 
 // roster: array of candidate operator names. Returns one of them, or null.
+const identifyPrompt = definePrompt({
+  key: 'identify',
+  group: 'call',
+  job: 'identify',
+  button: '📞 Хто взяв слухавку (901/902)',
+  title: '📞 *Хто взяв слухавку (901/902)*',
+  about:
+    'На спільних номерах Бінотел не знає, хто відповів, тож AI визначає це з розмови. ' +
+    '⚠️ Впливає на те, кому зараховані дзвінки зі спільних номерів.',
+  def: DEFAULT_IDENTIFY,
+});
+
 async function identifyManager(transcript, roster = []) {
   const candidates = (roster || []).filter(Boolean);
   if (candidates.length === 0) return null;
@@ -50,7 +63,7 @@ async function identifyManager(transcript, roster = []) {
         body: JSON.stringify({
           model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: await identifyPrompt() },
             { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\nТранскрипт:\n${transcript}` },
           ],
           response_format: { type: 'json_schema', json_schema: schema },

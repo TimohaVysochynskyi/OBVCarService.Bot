@@ -1,4 +1,5 @@
 import { withRetry } from './retry.js';
+import { definePrompt } from './prompts.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
@@ -48,7 +49,7 @@ ${reasonPromptList(reasonsOfBucket(b)).replace(/^/gm, '  ')}`
 ).join(`
 `);
 
-const SYSTEM_PROMPT = `Ти аналізуєш телефонну розмову менеджера автосервісу (СТО) з клієнтом.
+const DEFAULT_BLOCKER = `Ти аналізуєш телефонну розмову менеджера автосервісу (СТО) з клієнтом.
 
 ЗАВДАННЯ: визначити, чи клієнта НЕ ВЗЯЛИ на обслуговування САМЕ ЧЕРЕЗ ОБМЕЖЕННЯ САМОГО СТО — тобто менеджер зробив усе, що міг, але сервіс фізично/принципово не міг надати послугу.
 
@@ -126,7 +127,7 @@ const SCHEMA = {
 // measured producing ~1 false positive in 3 (a manager musing "someone who knows should look at the
 // wiring" was read as a refusal), so a strict reviewer that DEFAULTS TO REJECT is what makes the
 // number trustworthy. Same shape as the findings relevance pass in bot/analyze.js.
-const VERIFY_SYSTEM = `Ти СУВОРИЙ рецензент. Інша модель твердить, що в цій розмові СТО не змогло взяти клієнта. Твоє завдання — ВІДКИНУТИ твердження, якщо воно не доведене.
+const DEFAULT_BLOCKER_REVIEW = `Ти СУВОРИЙ рецензент. Інша модель твердить, що в цій розмові СТО не змогло взяти клієнта. Твоє завдання — ВІДКИНУТИ твердження, якщо воно не доведене.
 
 Підтверджуй (confirmed=true) ТІЛЬКИ якщо виконано ВСЕ:
 1. Клієнт у цій розмові справді хотів послугу або запис.
@@ -139,6 +140,31 @@ const VERIFY_SYSTEM = `Ти СУВОРИЙ рецензент. Інша моде
 Відкидай (confirmed=false), якщо цитата насправді про: засмічену деталь («радіатор забитий», «фільтр забитий»), пропозицію клієнтові вирішити («робимо, не робимо»), роздуми про потрібного спеціаліста, запитання клієнта без підтвердження менеджера, або якщо ти просто не впевнений.
 
 Якщо сумніваєшся — confirmed=false.`;
+
+const blockerPrompt = definePrompt({
+  key: 'blocker',
+  group: 'call',
+  job: 'blocker',
+  button: '🚧 Відмови СТО — пошук',
+  title: '🚧 *Відмови СТО — пошук*',
+  about:
+    'Як AI шукає дзвінки, де клієнта не взяло САМЕ СТО (черга, немає деталі, не наш профіль). ' +
+    'Такі дзвінки виключаються зі знаменника конверсії, щоб менеджера не карали за чужу проблему.',
+  def: DEFAULT_BLOCKER,
+});
+
+const blockerReviewPrompt = definePrompt({
+  key: 'blockerReview',
+  group: 'call',
+  job: 'blocker',
+  button: '🚧 Відмови СТО — перевірка',
+  title: '🚧 *Відмови СТО — перевірка*',
+  about:
+    'Другий, суворий прохід: він ВІДКИДАЄ знахідку, якщо вона не доведена. ' +
+    '⚠️ Саме він тримає точність — без нього приблизно кожна третя знахідка була хибною.',
+  def: DEFAULT_BLOCKER_REVIEW,
+});
+
 
 const VERIFY_SCHEMA = {
   name: 'blocker_verdict',
@@ -161,7 +187,7 @@ async function verifyBlocker(transcript, blocker, quote) {
     body: JSON.stringify({
       model: model(),
       messages: [
-        { role: 'system', content: VERIFY_SYSTEM },
+        { role: 'system', content: await blockerReviewPrompt() },
         {
           role: 'user',
           content:
@@ -196,7 +222,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
         body: JSON.stringify({
           model: model(),
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: await blockerPrompt() },
             {
               role: 'user',
               content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,

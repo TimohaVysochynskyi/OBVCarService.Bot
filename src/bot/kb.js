@@ -19,6 +19,7 @@ import {
 import { ROLES } from './access.js';
 import { withProgress, showScreen } from './ui.js';
 import { sendDocExcerpt, downloadOriginal } from './kbClip.js';
+import { definePrompt } from '../core/prompts.js';
 
 const EMBED_MODEL = () => process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
 const CHAT_MODEL = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
@@ -241,7 +242,7 @@ async function embedTexts(texts) {
   return out;
 }
 
-const ANSWER_SYSTEM = `Ти — асистент, що відповідає на запитання працівників автосервісу.
+const DEFAULT_KB_ANSWER = `Ти — асистент, що відповідає на запитання працівників автосервісу.
 
 Джерело правди — наведені фрагменти з внутрішніх посібників компанії. Правила:
 - Відповідай ПЕРЕДУСІМ на основі наведених фрагментів.
@@ -251,6 +252,18 @@ const ANSWER_SYSTEM = `Ти — асистент, що відповідає на
 - usedSources: номери [N] фрагментів, які РЕАЛЬНО використані у відповіді (лише справді потрібні; не перелічуй усі підряд).
 - Відповідь — це ВИСНОВОК своїми словами, стисло й по суті. Не переписуй фрагменти дослівно й довго: система покаже користувачеві самі фрагменти й сторінки окремо, під відповіддю.
 - Пиши ПРОСТИМ текстом (без markdown, без зірочок і решіток), тією ж мовою, що й запитання. НЕ додавай список джерел самостійно — його додасть система.`;
+
+const kbAnswerPrompt = definePrompt({
+  key: 'kbAnswer',
+  group: 'kb',
+  button: '📚 Відповідь із посібників',
+  title: '📚 *Відповідь із посібників*',
+  about:
+    'Як AI відповідає на питання механіків і менеджерів за завантаженими посібниками: ' +
+    'наскільки стисло, чи можна додавати загальні знання. ' +
+    '⚠️ Сам пошук по документах і вирізки сторінок працюють окремо й від цього тексту не залежать.',
+  def: DEFAULT_KB_ANSWER,
+});
 
 const ANSWER_SCHEMA = {
   name: 'kb_answer',
@@ -494,7 +507,7 @@ async function answerStructured(question, hits) {
     : '(релевантних фрагментів не знайдено)';
   return chatJson(
     [
-      { role: 'system', content: ANSWER_SYSTEM },
+      { role: 'system', content: await kbAnswerPrompt() },
       { role: 'user', content: `Питання: ${question}\n\nФрагменти посібників:\n\n${context}` },
     ],
     ANSWER_SCHEMA,

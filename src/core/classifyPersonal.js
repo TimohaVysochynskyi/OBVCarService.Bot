@@ -2,17 +2,12 @@ import { withRetry } from './retry.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { normalize } from './quoteMatch.js';
-import { NON_SALES_PURPOSES, PURPOSE_RULES } from './callPurpose.js';
+import { NON_SALES_PURPOSES, purposeRules } from './callPurpose.js';
+import { definePrompt } from './prompts.js';
 
 const MAX_CHARS = 8000;
 
-const SYSTEM = `Контекст: телефонна розмова на робочому номері працівника автосервісу (СТО).
-
-Уже встановлено, що це НЕ дзвінок-угода. Обери, що це саме:
-
-${PURPOSE_RULES}
-
-Варіант "sales" виключений — не обирай його.
+const DEFAULT_PERSONAL = `Варіант "sales" виключений — не обирай його.
 
 ⚠️ "personal" — РІДКІСНИЙ варіант. За замовчуванням дзвінок на робочому номері РОБОЧИЙ.
 Це РОБОЧІ дзвінки ("other"), а не особисті:
@@ -25,6 +20,30 @@ ${PURPOSE_RULES}
 "personal" обирай ЛИШЕ тоді, коли в розмові є ЯВНА неробоча тема: сім'я, побут, здоров'я, гроші поза роботою, приватні плани, не пов'язані зі СТО.
 
 Поле "evidence": якщо обрав "personal" — скопіюй ДОСЛІВНО один рядок із розмови, у якому видно цю неробочу тему. Не переказуй і не перекладай. Якщо такого рядка немає — це не "personal", обирай "other" і лиши "evidence" порожнім.`;
+
+// The category list itself is injected from the shared 'purpose' prompt rather than duplicated —
+// two copies of the same definitions would drift, and the owner would have to edit both.
+const personalPrompt = definePrompt({
+  key: 'personal',
+  group: 'call',
+  job: 'personal',
+  button: '🏠 Особисті дзвінки',
+  title: '🏠 *Особисті дзвінки*',
+  about:
+    'Як AI відокремлює справді особисті розмови від робочих на робочому номері. ' +
+    '⚠️ Цей розбір НІКОЛИ не робить дзвінок угодою, тож конверсія від нього не зрушить.',
+  def: DEFAULT_PERSONAL,
+});
+
+async function personalSystem() {
+  return `Контекст: телефонна розмова на робочому номері працівника автосервісу (СТО).
+
+Уже встановлено, що це НЕ дзвінок-угода. Обери, що це саме:
+
+${await purposeRules()}
+
+${await personalPrompt()}`;
+}
 
 const SCHEMA = {
   name: 'call_purpose',
@@ -63,7 +82,7 @@ async function classifyNonSalesPurpose(transcript) {
         body: JSON.stringify({
           model: model(),
           messages: [
-            { role: 'system', content: SYSTEM },
+            { role: 'system', content: await personalSystem() },
             { role: 'user', content: text.slice(0, MAX_CHARS) },
           ],
           temperature: 0,

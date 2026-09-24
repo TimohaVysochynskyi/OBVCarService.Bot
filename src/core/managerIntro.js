@@ -1,3 +1,4 @@
+import { definePrompt } from './prompts.js';
 import { findQuote } from './quoteMatch.js';
 
 // Did the manager introduce himself? — one boolean per call, in TWO parts: did he give his NAME,
@@ -175,7 +176,7 @@ function verifyIntro(raw, segments, managerName) {
 // What the per-call model is told. Deliberately phrased around the SPEECH-TO-TEXT damage documented
 // above: the model is the only one of the two paths that can recognise "Авивикар Сервис" as the
 // company, and it will only do that if it is told to expect the mangling.
-const INTRO_RULES = `⚠️ Рядок "Менеджер: <імʼя>" над транскриптом — це СЛУЖБОВА примітка від системи, а НЕ репліка. Те, що імʼя написане там, НЕ означає, що менеджер його вимовив. Суди ВИКЛЮЧНО за словами в самому транскрипті.
+const DEFAULT_INTRO_RULES = `⚠️ Рядок "Менеджер: <імʼя>" над транскриптом — це СЛУЖБОВА примітка від системи, а НЕ репліка. Те, що імʼя написане там, НЕ означає, що менеджер його вимовив. Суди ВИКЛЮЧНО за словами в самому транскрипті.
 - intro.name = чи НАЗВАВ менеджер СВОЄ імʼя ("це Роман", "мене звати Андрій", "Володимир, добрий день"). Клієнтове імʼя чи імʼя колеги — НЕ рахується.
 - intro.nameQuote = ДОСЛІВНИЙ рядок менеджера, у якому він назвався. Якщо такого рядка немає — intro.name = false і nameQuote = "".
 - intro.companyQuote = ДОСЛІВНИЙ рядок менеджера, у якому звучить назва сервісу. Немає — intro.company = false і companyQuote = "".
@@ -185,4 +186,16 @@ const INTRO_RULES = `⚠️ Рядок "Менеджер: <імʼя>" над т�
   ⚠️ АЛЕ якщо назву вимовила ІНША сторона (автовідповідач чужої компанії, клієнт) — це НЕ представлення менеджера.
 - Обидва поля стосуються ПОЧАТКУ розмови — і на вхідному, і на вихідному дзвінку.`;
 
-export { detectIntro, verifyIntro, INTRO_RULES, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };
+const introRules = definePrompt({
+  key: 'intro',
+  group: 'call',
+  job: 'map',
+  button: '🙋 Чи представився менеджер',
+  title: '🙋 *Чи представився менеджер*',
+  about:
+    'Як AI вирішує, чи назвав менеджер своє імʼя та назву сервісу на початку розмови. ' +
+    '⚠️ Сама перевірка (цитата має бути справжньою реплікою менеджера) забезпечується кодом і не редагується.',
+  def: DEFAULT_INTRO_RULES,
+});
+
+export { detectIntro, verifyIntro, introRules, DEFAULT_INTRO_RULES, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };

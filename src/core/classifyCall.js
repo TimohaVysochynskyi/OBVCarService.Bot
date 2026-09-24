@@ -2,13 +2,8 @@ import { withRetry } from "./retry.js";
 import { parseModelJson } from "./errors.js";
 import { fetchOk } from "./http.js";
 import { SALES_STAGES } from "./stages.js";
+import { definePrompt } from "./prompts.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
-import {
-  getStoredScoreRubric,
-  setStoredScoreRubric,
-  clearStoredScoreRubric,
-} from "./store.js";
-
 // Per-call classification: isSuccess (booked/confirmed), weakestStage (one of the shared 4 sales
 // stages — core/stages.js), and communicationScore (1-10). isSuccess and weakestStage are objective
 // and fixed in the prompt; the communicationScore RUBRIC is the tunable "characteristic by which we
@@ -31,23 +26,21 @@ const DEFAULT_SCORE_RUBRIC = `Оцінюй цілісне враження ві�
 • Перебивання клієнта — менеджер починає говорити, коли клієнт не договорив. Одне перебивання — мінус до балу; систематичні перебивання (3 і більше) не дають поставити вище 6, бо менеджер не чує потреби клієнта.
 • Швидкість реакції — довга тиша перед відповіддю на питання клієнта псує враження. Але це НЕ помилка, якщо менеджер попередив («секунду, зараз перевірю», «хвилинку, уточню») або якщо замовк сам клієнт — у такому разі бал не знижуй.`;
 
-// Effective rubric = owner's custom text (app_state.score_rubric) or the built-in default.
-async function getScoreRubric() {
-  return (await getStoredScoreRubric()) || DEFAULT_SCORE_RUBRIC;
-}
-
-async function getScoreRubricInfo() {
-  const custom = await getStoredScoreRubric();
-  return { rubric: custom || DEFAULT_SCORE_RUBRIC, isCustom: Boolean(custom) };
-}
-
-async function setScoreRubric(text) {
-  await setStoredScoreRubric(text);
-}
-
-async function resetScoreRubric() {
-  await clearStoredScoreRubric();
-}
+// Backed by the shared registry, so the owner edits it in the same place as every other prompt.
+// ⚠️ storeKey keeps the original app_state row: the owner's existing custom rubric must survive the
+// move, and a fresh key would silently reset it to the default.
+const getScoreRubric = definePrompt({
+  key: 'score',
+  storeKey: 'score_rubric',
+  group: 'call',
+  job: 'score',
+  button: '⭐️ Оцінка комунікації менеджера',
+  title: '⭐️ *Оцінка комунікації менеджера*',
+  about:
+    'Критерії, за якими AI ставить кожному дзвінку-угоді бал 1-10, вирішує, чи записався клієнт, ' +
+    'і який етап був найслабшим. ⚠️ Сама шкала 1-10 і перелік етапів фіксовані кодом.',
+  def: DEFAULT_SCORE_RUBRIC,
+});
 
 // The rubric is injected as the communicationScore criteria; the rest (context, isSuccess,
 // weakestStage over the shared 4 stages) is fixed.
@@ -119,7 +112,4 @@ export {
   classifyCall,
   DEFAULT_SCORE_RUBRIC,
   getScoreRubric,
-  getScoreRubricInfo,
-  setScoreRubric,
-  resetScoreRubric,
 };
