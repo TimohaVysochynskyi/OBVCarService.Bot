@@ -158,10 +158,13 @@ function verifyIntro(raw, segments, managerName) {
     // it is self-reference or the manager addressing a client of the same name — but it can no
     // longer answer "yes" about a line that contains no name at all.
     name: check(raw?.name, raw?.nameQuote, (t) => hasStem(normalize(t), stems) || hasStem(t.toLowerCase(), stems)),
-    // Deliberately laxer: recognising "Авивикар Сервис" as the company is the one thing the model
-    // can do and the patterns cannot, so requiring a pattern match here would throw away the whole
-    // point. "серв" is the fragment that survived every mangling we measured, so it is the floor.
-    company: check(raw?.company, raw?.companyQuote, (t) => companyMatches(t) || /серв[іи]с/i.test(normalize(t))),
+    // ⚠️ The quoted line must match OUR name's pattern. A first version accepted any line containing
+    // "серв", on the theory that the model could recognise manglings the patterns cannot — and
+    // measured on 100 live calls that let in three OTHER companies: "Вас вітає БМВ Сервіс" (another
+    // service's IVR), "ВБ автосервіс", "брокер сервіс". The theory was also wrong: every one of the
+    // 25 manglings of "OBV" we measured still contains "кар сервіс", which is exactly why that is
+    // the anchor. So the loosening bought no recall and cost precision on the metric that matters.
+    company: check(raw?.company, raw?.companyQuote, (t) => companyMatches(t)),
   };
 }
 
