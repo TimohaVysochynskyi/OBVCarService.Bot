@@ -26,7 +26,11 @@ import { findQuote } from './quoteMatch.js';
 // explicit non-letter class under /u instead.
 const EDGE = '(^|[^\\p{L}])';
 const COMPANY_PATTERNS = [
-  /кар\s*серв[іи]с/iu, // survives every mangling of the "OBV" prefix — the primary signal
+  // Survives every mangling of the "OBV" prefix — the primary signal.
+  // ⚠️ The separator class is not decoration: speech-to-text writes this as one word, two words AND
+  // hyphenated, and an earlier `\s*` here silently missed all three hyphenated cases in the whole
+  // history ("Объяви кар-сервис", "АБВ кар-сервис", "кар-сервіс") — a false NEGATIVE on the metric.
+  /кар[\s\-–—]*серв[іи]с/iu,
   new RegExp(`${EDGE}obv([^\\p{L}]|$)`, 'iu'),
   new RegExp(`${EDGE}о\\s*б\\s*в([^\\p{L}]|$)`, 'iu'),
   new RegExp(`${EDGE}о[- ]?бі[- ]?ві([^\\p{L}]|$)`, 'iu'),

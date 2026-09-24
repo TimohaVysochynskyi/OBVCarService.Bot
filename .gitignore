@@ -12,3 +12,6 @@ report*.json
 report-site/
 report-site*.zip
 .vscode/
+
+# Вивантажені записи розмов для ручної перевірки — це персональні дані клієнтів
+temp/
