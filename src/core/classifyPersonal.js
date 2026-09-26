@@ -4,6 +4,7 @@ import { fetchOk } from './http.js';
 import { normalize } from './quoteMatch.js';
 import { NON_SALES_PURPOSES, purposeRules } from './callPurpose.js';
 import { definePrompt } from './prompts.js';
+import { config } from '../shared/config.js';
 
 const MAX_CHARS = 8000;
 
@@ -45,7 +46,7 @@ const SCHEMA = {
 
 const MIN_EVIDENCE_CHARS = 12;
 
-const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+const model = () => config.openai.analyzeModel;
 
 function evidenceIsReal(transcript, evidence) {
   const quote = normalize(String(evidence || '').replace(/^\s*(Менеджер|Клієнт|Клиент|Оператор)\s*:\s*/i, ''));
@@ -61,7 +62,7 @@ async function classifyNonSalesPurpose(transcript) {
     async () => {
       const res = await fetchOk('openai', 'визначення типу дзвінка', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model(),
           messages: [

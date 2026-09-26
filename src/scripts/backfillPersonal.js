@@ -2,8 +2,9 @@ import 'dotenv/config';
 import { migrate, getNonSalesCalls, setCallPurpose } from '../core/store.js';
 import { classifyNonSalesPurpose } from '../core/classifyPersonal.js';
 import { displayName } from '../bot/operators.js';
+import { config } from '../shared/config.js';
 
-const PAUSE_MS = Number(process.env.BACKFILL_PERSONAL_PAUSE_MS || 400);
+const PAUSE_MS = config.backfill.personalPauseMs;
 
 function parseArgs(argv) {
   const limitIdx = argv.indexOf('--limit');

@@ -3,27 +3,13 @@ import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
 
 const src = readSrc('jobs/processCalls.js');
-const fnSrc = src.match(/const DEFAULT_CHUNK_PAUSE_MS[\s\S]*?function chunkPauseMs\(\)\s*\{[\s\S]*?\n\}/)[0];
-const withEnv = (env) => new Function('process', `${fnSrc}; return chunkPauseMs();`)({ env });
 
-test('дефолт паузи між чанками незмінний', () => {
-  assert.equal(withEnv({}), 1500);
+test('пауза між чанками береться з конфігу, а не з власного розбору env', () => {
+  assert.match(src, /function chunkPauseMs\(\) \{\s*\n\s*return config\.poll\.chunkPauseMs;/);
 });
 
-test('POLL_CHUNK_PAUSE_MS переважує', () => {
-  assert.equal(withEnv({ POLL_CHUNK_PAUSE_MS: '4000' }), 4000);
-});
-
-test('0 = без паузи', () => {
-  assert.equal(withEnv({ POLL_CHUNK_PAUSE_MS: '0' }), 0);
-});
-
-test('сміття в паузі → дефолт', () => {
-  assert.equal(withEnv({ POLL_CHUNK_PAUSE_MS: 'abc' }), 1500);
-});
-
-test('відʼємна пауза → дефолт', () => {
-  assert.equal(withEnv({ POLL_CHUNK_PAUSE_MS: '-5' }), 1500);
+test('ліміт спроб черги теж із конфігу', () => {
+  assert.match(src, /MAX_PENDING_ATTEMPTS = config\.poll\.maxPendingAttempts/);
 });
 
 test('помилка лістингу валить весь діапазон, а не пропускає вікно', () => {

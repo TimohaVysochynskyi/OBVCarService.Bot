@@ -2,8 +2,9 @@ import 'dotenv/config';
 import { migrate, getUnexplainedDeclines, setClientDeclineReason, getDeclineReasonCounts } from '../core/store.js';
 import { classifyClientDecline } from '../core/clientDecline.js';
 import { reasonLabel } from '../core/declineReasons.js';
+import { config } from '../shared/config.js';
 
-const PAUSE_MS = Number(process.env.BACKFILL_DECLINE_PAUSE_MS || 400);
+const PAUSE_MS = config.backfill.declinePauseMs;
 
 function parseArgs(argv) {
   const limitIdx = argv.indexOf('--limit');

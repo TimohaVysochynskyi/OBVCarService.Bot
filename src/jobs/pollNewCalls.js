@@ -7,10 +7,11 @@ import { NOTICES } from '../core/errorTexts.js';
 import { sendAlert } from '../core/telegram.js';
 import { alertOnce, alertText, resetIngestAlerts } from '../core/alerts.js';
 import { processCallsForRange, retryPendingCalls } from './processCalls.js';
+import { config } from '../shared/config.js';
 
 
 async function checkElevenLabsBalance() {
-  if (!process.env.ELEVENLABS_API_KEY) return;
+  if (!config.elevenlabs.apiKey) return;
   const balance = await getElevenLabsBalance();
 
   await alertOnce('elevenlabs_permission', {
@@ -35,7 +36,7 @@ async function checkAudioDiskSpace() {
   const freeMb = await freeSpaceMb();
   if (freeMb == null) return;
 
-  const minFreeMb = Number(process.env.AUDIO_MIN_FREE_MB || 1024);
+  const minFreeMb = config.audio.minFreeMb;
   const stats = freeMb < minFreeMb ? await getAudioArchiveStats().catch(() => null) : null;
   const archiveMb = stats ? Math.round(Number(stats.bytes) / (1024 * 1024)) : null;
 
@@ -46,17 +47,10 @@ async function checkAudioDiskSpace() {
   });
 }
 
-const DEFAULT_REMINDER_MIN = 120;
-
-function outageReminderMin() {
-  const minutes = Number(process.env.BINOTEL_OUTAGE_REMINDER_MIN || DEFAULT_REMINDER_MIN);
-  return Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_REMINDER_MIN;
-}
-
 async function noteBinotelDown(err) {
   return alertOnce('binotel_outage', {
     active: true,
-    reminderMin: outageReminderMin(),
+    reminderMin: config.binotel.outageReminderMin,
     message: ({ first, downFor, since }) =>
       alertText(
         describeError(err, {
@@ -76,7 +70,7 @@ async function noteBinotelUp() {
 }
 
 async function pruneErrorLog() {
-  const keepDays = Number(process.env.ERROR_LOG_KEEP_DAYS || 30);
+  const keepDays = config.poll.errorLogKeepDays;
   const removed = await deleteOldErrorLog(new Date(Date.now() - keepDays * 24 * 3600 * 1000));
   if (removed) console.log(`[poll] прибрано зі журналу інцидентів: ${removed}`);
 }
@@ -86,11 +80,8 @@ async function clearIngestFailureAlerts() {
   if (wasFailing) await sendAlert(NOTICES.ingestRecovered, { icon: '✅' });
 }
 
-const DEFAULT_OVERLAP_MIN = 15;
-
 function checkpointOverlapMs() {
-  const minutes = Number(process.env.POLL_OVERLAP_MIN || DEFAULT_OVERLAP_MIN);
-  return (Number.isFinite(minutes) && minutes >= 0 ? minutes : DEFAULT_OVERLAP_MIN) * 60_000;
+  return config.poll.overlapMin * 60_000;
 }
 
 async function pollNewCalls() {
@@ -99,7 +90,7 @@ async function pollNewCalls() {
 
     const end = new Date();
     const checkpoint = await getCheckpoint();
-    const windowMinutes = Number(process.env.POLL_WINDOW_MINUTES || 20);
+    const windowMinutes = config.poll.windowMinutes;
     const start = checkpoint || new Date(end.getTime() - windowMinutes * 60 * 1000);
 
     console.log(`[poll] checkpoint: ${checkpoint ? checkpoint.toISOString() : '(none, using default window)'}`);

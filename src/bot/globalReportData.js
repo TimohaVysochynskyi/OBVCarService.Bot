@@ -23,6 +23,7 @@ import { reasonLabel, reasonSide } from '../core/declineReasons.js';
 import { displayName, formatPhone } from './operators.js';
 import { collectRangeFindings } from './segments.js';
 import { mergeFindings } from './analyze.js';
+import { config } from '../shared/config.js';
 
 const TOP_N = 3;
 const ALL = 'all';
@@ -450,9 +451,9 @@ function buildDirections(rows) {
   return out;
 }
 
-const REPORT_CONCURRENCY = Number(process.env.GLOBAL_REPORT_CONCURRENCY || 1);
-const REPORT_PAUSE_MS = Number(process.env.GLOBAL_REPORT_PAUSE_MS || 1500);
-const REPORT_BUDGET_MS = Number(process.env.GLOBAL_REPORT_BUDGET_MS || 120000);
+const REPORT_CONCURRENCY = config.report.concurrency;
+const REPORT_PAUSE_MS = config.report.pauseMs;
+const REPORT_BUDGET_MS = config.report.budgetMs;
 
 async function buildGlobalReport({
   analyze = true,

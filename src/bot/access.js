@@ -1,4 +1,5 @@
 import { getBotUser, seedDirector } from '../core/store.js';
+import { config } from '../shared/config.js';
 
 const ROLES = {
   DIRECTOR: 'director',
@@ -90,10 +91,7 @@ function invalidateRole(telegramId) {
 
 async function seedDirectors() {
   const ids = new Set(
-    (process.env.TELEGRAM_BOOTSTRAP_CHAT_IDS || '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => /^\d+$/.test(s) && Number(s) > 0)
+    config.telegram.bootstrapChatIds.filter((s) => /^\d+$/.test(s) && Number(s) > 0)
   );
   for (const id of ids) {
     await seedDirector(id);

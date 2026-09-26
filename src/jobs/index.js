@@ -7,11 +7,20 @@ import { alertOnce, alertText } from '../core/alerts.js';
 import { recordError } from '../core/errorLog.js';
 import { installProcessTraps } from '../core/processTraps.js';
 import { markAlive } from '../core/liveness.js';
+import { config, missingConfig, configIssues } from '../shared/config.js';
+import { NOTICES } from '../core/errorTexts.js';
 
 installProcessTraps('poll');
 
+const missing = missingConfig(['db', 'binotel', 'openai']);
+if (missing.length) {
+  console.error(`[poll] ${NOTICES.missingEnv(missing)}`);
+  process.exit(1);
+}
+for (const issue of configIssues()) console.warn(`[poll] налаштування: ${issue}`);
+
 async function main() {
-  const jobType = process.env.JOB_TYPE || 'poll';
+  const jobType = config.poll.jobType;
   console.log(`[index] starting job: ${jobType}`);
 
   await migrate();

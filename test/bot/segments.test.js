@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
+import { config } from '../../src/shared/config.js';
 
 const seg = readSrc('bot/segments.js');
 const fn = seg.match(/async function collectRangeFindings\([\s\S]*?\n\}/)[0];
@@ -54,15 +55,18 @@ test('на кешованому дні витримки немає', () => {
 });
 
 test('звіт іде по одному дню за раз', () => {
-  assert.match(data, /GLOBAL_REPORT_CONCURRENCY \|\| 1/);
+  assert.match(data, /REPORT_CONCURRENCY = config\.report\.concurrency/);
+  assert.equal(config.report.concurrency, 1);
 });
 
 test('між днями півтори секунди', () => {
-  assert.match(data, /GLOBAL_REPORT_PAUSE_MS \|\| 1500/);
+  assert.match(data, /REPORT_PAUSE_MS = config\.report\.pauseMs/);
+  assert.equal(config.report.pauseMs, 1500);
 });
 
 test('бюджет команди — дві хвилини', () => {
-  assert.match(data, /GLOBAL_REPORT_BUDGET_MS \|\| 120000/);
+  assert.match(data, /REPORT_BUDGET_MS = config\.report\.budgetMs/);
+  assert.equal(config.report.budgetMs, 120000);
 });
 
 test('бюджет 0 = без обмеження', () => {

@@ -5,9 +5,10 @@ import { transcribeAudio } from '../core/transcribe.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { classifyCall } from '../core/classifyCall.js';
 import { displayName } from '../bot/operators.js';
+import { config } from '../shared/config.js';
 
 async function main() {
-  if (!process.env.ELEVENLABS_API_KEY) {
+  if (!config.elevenlabs.apiKey) {
     console.error('[backfill] ELEVENLABS_API_KEY is not set — timecodes need ElevenLabs. Aborting.');
     process.exit(1);
   }

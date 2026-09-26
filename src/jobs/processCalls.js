@@ -12,9 +12,10 @@ import { appError, classify, describeError, isHopeless, reviveError } from '../c
 import { NOTICES } from '../core/errorTexts.js';
 import { alertText } from '../core/alerts.js';
 import { recordError } from '../core/errorLog.js';
+import { config } from '../shared/config.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;
-const MAX_PENDING_ATTEMPTS = Number(process.env.MAX_PENDING_ATTEMPTS || 20);
+const MAX_PENDING_ATTEMPTS = config.poll.maxPendingAttempts;
 
 function splitIntoChunks(start, end) {
   const chunks = [];
@@ -177,11 +178,8 @@ async function processChunk(start, end, roster) {
   }
 }
 
-const DEFAULT_CHUNK_PAUSE_MS = 1500;
-
 function chunkPauseMs() {
-  const ms = Number(process.env.POLL_CHUNK_PAUSE_MS || DEFAULT_CHUNK_PAUSE_MS);
-  return Number.isFinite(ms) && ms >= 0 ? ms : DEFAULT_CHUNK_PAUSE_MS;
+  return config.poll.chunkPauseMs;
 }
 
 async function processCallsForRange(start, end) {

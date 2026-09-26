@@ -4,9 +4,10 @@ import { join } from 'node:path';
 import { InputFile } from 'grammy';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { ffmpegAvailable, cutMp3 } from '../core/ffmpeg.js';
+import { config } from '../shared/config.js';
 
 
-const PAD = Number(process.env.AUDIO_CLIP_PAD_SEC || 3);
+const PAD = config.audio.clipPadSec;
 const MAX_CLIPS_PER_FINDING = 3;
 const CAPTION_QUOTE_MAX = 300;
 

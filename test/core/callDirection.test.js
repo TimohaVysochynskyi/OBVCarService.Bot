@@ -98,9 +98,10 @@ test('і не звертається до OpenAI напряму', () => {
   assert.ok(!script.includes('api.openai.com'));
 });
 
-test('увесь його світ — Binotel, база і словник напрямків', () => {
+test('увесь його світ — Binotel, база, словник напрямків і конфіг', () => {
   const imports = [...script.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(imports.sort(), ['../core/binotel.js', '../core/callDirection.js', '../core/store.js']);
+  assert.deepEqual(imports.sort(),
+    ['../core/binotel.js', '../core/callDirection.js', '../core/store.js', '../shared/config.js']);
 });
 
 test('бере дані лише з лістингу Binotel', () => {

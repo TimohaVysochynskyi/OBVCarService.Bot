@@ -2,14 +2,15 @@ import { withRetry } from './retry.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk, fetchRaw } from './http.js';
 import { probeChannels } from './audioMeta.js';
+import { config } from '../shared/config.js';
 
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 const SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
-const sttModel = () => process.env.ELEVENLABS_STT_MODEL || 'scribe_v1';
-const numSpeakers = () => process.env.ELEVENLABS_NUM_SPEAKERS || '2';
+const sttModel = () => config.elevenlabs.sttModel;
+const numSpeakers = () => config.elevenlabs.numSpeakers;
 
 async function sttDiarize(audioBlob, { multichannel = false } = {}) {
-  const key = process.env.ELEVENLABS_API_KEY;
+  const key = config.elevenlabs.apiKey;
   if (!key) throw new Error('ELEVENLABS_API_KEY is not set');
   return withRetry(
     async () => {
@@ -24,7 +25,7 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
         form.append('diarize', 'true');
         form.append('num_speakers', numSpeakers());
       }
-      if (process.env.CALL_LANGUAGE) form.append('language_code', process.env.CALL_LANGUAGE);
+      if (config.call.language) form.append('language_code', config.call.language);
 
       const res = await fetchOk('elevenlabs', 'транскрипція розмови', STT_URL, {
         method: 'POST',
@@ -37,27 +38,18 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
   );
 }
 
-const DEFAULT_USD_PER_1000_CREDITS = 0.3642;
-
-const DEFAULT_MIN_BALANCE_USD = 3.31;
-
-const envNumber = (name, fallback) => {
-  const value = Number(process.env[name]);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-};
-
 function creditsToUsd(credits) {
   const amount = Number(credits);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
-  return (amount / 1000) * envNumber('ELEVENLABS_USD_PER_1000_CREDITS', DEFAULT_USD_PER_1000_CREDITS);
+  return (amount / 1000) * config.elevenlabs.usdPer1000Credits;
 }
 
 function minBalanceUsd() {
-  return envNumber('ELEVENLABS_MIN_BALANCE_USD', DEFAULT_MIN_BALANCE_USD);
+  return config.elevenlabs.minBalanceUsd;
 }
 
 async function getElevenLabsBalance() {
-  const key = process.env.ELEVENLABS_API_KEY;
+  const key = config.elevenlabs.apiKey;
   if (!key) return { ok: false, reason: 'no_key' };
   try {
     const res = await fetchRaw('elevenlabs', 'перевірка балансу', SUBSCRIPTION_URL, {
@@ -195,9 +187,9 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
       async () => {
         const res = await fetchOk('openai', 'визначення ролей мовців', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
+            model: config.openai.analyzeModel,
             messages: [
               { role: 'system', content: system },
               { role: 'user', content: body },

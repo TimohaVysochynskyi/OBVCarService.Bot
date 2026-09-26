@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { config } from '../shared/config.js';
 
 
-const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
+const FFPROBE = config.audio.ffprobePath;
 
 function runFfprobe(args) {
   return new Promise((resolve, reject) => {

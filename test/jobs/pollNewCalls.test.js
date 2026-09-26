@@ -3,8 +3,6 @@ import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
 
 const poll = readSrc('jobs/pollNewCalls.js');
-const fnSrc = poll.match(/const DEFAULT_OVERLAP_MIN[\s\S]*?function checkpointOverlapMs\(\)\s*\{[\s\S]*?\n\}/)[0];
-const withEnv = (env) => new Function('process', `${fnSrc}; return checkpointOverlapMs();`)({ env });
 
 const CRON = 15 * 60000;
 const CALL_START = new Date(10 * CRON - 11000);
@@ -21,24 +19,13 @@ function leaks(overlapMs) {
   return true;
 }
 
-test('дефолт перекриття = 15 хв', () => {
-  assert.equal(withEnv({}), 15 * 60000);
+test('перекриття береться з конфігу, а не з власного розбору env', () => {
+  assert.match(poll, /function checkpointOverlapMs\(\) \{\s*\n\s*return config\.poll\.overlapMin \* 60_000;/);
 });
 
-test('POLL_OVERLAP_MIN переважує', () => {
-  assert.equal(withEnv({ POLL_OVERLAP_MIN: '5' }), 5 * 60000);
-});
-
-test('0 = вимкнути перекриття (стара поведінка)', () => {
-  assert.equal(withEnv({ POLL_OVERLAP_MIN: '0' }), 0);
-});
-
-test('сміття в env → дефолт, а не NaN', () => {
-  assert.equal(withEnv({ POLL_OVERLAP_MIN: 'дурня' }), 15 * 60000);
-});
-
-test('відʼємне перекриття відкидається', () => {
-  assert.equal(withEnv({ POLL_OVERLAP_MIN: '-9' }), 15 * 60000);
+test('вікно першого прогону і нагадування про аварію теж із конфігу', () => {
+  assert.match(poll, /config\.poll\.windowMinutes/);
+  assert.match(poll, /reminderMin: config\.binotel\.outageReminderMin/);
 });
 
 test('чекпоінт ставиться на end мінус перекриття', () => {

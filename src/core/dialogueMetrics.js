@@ -1,11 +1,9 @@
+import { config } from '../shared/config.js';
 
 const CUT_OFF_RE = /(?:[-–—‐‑]{1,3}|\.{2,3}|…)$/u;
 
-const DEFAULT_LONG_PAUSE_SEC = 4;
-
 function longPauseSec() {
-  const n = Number(process.env.LONG_PAUSE_SEC);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_LONG_PAUSE_SEC;
+  return config.call.longPauseSec;
 }
 
 const isClient = (s) => s?.role === 'client';
@@ -128,5 +126,4 @@ export {
   mmss,
   longPauseSec,
   CUT_OFF_RE,
-  DEFAULT_LONG_PAUSE_SEC,
 };

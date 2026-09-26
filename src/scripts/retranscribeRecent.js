@@ -3,8 +3,9 @@ import { getOperators, getRecentCallsForOperator, updateCallTranscript } from '.
 import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { displayName, hasAlias } from '../bot/operators.js';
+import { config } from '../shared/config.js';
 
-const PER_OPERATOR = Number(process.env.RETRANSCRIBE_LIMIT || 5);
+const PER_OPERATOR = config.backfill.retranscribeLimit;
 
 function isPersonOperator(name) {
   if (!name) return false;
@@ -12,7 +13,7 @@ function isPersonOperator(name) {
 }
 
 async function main() {
-  if (!process.env.ELEVENLABS_API_KEY) {
+  if (!config.elevenlabs.apiKey) {
     console.error('[retranscribe] ELEVENLABS_API_KEY is not set — this script is meant to use ElevenLabs. Aborting.');
     process.exit(1);
   }

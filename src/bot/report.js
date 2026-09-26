@@ -19,6 +19,7 @@ import { BLOCKER_LABELS } from '../core/dealBlocker.js';
 import { withProgress, sendLong } from './ui.js';
 import { displayName, formatPhone } from './operators.js';
 import { kyivParts, kyivDaySegments, startOfDay, formatKyiv, shortDate } from './time.js';
+import { config } from '../shared/config.js';
 
 const NO_SALES_TEXT =
   'За цей період менеджер не мав дзвінків-угод, тому оцінка навичок продажу наразі неможлива. Вище наведені кількісні показники роботи.';
@@ -371,7 +372,7 @@ async function maybeSendScheduledReport(api) {
   if (!slots.length) return;
   if (running) return;
 
-  const graceMs = Number(process.env.SEGMENT_GRACE_MIN || 10) * 60000;
+  const graceMs = config.report.segmentGraceMin * 60000;
   const { dateStr } = kyivParts(now);
   const daySegs = kyivDaySegments(now, slots);
   const delivered = await getDeliveredSlots();

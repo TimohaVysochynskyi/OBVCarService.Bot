@@ -1,18 +1,12 @@
 import pg from 'pg';
 import { PERSONAL_OPERATORS } from './phoneLines.js';
+import { config } from '../shared/config.js';
 
 const { Pool } = pg;
 
-function sslConfig() {
-  const url = process.env.DATABASE_URL || '';
-  if (/\bsslmode=disable\b/i.test(url)) return false;
-  if (/@(localhost|127\.0\.0\.1|\[::1\])[:/]/i.test(url)) return false;
-  return { rejectUnauthorized: false };
-}
-
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: sslConfig(),
+  connectionString: config.db.url,
+  ssl: config.db.ssl,
 });
 
 let poolErrorHandler = null;

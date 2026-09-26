@@ -1,4 +1,5 @@
 import { httpError } from './errors.js';
+import { config } from '../shared/config.js';
 
 
 const DEFAULT_TIMEOUT_MS = {
@@ -13,8 +14,7 @@ const FALLBACK_TIMEOUT_MS = 60_000;
 
 function timeoutFor(provider, override) {
   if (override) return override;
-  const fromEnv = Number(process.env.HTTP_TIMEOUT_MS);
-  if (Number.isFinite(fromEnv) && fromEnv > 0) return fromEnv;
+  if (config.http.timeoutMs) return config.http.timeoutMs;
   return DEFAULT_TIMEOUT_MS[provider] ?? FALLBACK_TIMEOUT_MS;
 }
 

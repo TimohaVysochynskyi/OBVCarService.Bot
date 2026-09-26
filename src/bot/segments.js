@@ -13,10 +13,11 @@ import { reduceFindingsConsistent, getAnalyzePrompt, MAX_PHRASES } from './analy
 import { getScoreRubric } from '../core/classifyCall.js';
 import { kyivDaySegments } from './time.js';
 import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
+import { config } from '../shared/config.js';
 
 
 const SEGMENT_ANALYSIS_VERSION = 1;
-const PASSES = Math.max(1, Number(process.env.SEGMENT_CONSISTENCY_PASSES || 3));
+const PASSES = config.report.segmentPasses;
 const RECENT_MS = 24 * 3600 * 1000;
 
 const shortHash = (s) => createHash('sha1').update(String(s || '')).digest('hex').slice(0, 12);
@@ -48,7 +49,7 @@ async function segmentMeta(passes) {
   return {
     rubricHash: shortHash(rubric),
     promptHash: shortHash(prompt),
-    model: process.env.OPENAI_REPORT_MODEL || 'gpt-4o',
+    model: config.openai.reportModel,
     passes,
   };
 }

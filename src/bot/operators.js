@@ -1,3 +1,5 @@
+import { config } from '../shared/config.js';
+
 const DEFAULT_ALIASES = {};
 
 function parseAliases(raw) {
@@ -12,7 +14,7 @@ function parseAliases(raw) {
   return map;
 }
 
-const OPERATOR_ALIASES = parseAliases(process.env.OPERATOR_ALIASES);
+const OPERATOR_ALIASES = parseAliases(config.lines.aliasesRaw);
 
 function displayName(name) {
   return (name != null && OPERATOR_ALIASES[name]) || name;

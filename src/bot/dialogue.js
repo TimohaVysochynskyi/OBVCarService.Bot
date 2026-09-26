@@ -1,6 +1,7 @@
 import { withRetry } from '../core/retry.js';
 import { modelContent } from '../core/errors.js';
 import { fetchOk } from '../core/http.js';
+import { config } from '../shared/config.js';
 
 const DIALOGUE_SYSTEM = `Тобі дано транскрипт телефонної розмови в автосервісі між МЕНЕДЖЕРОМ (працівник сервісу) і КЛІЄНТОМ. Запис моно, без розділення каналів, тому репліки не розмічені.
 
@@ -19,11 +20,11 @@ async function formatDialogue(transcript) {
       const res = await fetchOk('openai', 'форматування діалогу', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${config.openai.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
+          model: config.openai.analyzeModel,
           messages: [
             { role: 'system', content: DIALOGUE_SYSTEM },
             { role: 'user', content: text },

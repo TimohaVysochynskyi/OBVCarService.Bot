@@ -17,6 +17,7 @@ import { HEALTH } from '../core/errorTexts.js';
 import { ffmpegAvailable } from '../core/ffmpeg.js';
 import { showScreen } from './ui.js';
 import { formatKyiv } from './time.js';
+import { config } from '../shared/config.js';
 
 
 const PROBE_TIMEOUT_MS = 8000;
@@ -42,7 +43,7 @@ function ageMinutes(at) {
 function ffprobeAvailable() {
   return new Promise((resolve) => {
     try {
-      const p = spawn(process.env.FFPROBE_PATH || 'ffprobe', ['-version']);
+      const p = spawn(config.audio.ffprobePath, ['-version']);
       const timer = setTimeout(() => {
         p.kill('SIGKILL');
         resolve(false);
@@ -73,20 +74,20 @@ async function checkBinotel() {
 }
 
 async function checkOpenAi() {
-  if (!process.env.OPENAI_API_KEY) return { status: FAIL, detail: HEALTH.noKey };
-  const model = process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+  if (!config.openai.apiKey) return { status: FAIL, detail: HEALTH.noKey };
+  const model = config.openai.analyzeModel;
   await fetchOk(
     'openai',
     'перевірка ключа',
     `https://api.openai.com/v1/models/${encodeURIComponent(model)}`,
-    { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } },
+    { headers: { Authorization: `Bearer ${config.openai.apiKey}` } },
     { timeoutMs: PROBE_TIMEOUT_MS }
   );
   return { status: OK, detail: HEALTH.openAiOk };
 }
 
 async function checkElevenLabs() {
-  if (!process.env.ELEVENLABS_API_KEY) return { status: WARN, detail: HEALTH.byCode('ELV-NOKEY') };
+  if (!config.elevenlabs.apiKey) return { status: WARN, detail: HEALTH.byCode('ELV-NOKEY') };
   const balance = await getElevenLabsBalance();
   if (!balance.ok) {
     if (balance.reason === 'missing_permission') return { status: WARN, detail: HEALTH.byCode('ELV-PERM') };
@@ -111,7 +112,7 @@ async function checkAudioTools() {
 async function checkDisk() {
   const freeMb = await freeSpaceMb();
   if (freeMb == null) return { status: WARN, detail: HEALTH.diskUnknown };
-  const minFreeMb = Number(process.env.AUDIO_MIN_FREE_MB || 1024);
+  const minFreeMb = config.audio.minFreeMb;
   const stats = await getAudioArchiveStats().catch(() => null);
   const archiveMb = stats ? Math.round(Number(stats.bytes) / (1024 * 1024)) : null;
   return {
@@ -124,7 +125,7 @@ async function checkIngest() {
   const [beat, checkpoint] = await Promise.all([getHeartbeat('poll'), getCheckpoint()]);
   const beatAge = ageMinutes(beat);
   if (beatAge == null) return { status: WARN, detail: HEALTH.ingestUnknown };
-  const maxMin = Number(process.env.POLL_STALE_MAX_MIN || 45);
+  const maxMin = config.liveness.pollMaxMin;
   return {
     status: beatAge > maxMin ? FAIL : OK,
     detail: HEALTH.ingest(beatAge, ageMinutes(checkpoint)),

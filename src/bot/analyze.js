@@ -6,11 +6,12 @@ import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
 import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
+import { config } from '../shared/config.js';
 
 
 const MIN_EVIDENCE = 2;
 const MAX_PHRASES = 5;
-const reduceModel = () => process.env.OPENAI_REPORT_MODEL || 'gpt-4o';
+const reduceModel = () => config.openai.reportModel;
 
 const getAnalyzePrompt = definePrompt({
   key: 'reportGuidance',
@@ -312,7 +313,7 @@ async function mergeFindings(managerName, findings) {
       async () => {
         const res = await fetchOk('openai', 'зведення знахідок за період', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: reduceModel(),
             messages: [
@@ -352,7 +353,7 @@ async function verifyFindingsRelevance(findings) {
       async () => {
         const res = await fetchOk('openai', 'перевірка релевантності доказів', 'https://api.openai.com/v1/chat/completions', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: reduceModel(),
             messages: [
@@ -408,7 +409,7 @@ async function runReducePass(managerName, candidates, stats) {
     async () => {
       const res = await fetchOk('openai', 'аналіз дзвінків за період', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: reduceModel(),
           messages: [

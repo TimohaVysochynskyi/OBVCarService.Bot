@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
+import { config } from '../shared/config.js';
 
 
-const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
-const FFMPEG_TIMEOUT_MS = Number(process.env.FFMPEG_TIMEOUT_MS || 60_000);
+const FFMPEG = config.audio.ffmpegPath;
+const FFMPEG_TIMEOUT_MS = config.audio.ffmpegTimeoutMs;
 const PROBE_TIMEOUT_MS = 5_000;
 
 let probe = null;

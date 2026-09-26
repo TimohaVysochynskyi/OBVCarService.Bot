@@ -2,6 +2,7 @@ import { withRetry } from './retry.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { transcribeDiarized } from './elevenlabs.js';
+import { config } from '../shared/config.js';
 
 const PROMPTS = {
   uk: 'Це телефонна розмова автосервісу українською мовою. Часто трапляються розмовні форми та суржик (напр. "да", "шо", "тіки", "нема") — це все українська мова, транскрибуй українською.',
@@ -14,13 +15,13 @@ async function transcribeOnce(audioBlob, { language, prompt } = {}) {
     async () => {
       const form = new FormData();
       form.append('file', audioBlob, 'call.mp3');
-      form.append('model', process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe');
+      form.append('model', config.openai.transcribeModel);
       if (language) form.append('language', language);
       if (prompt) form.append('prompt', prompt);
 
       const res = await fetchOk('openai', 'транскрипція розмови', 'https://api.openai.com/v1/audio/transcriptions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}` },
         body: form,
       });
       const data = await res.json();
@@ -56,11 +57,11 @@ async function detectLanguages(text) {
       const res = await fetchOk('openai', 'визначення мови розмови', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${config.openai.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
+          model: config.openai.analyzeModel,
           messages: [
             { role: 'system', content: DETECT_SYSTEM },
             { role: 'user', content: text.slice(0, 4000) },
@@ -96,7 +97,7 @@ async function transcribeAudio(audio, { managerName, audioPath } = {}) {
   const audioBlob = await toBlob(audio);
   console.log(`[transcribe] audio ready: ${audioBlob.size} bytes`);
 
-  if (process.env.ELEVENLABS_API_KEY) {
+  if (config.elevenlabs.apiKey) {
     try {
       const result = await transcribeDiarized(audioBlob, managerName, { audioPath });
       console.log(`[transcribe] ElevenLabs OK — ${result.transcript.length} chars (diarized, ${result.segments?.length ?? 0} segments)`);
@@ -108,7 +109,7 @@ async function transcribeAudio(audio, { managerName, audioPath } = {}) {
 
   console.log('[transcribe] transcribing via OpenAI (plain, no diarization)...');
 
-  const forced = process.env.CALL_LANGUAGE;
+  const forced = config.call.language;
   if (forced) {
     const text = await transcribeOnce(audioBlob, { language: forced, prompt: PROMPTS[forced] });
     console.log(`[transcribe] received ${text.length} chars (forced ${forced})`);

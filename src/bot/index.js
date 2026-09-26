@@ -37,17 +37,21 @@ import { describeError } from '../core/errors.js';
 import { recordError } from '../core/errorLog.js';
 import { sendAlert } from '../core/telegram.js';
 import { alertText } from '../core/alerts.js';
+import { NOTICES } from '../core/errorTexts.js';
+import { config, missingConfig, configIssues } from '../shared/config.js';
 
 const kbState = { ready: false };
 
 installProcessTraps('bot');
 
-const token = process.env.TELEGRAM_BOT_TOKEN;
-if (!token) {
-  throw new Error('TELEGRAM_BOT_TOKEN is not set - put the token of the clean bot from @BotFather there');
+const missing = missingConfig(['db', 'telegram']);
+if (missing.length) {
+  console.error(`[bot] ${NOTICES.missingEnv(missing)}`);
+  process.exit(1);
 }
+for (const issue of configIssues()) console.warn(`[bot] налаштування: ${issue}`);
 
-const bot = new Bot(token);
+const bot = new Bot(config.telegram.token);
 installMessageTracker(bot);
 
 bot.use(session({ initial: () => ({ awaiting: null, screenId: null }) }));

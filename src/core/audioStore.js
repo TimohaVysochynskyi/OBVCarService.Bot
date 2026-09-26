@@ -5,12 +5,13 @@ import { fileURLToPath } from 'node:url';
 import { getCallRecordUrl } from './binotel.js';
 import { getCallAudio } from './store.js';
 import { withRetry } from './retry.js';
+import { config } from '../shared/config.js';
 
 
 const DEFAULT_ROOT = fileURLToPath(new URL('../../data/recordings', import.meta.url));
 
 function storageRoot() {
-  const configured = process.env.AUDIO_STORAGE_DIR;
+  const configured = config.audio.storageDir;
   if (!configured) return DEFAULT_ROOT;
   return isAbsolute(configured) ? configured : resolve(process.cwd(), configured);
 }

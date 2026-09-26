@@ -3,11 +3,12 @@ import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
 import { SALES_STAGES } from './stages.js';
+import { config } from '../shared/config.js';
 
 
 const ANALYSIS_VERSION = 2;
 const MAX_ITEMS = 8;
-const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+const model = () => config.openai.analyzeModel;
 const NO_INTRO = { name: false, company: false };
 
 
@@ -100,7 +101,7 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
     async () => {
       const res = await fetchOk('openai', 'аналіз поведінки в дзвінку', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model(),
           messages: [

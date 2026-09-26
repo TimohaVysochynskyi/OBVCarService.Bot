@@ -4,6 +4,7 @@ import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { normalize } from './quoteMatch.js';
 import { CLIENT_REASON_KEYS, CLIENT_REASONS, reasonPromptList } from './declineReasons.js';
+import { config } from '../shared/config.js';
 
 const MAX_CHARS = 12000;
 const MIN_EVIDENCE_CHARS = 8;
@@ -34,7 +35,7 @@ const SCHEMA = {
   },
 };
 
-const model = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+const model = () => config.openai.analyzeModel;
 
 function evidenceIsReal(transcript, evidence) {
   const quote = normalize(String(evidence || '').replace(/^\s*(Менеджер|Клієнт|Клиент|Оператор)\s*:\s*/i, ''));
@@ -50,7 +51,7 @@ async function classifyClientDecline(transcript) {
     async () => {
       const res = await fetchOk('openai', 'причина відмови клієнта', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model(),
           messages: [

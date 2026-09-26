@@ -6,12 +6,10 @@ import crypto from 'node:crypto';
 import { InputFile } from 'grammy';
 import { PDFDocument } from 'pdf-lib';
 import { withRetry } from '../core/retry.js';
+import { config } from '../shared/config.js';
 
 
-const PAD_PAGES = () => {
-  const n = Number(process.env.KB_CLIP_PAD_PAGES);
-  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1;
-};
+const PAD_PAGES = () => config.report.kbClipPadPages;
 
 const cacheDir = () => path.join(os.tmpdir(), 'obv-kb-cache');
 const cacheName = (fileId) => `${crypto.createHash('sha1').update(fileId).digest('hex')}.bin`;
@@ -19,7 +17,7 @@ const cacheName = (fileId) => `${crypto.createHash('sha1').update(fileId).digest
 const excerptFileIds = new Map();
 
 async function fetchTelegramFile(fileId) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = config.telegram.token;
   const meta = await withRetry(
     async () => {
       const res = await fetchOk('telegram', 'getFile', `https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(fileId)}`);

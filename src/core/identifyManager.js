@@ -2,6 +2,7 @@ import { withRetry } from './retry.js';
 import { definePrompt } from './prompts.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
+import { config } from '../shared/config.js';
 
 const identifyPrompt = definePrompt({
   key: 'identify',
@@ -40,11 +41,11 @@ async function identifyManager(transcript, roster = []) {
       const res = await fetchOk('openai', 'визначення менеджера з розмови', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${config.openai.apiKey}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini',
+          model: config.openai.analyzeModel,
           messages: [
             { role: 'system', content: await identifyPrompt() },
             { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\nТранскрипт:\n${transcript}` },

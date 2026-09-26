@@ -20,9 +20,10 @@ import { ROLES } from './access.js';
 import { withProgress, showScreen } from './ui.js';
 import { sendDocExcerpt, downloadOriginal } from './kbClip.js';
 import { definePrompt } from '../core/prompts.js';
+import { config } from '../shared/config.js';
 
-const EMBED_MODEL = () => process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
-const CHAT_MODEL = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
+const EMBED_MODEL = () => config.openai.embedModel;
+const CHAT_MODEL = () => config.openai.analyzeModel;
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
 const AUDIENCE_LABEL = { mechanic: '🔧 Механікам', manager: '💼 Менеджерам', both: '👥 Обом' };
@@ -196,7 +197,7 @@ async function embedTexts(texts) {
       async () => {
         const res = await fetchOk('openai', 'побудова векторів для пошуку', 'https://api.openai.com/v1/embeddings', {
           method: 'POST',
-          headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: EMBED_MODEL(), input: batch }),
         });
         const data = await res.json();
@@ -272,7 +273,7 @@ async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 
     async () => {
       const res = await fetchOk('openai', label, 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: CHAT_MODEL(),
           messages,

@@ -1,11 +1,7 @@
 import 'dotenv/config';
 import { migrate, getOperatorRoster, getNumericManagerCalls, updateManagerName } from '../core/store.js';
 import { identifyManager } from '../core/identifyManager.js';
-
-const SHARED_EXTENSIONS = (process.env.SHARED_EXTENSIONS || '901,902')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+import { SHARED_EXTENSIONS } from '../core/phoneLines.js';
 
 async function main() {
   await migrate();

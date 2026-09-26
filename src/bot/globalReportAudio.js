@@ -5,15 +5,16 @@ import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { ffmpegAvailable, cutMp3 } from '../core/ffmpeg.js';
+import { config } from '../shared/config.js';
 
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIO_DIR = 'audio';
-const PAD = Number(process.env.AUDIO_CLIP_PAD_SEC || 3);
+const PAD = config.audio.clipPadSec;
 const MAX_CLIP_SEC = 90;
 
 function siteDir() {
-  const configured = process.env.REPORT_SITE_DIR;
+  const configured = config.report.siteDir;
   if (configured) return resolve(configured);
   return join(REPO_ROOT, 'data', 'report-site');
 }

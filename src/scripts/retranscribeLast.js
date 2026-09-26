@@ -4,11 +4,12 @@ import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeDiarized } from '../core/elevenlabs.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { displayName } from '../bot/operators.js';
+import { config } from '../shared/config.js';
 
-const LIMIT = Number(process.env.RETRANSCRIBE_LAST_LIMIT || 7);
+const LIMIT = config.backfill.retranscribeLastLimit;
 
 async function main() {
-  if (!process.env.ELEVENLABS_API_KEY) {
+  if (!config.elevenlabs.apiKey) {
     console.error('[retranscribe:last] ELEVENLABS_API_KEY is not set — this script must use ElevenLabs. Aborting.');
     process.exit(1);
   }

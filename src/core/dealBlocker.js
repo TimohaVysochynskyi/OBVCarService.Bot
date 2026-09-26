@@ -5,6 +5,7 @@ import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
 import { pseudoSegments } from './analyzeCall.js';
 import { SERVICE_REASON_KEYS, bucketOfReason, reasonsOfBucket, reasonPromptList } from './declineReasons.js';
+import { config } from '../shared/config.js';
 
 
 const NO_BLOCKER = 'none';
@@ -22,7 +23,7 @@ const BLOCKER_TITLES = {
   out_of_scope: 'Не наш профіль',
 };
 
-const model = () => process.env.OPENAI_BLOCKER_MODEL || 'gpt-4o';
+const model = () => config.openai.blockerModel;
 
 const REASON_SECTION = DEAL_BLOCKERS.map(
   (b) => `  ${BLOCKER_COLUMNS[b]} (${b}):
@@ -85,7 +86,7 @@ const VERIFY_SCHEMA = {
 async function verifyBlocker(transcript, blocker, quote) {
   const res = await fetchOk('openai', 'перевірка незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: model(),
       messages: [
@@ -115,7 +116,7 @@ async function detectDealBlocker(transcript, segments, managerName) {
     async () => {
       const res = await fetchOk('openai', 'пошук незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: model(),
           messages: [

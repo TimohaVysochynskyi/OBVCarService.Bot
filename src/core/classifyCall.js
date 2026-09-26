@@ -4,6 +4,7 @@ import { fetchOk } from "./http.js";
 import { SALES_STAGES } from "./stages.js";
 import { definePrompt } from "./prompts.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
+import { config } from '../shared/config.js';
 
 const getScoreRubric = definePrompt({
   key: 'score',
@@ -56,11 +57,11 @@ async function classifyCall(transcript, segments = null) {
       const res = await fetchOk("openai", "оцінка дзвінка", "https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+          Authorization: `Bearer ${config.openai.apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          model: process.env.OPENAI_ANALYZE_MODEL || "gpt-4o-mini",
+          model: config.openai.analyzeModel,
           messages: [
             { role: "system", content: system },
             { role: "user", content: userContent },

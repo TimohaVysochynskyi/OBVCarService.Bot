@@ -1,8 +1,6 @@
+import { config } from '../shared/config.js';
 
-const SHARED_EXTENSIONS = (process.env.SHARED_EXTENSIONS || '901,902')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const SHARED_EXTENSIONS = config.lines.shared;
 
 const DEFAULT_PERSONAL_OPERATORS = { 903: 'Роман', 904: 'Андрій', 905: 'Володимир' };
 
@@ -18,12 +16,9 @@ function parsePersonalOperators(raw) {
   return map;
 }
 
-const PERSONAL_OPERATORS = parsePersonalOperators(process.env.PERSONAL_OPERATORS);
+const PERSONAL_OPERATORS = parsePersonalOperators(config.lines.personalRaw);
 
-const EXCLUDED_EXTENSIONS = (process.env.EXCLUDED_EXTENSIONS || '0674738200')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const EXCLUDED_EXTENSIONS = config.lines.excluded;
 
 const DEFAULT_LINE_NUMBERS = {
   901: '0754738200',
@@ -45,7 +40,7 @@ function parseLineNumbers(raw) {
   return map;
 }
 
-const LINE_NUMBERS = parseLineNumbers(process.env.LINE_NUMBERS);
+const LINE_NUMBERS = parseLineNumbers(config.lines.numbersRaw);
 
 const LINE_KINDS = {
   shared: { title: 'Стаціонарний', about: 'Спільна лінія: слухавку бере той, хто вільний. Саме ці номери йдуть у рекламу, тому вхідні на них — головне, за чим тут варто стежити.' },

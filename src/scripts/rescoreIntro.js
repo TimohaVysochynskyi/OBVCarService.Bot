@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { migrate, getRecentCallsForIntro, updateCallIntro } from '../core/store.js';
 import { analyzeCallBehaviors } from '../core/analyzeCall.js';
 import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
+import { config } from '../shared/config.js';
 
 
 const arg = (flag, fallback) => {
@@ -10,7 +11,7 @@ const arg = (flag, fallback) => {
 };
 
 const LIMIT = arg('--limit', 100);
-const PAUSE_MS = Number(process.env.RESCORE_INTRO_PAUSE_MS || 500);
+const PAUSE_MS = config.backfill.rescoreIntroPauseMs;
 const pct = (part, total) => (total ? `${Math.round((part / total) * 100)}%` : '—');
 const yn = (v) => (v === true ? 'так' : v === false ? 'ні' : '—');
 

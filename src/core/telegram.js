@@ -1,6 +1,7 @@
 import { withRetry } from './retry.js';
 import { fetchOk } from './http.js';
 import { getRecipients } from './store.js';
+import { config } from '../shared/config.js';
 
 const TELEGRAM_MAX_LENGTH = 4096;
 const CHUNK_TARGET_LENGTH = 3800;
@@ -49,7 +50,7 @@ async function sendChunk(token, chatId, text) {
 }
 
 async function sendMessage(text, { chatId } = {}) {
-  const token = process.env.TELEGRAM_BOT_TOKEN;
+  const token = config.telegram.token;
 
   if (!token || !chatId) {
     console.log('[telegram] DRY RUN (no TELEGRAM_BOT_TOKEN or chatId) - would send:\n');
@@ -69,12 +70,10 @@ async function sendMessage(text, { chatId } = {}) {
 }
 
 function fallbackRecipients() {
-  const raw = process.env.ALERT_FALLBACK_CHAT_IDS || process.env.TELEGRAM_BOOTSTRAP_CHAT_IDS || '';
-  return raw
-    .split(',')
-    .map((part) => part.trim())
-    .filter((id) => /^-?\d+$/.test(id))
-    .map((id) => ({ id, name: id }));
+  const configured = config.telegram.alertFallbackChatIds.length
+    ? config.telegram.alertFallbackChatIds
+    : config.telegram.bootstrapChatIds;
+  return configured.filter((id) => /^-?\d+$/.test(id)).map((id) => ({ id, name: id }));
 }
 
 async function sendAlert(text, { icon = '⚠️' } = {}) {

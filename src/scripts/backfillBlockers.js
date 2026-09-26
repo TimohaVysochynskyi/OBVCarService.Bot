@@ -9,9 +9,10 @@ import {
 } from '../core/store.js';
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { displayName } from '../bot/operators.js';
+import { config } from '../shared/config.js';
 
 
-const PAUSE_MS = Number(process.env.BACKFILL_BLOCKER_PAUSE_MS || 2600);
+const PAUSE_MS = config.backfill.blockerPauseMs;
 
 function parseArgs(argv) {
   const limitIdx = argv.indexOf('--limit');
@@ -46,7 +47,7 @@ async function main() {
     console.log('[backfillBlockers] нічого перевіряти — усі незакриті дзвінки вже перевірені.');
     process.exit(0);
   }
-  console.log(`[backfillBlockers] до перевірки: ${calls.length} дзвінк(ів), модель ${process.env.OPENAI_BLOCKER_MODEL || 'gpt-4o'}\n`);
+  console.log(`[backfillBlockers] до перевірки: ${calls.length} дзвінк(ів), модель ${config.openai.blockerModel}\n`);
 
   let clean = 0;
   let noSlot = 0;

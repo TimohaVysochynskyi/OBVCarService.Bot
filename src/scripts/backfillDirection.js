@@ -2,9 +2,10 @@ import 'dotenv/config';
 import { migrate, updateDirectionIfMissing, getDirectionStats, getEarliestCallTime } from '../core/store.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 import { DIRECTION_LABELS } from '../core/callDirection.js';
+import { config } from '../shared/config.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;
-const PAUSE_MS = Number(process.env.POLL_CHUNK_PAUSE_MS || 1500);
+const PAUSE_MS = config.poll.chunkPauseMs;
 
 function splitIntoChunks(start, end) {
   const chunks = [];

@@ -1,15 +1,8 @@
 import { getHeartbeat, setHeartbeat } from './store.js';
 import { alertOnce, humanDuration, kyivTime } from './alerts.js';
 import { NOTICES } from './errorTexts.js';
+import { config } from '../shared/config.js';
 
-
-const DEFAULT_BOT_MAX_MIN = 10;
-const DEFAULT_POLL_MAX_MIN = 45;
-
-const minutesFromEnv = (name, fallback) => {
-  const value = Number(process.env[name] || fallback);
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-};
 
 function startHeartbeat(name, intervalMs = 60_000) {
   const beat = () =>
@@ -38,7 +31,7 @@ async function checkAlive(name, { key, maxMinutes, message, recovered }) {
 async function checkBotAlive() {
   return checkAlive('bot', {
     key: 'bot_down',
-    maxMinutes: minutesFromEnv('BOT_HEARTBEAT_MAX_MIN', DEFAULT_BOT_MAX_MIN),
+    maxMinutes: config.liveness.botMaxMin,
     message: (silentFor) => NOTICES.botDown(silentFor),
     recovered: (downFor) => NOTICES.botRecovered(downFor),
   });
@@ -47,7 +40,7 @@ async function checkBotAlive() {
 async function checkPollerAlive() {
   return checkAlive('poll', {
     key: 'poll_stale',
-    maxMinutes: minutesFromEnv('POLL_STALE_MAX_MIN', DEFAULT_POLL_MAX_MIN),
+    maxMinutes: config.liveness.pollMaxMin,
     message: (silentFor, lastAt) => NOTICES.pollStale(silentFor, lastAt),
     recovered: (downFor) => NOTICES.pollRecovered(downFor),
   });

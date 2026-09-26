@@ -2,13 +2,14 @@ import { withRetry } from './retry.js';
 import { httpError } from './errors.js';
 import { fetchRaw } from './http.js';
 import { directionOf } from './callDirection.js';
+import { config } from '../shared/config.js';
 
-const BASE_URL = process.env.BINOTEL_BASE_URL || 'https://api.binotel.com/api/4.0';
+const BASE_URL = config.binotel.baseUrl;
 
 function auth() {
   return {
-    key: process.env.BINOTEL_API_KEY,
-    secret: process.env.BINOTEL_API_SECRET,
+    key: config.binotel.apiKey,
+    secret: config.binotel.apiSecret,
   };
 }
 

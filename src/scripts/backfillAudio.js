@@ -1,9 +1,10 @@
 import 'dotenv/config';
 import { migrate, getCallsMissingAudio, setCallAudio, getAudioArchiveStats } from '../core/store.js';
 import { fetchRecording, saveRecording, readStoredRecording, storageRoot, freeSpaceMb } from '../core/audioStore.js';
+import { config } from '../shared/config.js';
 
 
-const PAUSE_MS = Number(process.env.BACKFILL_AUDIO_PAUSE_MS || 1500);
+const PAUSE_MS = config.backfill.audioPauseMs;
 const MB = 1024 * 1024;
 
 function parseArgs(argv) {
