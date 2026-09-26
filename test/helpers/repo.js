@@ -34,6 +34,16 @@ function orphanClasses(html, css, appJs = '') {
   return { used, orphans: [...used].filter((c) => !css.includes(escapeClass(c))) };
 }
 
+const MIGRATIONS = `${SRC}platform/db/migrations/`;
+
+function migrationsSql() {
+  return fs.readdirSync(MIGRATIONS)
+    .filter((f) => f.endsWith('.sql'))
+    .sort()
+    .map((f) => fs.readFileSync(MIGRATIONS + f, 'utf8'))
+    .join('\n');
+}
+
 const bytes = (s) => Buffer.byteLength(s, 'utf8');
 
-export { ROOT, SRC, readRepo, readSrc, readJson, sliceFunction, escapeClass, classesIn, orphanClasses, bytes };
+export { ROOT, SRC, MIGRATIONS, readRepo, readSrc, readJson, migrationsSql, sliceFunction, escapeClass, classesIn, orphanClasses, bytes };

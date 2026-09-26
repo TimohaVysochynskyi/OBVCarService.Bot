@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc } from '../helpers/repo.js';
+import { readSrc, migrationsSql } from '../helpers/repo.js';
 import * as dr from '../../src/core/declineReasons.js';
 import * as db from '../../src/core/dealBlocker.js';
 
 const dbSrc = readSrc('core/dealBlocker.js');
 const store = readSrc('core/store.js');
+const schema = migrationsSql();
 const dyn = readSrc('bot/dynamics.js');
 
 test('три бакети відмов', () => {
@@ -90,8 +91,8 @@ test('зворотний фільтр NULL-безпечний', () => {
 });
 
 test('обидві колонки причин створюються', () => {
-  assert.match(store, /deal_blocker_reason TEXT/);
-  assert.match(store, /client_decline_reason TEXT/);
+  assert.match(schema, /deal_blocker_reason TEXT/);
+  assert.match(schema, /client_decline_reason TEXT/);
 });
 
 test('лічильник «нема деталей» є в агрегаті', () => {

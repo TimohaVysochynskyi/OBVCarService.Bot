@@ -1,0 +1,159 @@
+COLUMN|app_state|key|text|NO|-
+COLUMN|app_state|value|text|YES|-
+COLUMN|bot_users|added_by|bigint|YES|-
+COLUMN|bot_users|created_at|timestamp with time zone|NO|now()
+COLUMN|bot_users|display_name|text|YES|-
+COLUMN|bot_users|id|integer|NO|nextval('bot_users_id_seq'::regclass)
+COLUMN|bot_users|operator_name|text|YES|-
+COLUMN|bot_users|phone|text|YES|-
+COLUMN|bot_users|role|text|NO|-
+COLUMN|bot_users|status|text|NO|'active'::text
+COLUMN|bot_users|telegram_id|bigint|YES|-
+COLUMN|bot_users|username|text|YES|-
+COLUMN|calls|analysis_version|integer|YES|-
+COLUMN|calls|audio_bytes|integer|YES|-
+COLUMN|calls|audio_path|text|YES|-
+COLUMN|calls|audio_status|text|YES|-
+COLUMN|calls|behaviors|jsonb|YES|-
+COLUMN|calls|call_purpose|text|YES|-
+COLUMN|calls|client_decline_reason|text|YES|-
+COLUMN|calls|client_name|text|YES|-
+COLUMN|calls|client_number|text|YES|-
+COLUMN|calls|communication_score|integer|YES|-
+COLUMN|calls|created_at|timestamp with time zone|NO|now()
+COLUMN|calls|deal_blocker_quote|text|YES|-
+COLUMN|calls|deal_blocker_reason|text|YES|-
+COLUMN|calls|deal_blocker|text|YES|-
+COLUMN|calls|direction|text|YES|-
+COLUMN|calls|duration_sec|integer|YES|-
+COLUMN|calls|general_call_id|text|NO|-
+COLUMN|calls|hangup_by|text|YES|-
+COLUMN|calls|id|integer|NO|nextval('calls_id_seq'::regclass)
+COLUMN|calls|internal_number|text|YES|-
+COLUMN|calls|intro_company|boolean|YES|-
+COLUMN|calls|intro_name|boolean|YES|-
+COLUMN|calls|is_success|boolean|YES|-
+COLUMN|calls|manager_name|text|YES|-
+COLUMN|calls|segments|jsonb|YES|-
+COLUMN|calls|start_time|timestamp with time zone|YES|-
+COLUMN|calls|transcript|text|YES|-
+COLUMN|calls|weakest_stage|text|YES|-
+COLUMN|error_log|at|timestamp with time zone|NO|now()
+COLUMN|error_log|code|text|NO|-
+COLUMN|error_log|context|jsonb|YES|-
+COLUMN|error_log|feature|text|YES|-
+COLUMN|error_log|id|integer|NO|nextval('error_log_id_seq'::regclass)
+COLUMN|error_log|incident|text|NO|-
+COLUMN|error_log|message|text|YES|-
+COLUMN|error_log|process|text|NO|-
+COLUMN|error_log|technical|text|YES|-
+COLUMN|error_log|telegram_id|bigint|YES|-
+COLUMN|kb_chunks|content|text|NO|-
+COLUMN|kb_chunks|created_at|timestamp with time zone|NO|now()
+COLUMN|kb_chunks|doc_id|integer|NO|-
+COLUMN|kb_chunks|embedding|USER-DEFINED|YES|-
+COLUMN|kb_chunks|id|integer|NO|nextval('kb_chunks_id_seq'::regclass)
+COLUMN|kb_chunks|ord|integer|NO|-
+COLUMN|kb_chunks|page_end|integer|YES|-
+COLUMN|kb_chunks|page_start|integer|YES|-
+COLUMN|kb_chunks|tsv|tsvector|YES|-
+COLUMN|kb_docs|audience|text|NO|'mechanic'::text
+COLUMN|kb_docs|chunk_count|integer|NO|0
+COLUMN|kb_docs|created_at|timestamp with time zone|NO|now()
+COLUMN|kb_docs|file_id|text|YES|-
+COLUMN|kb_docs|filename|text|NO|-
+COLUMN|kb_docs|id|integer|NO|nextval('kb_docs_id_seq'::regclass)
+COLUMN|kb_docs|mime|text|YES|-
+COLUMN|kb_docs|uploaded_by|text|YES|-
+COLUMN|pending_calls|attempts|integer|NO|0
+COLUMN|pending_calls|client_name|text|YES|-
+COLUMN|pending_calls|client_number|text|YES|-
+COLUMN|pending_calls|direction|text|YES|-
+COLUMN|pending_calls|duration_sec|integer|YES|-
+COLUMN|pending_calls|general_call_id|text|NO|-
+COLUMN|pending_calls|internal_number|text|YES|-
+COLUMN|pending_calls|last_error|text|YES|-
+COLUMN|pending_calls|manager_name|text|YES|-
+COLUMN|pending_calls|start_time|timestamp with time zone|YES|-
+COLUMN|pending_calls|status|text|NO|'pending'::text
+COLUMN|pending_calls|updated_at|timestamp with time zone|NO|now()
+COLUMN|report_segments|analysis_version|integer|NO|1
+COLUMN|report_segments|call_ids|jsonb|NO|'[]'::jsonb
+COLUMN|report_segments|candidate_count|integer|YES|-
+COLUMN|report_segments|created_at|timestamp with time zone|NO|now()
+COLUMN|report_segments|findings|jsonb|NO|'[]'::jsonb
+COLUMN|report_segments|id|integer|NO|nextval('report_segments_id_seq'::regclass)
+COLUMN|report_segments|kind|text|NO|-
+COLUMN|report_segments|manager_name|text|NO|-
+COLUMN|report_segments|meta|jsonb|YES|-
+COLUMN|report_segments|period_end|timestamp with time zone|NO|-
+COLUMN|report_segments|period_start|timestamp with time zone|NO|-
+COLUMN|report_segments|phrases|jsonb|NO|'[]'::jsonb
+COLUMN|report_segments|stats|jsonb|YES|-
+COLUMN|report_segments|updated_at|timestamp with time zone|NO|now()
+CONSTRAINT|app_state|app_state_key_not_null|NOT NULL key
+CONSTRAINT|app_state|app_state_pkey|PRIMARY KEY (key)
+CONSTRAINT|bot_users|bot_users_created_at_not_null|NOT NULL created_at
+CONSTRAINT|bot_users|bot_users_id_not_null|NOT NULL id
+CONSTRAINT|bot_users|bot_users_pkey|PRIMARY KEY (id)
+CONSTRAINT|bot_users|bot_users_role_not_null|NOT NULL role
+CONSTRAINT|bot_users|bot_users_status_not_null|NOT NULL status
+CONSTRAINT|bot_users|bot_users_telegram_id_key|UNIQUE (telegram_id)
+CONSTRAINT|calls|calls_created_at_not_null|NOT NULL created_at
+CONSTRAINT|calls|calls_general_call_id_key|UNIQUE (general_call_id)
+CONSTRAINT|calls|calls_general_call_id_not_null|NOT NULL general_call_id
+CONSTRAINT|calls|calls_id_not_null|NOT NULL id
+CONSTRAINT|calls|calls_pkey|PRIMARY KEY (id)
+CONSTRAINT|error_log|error_log_at_not_null|NOT NULL at
+CONSTRAINT|error_log|error_log_code_not_null|NOT NULL code
+CONSTRAINT|error_log|error_log_id_not_null|NOT NULL id
+CONSTRAINT|error_log|error_log_incident_not_null|NOT NULL incident
+CONSTRAINT|error_log|error_log_pkey|PRIMARY KEY (id)
+CONSTRAINT|error_log|error_log_process_not_null|NOT NULL process
+CONSTRAINT|kb_chunks|kb_chunks_content_not_null|NOT NULL content
+CONSTRAINT|kb_chunks|kb_chunks_created_at_not_null|NOT NULL created_at
+CONSTRAINT|kb_chunks|kb_chunks_doc_id_fkey|FOREIGN KEY (doc_id) REFERENCES kb_docs(id) ON DELETE CASCADE
+CONSTRAINT|kb_chunks|kb_chunks_doc_id_not_null|NOT NULL doc_id
+CONSTRAINT|kb_chunks|kb_chunks_id_not_null|NOT NULL id
+CONSTRAINT|kb_chunks|kb_chunks_ord_not_null|NOT NULL ord
+CONSTRAINT|kb_chunks|kb_chunks_pkey|PRIMARY KEY (id)
+CONSTRAINT|kb_docs|kb_docs_audience_not_null|NOT NULL audience
+CONSTRAINT|kb_docs|kb_docs_chunk_count_not_null|NOT NULL chunk_count
+CONSTRAINT|kb_docs|kb_docs_created_at_not_null|NOT NULL created_at
+CONSTRAINT|kb_docs|kb_docs_filename_not_null|NOT NULL filename
+CONSTRAINT|kb_docs|kb_docs_id_not_null|NOT NULL id
+CONSTRAINT|kb_docs|kb_docs_pkey|PRIMARY KEY (id)
+CONSTRAINT|pending_calls|pending_calls_attempts_not_null|NOT NULL attempts
+CONSTRAINT|pending_calls|pending_calls_general_call_id_not_null|NOT NULL general_call_id
+CONSTRAINT|pending_calls|pending_calls_pkey|PRIMARY KEY (general_call_id)
+CONSTRAINT|pending_calls|pending_calls_status_not_null|NOT NULL status
+CONSTRAINT|pending_calls|pending_calls_updated_at_not_null|NOT NULL updated_at
+CONSTRAINT|report_segments|report_segments_analysis_version_not_null|NOT NULL analysis_version
+CONSTRAINT|report_segments|report_segments_call_ids_not_null|NOT NULL call_ids
+CONSTRAINT|report_segments|report_segments_created_at_not_null|NOT NULL created_at
+CONSTRAINT|report_segments|report_segments_findings_not_null|NOT NULL findings
+CONSTRAINT|report_segments|report_segments_id_not_null|NOT NULL id
+CONSTRAINT|report_segments|report_segments_kind_not_null|NOT NULL kind
+CONSTRAINT|report_segments|report_segments_manager_name_not_null|NOT NULL manager_name
+CONSTRAINT|report_segments|report_segments_period_end_not_null|NOT NULL period_end
+CONSTRAINT|report_segments|report_segments_period_start_not_null|NOT NULL period_start
+CONSTRAINT|report_segments|report_segments_phrases_not_null|NOT NULL phrases
+CONSTRAINT|report_segments|report_segments_pkey|PRIMARY KEY (id)
+CONSTRAINT|report_segments|report_segments_updated_at_not_null|NOT NULL updated_at
+INDEX|app_state|app_state_pkey|CREATE UNIQUE INDEX app_state_pkey ON public.app_state USING btree (key)
+INDEX|bot_users|bot_users_pkey|CREATE UNIQUE INDEX bot_users_pkey ON public.bot_users USING btree (id)
+INDEX|bot_users|bot_users_telegram_id_key|CREATE UNIQUE INDEX bot_users_telegram_id_key ON public.bot_users USING btree (telegram_id)
+INDEX|calls|calls_general_call_id_key|CREATE UNIQUE INDEX calls_general_call_id_key ON public.calls USING btree (general_call_id)
+INDEX|calls|calls_pkey|CREATE UNIQUE INDEX calls_pkey ON public.calls USING btree (id)
+INDEX|error_log|error_log_at_idx|CREATE INDEX error_log_at_idx ON public.error_log USING btree (at DESC)
+INDEX|error_log|error_log_code_idx|CREATE INDEX error_log_code_idx ON public.error_log USING btree (code, at DESC)
+INDEX|error_log|error_log_incident_idx|CREATE INDEX error_log_incident_idx ON public.error_log USING btree (incident)
+INDEX|error_log|error_log_pkey|CREATE UNIQUE INDEX error_log_pkey ON public.error_log USING btree (id)
+INDEX|kb_chunks|kb_chunks_embedding_idx|CREATE INDEX kb_chunks_embedding_idx ON public.kb_chunks USING hnsw (embedding vector_cosine_ops)
+INDEX|kb_chunks|kb_chunks_pkey|CREATE UNIQUE INDEX kb_chunks_pkey ON public.kb_chunks USING btree (id)
+INDEX|kb_chunks|kb_chunks_tsv_idx|CREATE INDEX kb_chunks_tsv_idx ON public.kb_chunks USING gin (tsv)
+INDEX|kb_docs|kb_docs_pkey|CREATE UNIQUE INDEX kb_docs_pkey ON public.kb_docs USING btree (id)
+INDEX|pending_calls|pending_calls_pkey|CREATE UNIQUE INDEX pending_calls_pkey ON public.pending_calls USING btree (general_call_id)
+INDEX|report_segments|report_segments_lookup|CREATE INDEX report_segments_lookup ON public.report_segments USING btree (manager_name, kind, period_start)
+INDEX|report_segments|report_segments_pkey|CREATE UNIQUE INDEX report_segments_pkey ON public.report_segments USING btree (id)
+INDEX|report_segments|report_segments_uq|CREATE UNIQUE INDEX report_segments_uq ON public.report_segments USING btree (manager_name, period_start, period_end, kind)

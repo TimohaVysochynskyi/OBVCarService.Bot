@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc } from '../helpers/repo.js';
+import { readSrc, migrationsSql } from '../helpers/repo.js';
 import { directionOf, DIRECTION_LABELS } from '../../src/core/callDirection.js';
 
 const store = readSrc('core/store.js');
+const schema = migrationsSql();
 const script = readSrc('scripts/backfillDirection.js');
 
 test('callType 0 → вхідний (рядком і числом)', () => {
@@ -32,19 +33,19 @@ test('у кожного напрямку є назва й пояснення', (
 });
 
 test('колонка direction створюється в calls', () => {
-  assert.match(store, /ALTER TABLE calls ADD COLUMN IF NOT EXISTS direction TEXT;/);
+  assert.match(schema, /ALTER TABLE calls ADD COLUMN IF NOT EXISTS direction TEXT;/);
 });
 
 test('...і в черзі ретраю', () => {
-  assert.match(store, /ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS direction TEXT;/);
+  assert.match(schema, /ALTER TABLE pending_calls ADD COLUMN IF NOT EXISTS direction TEXT;/);
 });
 
 test('нова колонка створюється ПІСЛЯ дропу легасі', () => {
-  assert.ok(store.indexOf('DROP COLUMN IF EXISTS call_type') < store.indexOf('ADD COLUMN IF NOT EXISTS direction'));
+  assert.ok(schema.indexOf('DROP COLUMN IF EXISTS call_type') < schema.indexOf('ADD COLUMN IF NOT EXISTS direction'));
 });
 
 test('нову колонку НЕ названо call_type', () => {
-  assert.ok(!/ADD COLUMN IF NOT EXISTS call_type/.test(store));
+  assert.ok(!/ADD COLUMN IF NOT EXISTS call_type/.test(schema));
 });
 
 test('saveCall пише напрямок', () => {
