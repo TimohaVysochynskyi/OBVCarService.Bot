@@ -7,14 +7,8 @@ import { buildDynamicsText, MAX_BUCKETS } from './dynamics.js';
 import { periodRange, formatKyiv } from './time.js';
 import { showScreen, withProgress } from './ui.js';
 
-// Which report mode each period uses. Day keeps the slot-segment assembly (it is also what the
-// auto-reports freeze); week and month analyse every uncached DAY of the range and merge the result
-// into one list; quarter is reuse-only on purpose — analysing ~90 days on a button press would be
-// both slow and expensive, so it aggregates whatever analysis already exists and says as much.
 const MODE_BY_PERIOD = { day: 'daily', week: 'range', month: 'range', quarter: 'range_reuse' };
 
-// Content for the "choose a manager" screen - reused by the inline button (edits the message)
-// and by the /stats command.
 async function statsPicker() {
   const operators = await getOperators();
   if (!operators.length) {
@@ -23,11 +17,7 @@ async function statsPicker() {
   return { text: '📊 Оберіть менеджера:', kb: operatorListKeyboard(operators, 'stat') };
 }
 
-// Growth dashboard for a manager — the primary screen. Numeric trajectory + weak-stage evolution +
-// growth verdict across the last buckets (weeks or months). Text-only, no LLM (getBucketedTrend is
-// one live SQL query), so it's instant. The classic per-period evidence report is a drill-down.
 async function showDynamics(ctx, name, bucket) {
-  // Same cap for weeks and months: never more than 12 buckets (= at most 366 days of history).
   const buckets = await getBucketedTrend(name, bucket, MAX_BUCKETS);
   const text = buildDynamicsText(name, bucket, buckets);
   const tick = (b) => (b === bucket ? ' ✓' : '');
@@ -49,20 +39,16 @@ function registerStats(bot) {
     await showScreen(ctx, text, kb);
   });
 
-  // Manager landing = the GROWTH dashboard (numeric trajectory + weak-stage evolution + verdict),
-  // not a one-off effectiveness report. The per-period evidence report is one tap away (stat:rep).
   bot.callbackQuery(/^stat:op:(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await showDynamics(ctx, ctx.match[1], 'week');
   });
 
-  // Toggle bucket granularity (weeks ⇄ months).
   bot.callbackQuery(/^stat:dyn:(week|month):(.+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     await showDynamics(ctx, ctx.match[2], ctx.match[1]);
   });
 
-  // Drill-down: the classic per-period evidence report.
   bot.callbackQuery(/^stat:rep:(.+)$/, async (ctx) => {
     const name = ctx.match[1];
     await ctx.answerCallbackQuery();
@@ -79,16 +65,10 @@ function registerStats(bot) {
       .text('📈 Динаміка', `stat:op:${name}`)
       .row()
       .text('« Назад до меню', 'menu');
-    // The evidence report (admin-only) is delivered COLLAPSED - header/trend + "Розгорнути"/
-    // "Рекомендації" buttons, same as every other report delivery path. Audio isn't cut until
-    // "Розгорнути" is clicked, so this is fast now (no ffmpeg/download up front).
     const res = await withProgress(
       ctx.api,
       ctx.chat.id,
       'typing',
-      // 'day' → segmented cache (frozen segments + live tail); week/month → analyse every day of the
-      // range that isn't cached yet and merge into ONE list; quarter → reuse-only (~90 days is too
-      // much to analyse on a button press) and says so in the header.
       () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { mode: MODE_BY_PERIOD[period] }),
       { notice: '⏳ Формую доказовий звіт: аналізую дзвінки періоду, це може зайняти до хвилини…' }
     );
@@ -102,12 +82,7 @@ function registerStats(bot) {
   registerMyStats(bot);
 }
 
-// --- Manager self-view ("Моя статистика") ---------------------------------------------------
-// A manager sees ONLY their own numeric statistics (calls / conversion / score / weakest stage) +
-// their phone. NOT the evidence report — that is an admin (director/marketer) tool. Their identity
-// comes from bot_users.operator_name (linked by the director when adding them).
 
-// Shared by the "📊 Моя статистика" button (me:pick) and the /myreport command.
 async function openMyReport(ctx) {
   ctx.session.awaiting = null;
   if (!ctx.botUser?.operatorName) {
@@ -135,8 +110,6 @@ function registerMyStats(bot) {
     const s = await getOperatorStats(name, start, end);
     const sales = s.salesCount ?? 0;
     const info = s.infoCount ?? 0;
-    // Conversion over REACHABLE deals: ones the СТО itself turned away don't count against the
-    // manager (see core/dealBlocker.js). Mentioned only when it actually happened.
     const reachable = s.reachableCount == null ? sales : s.reachableCount;
     const rate = reachable ? Math.round((s.successCount / reachable) * 100) : 0;
     const blockedLine = s.blockedCount
@@ -161,8 +134,6 @@ function registerMyStats(bot) {
     await showScreen(ctx, body, kb);
   });
 
-  // Let a manager store their own phone (request_users doesn't return a phone, so a manager added
-  // from contacts has none until they share it here).
   bot.callbackQuery('me:phone', async (ctx) => {
     await ctx.answerCallbackQuery();
     ctx.session.awaiting = { type: 'save_phone' };

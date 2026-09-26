@@ -13,7 +13,7 @@ import { NOTICES } from '../core/errorTexts.js';
 import { alertText } from '../core/alerts.js';
 import { recordError } from '../core/errorLog.js';
 
-const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // stay safely under Binotel's 24h cap on this endpoint
+const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;
 const MAX_PENDING_ATTEMPTS = Number(process.env.MAX_PENDING_ATTEMPTS || 20);
 
 function splitIntoChunks(start, end) {
@@ -27,14 +27,6 @@ function splitIntoChunks(start, end) {
   return chunks;
 }
 
-// Binotel is the source of truth for WHICH extension took the call, but not for spelling/name
-// stability - see PERSONAL_OPERATORS above. A known personal extension (903/904/905) is resolved
-// straight from that map, no matter what (or whether) Binotel's employeeData says, and never goes
-// through content-based identification. Shared handsets (SHARED_EXTENSIONS) - and any OTHER
-// extension Binotel doesn't carry a name for - fall back to asking the model who introduced
-// themselves, constrained to the known operator names (roster, derived from Binotel names on
-// other calls). No match / no name -> keep the bare extension as the label so the call still
-// shows up, just unattributed to a person.
 async function resolveManagerName(call, transcript, roster) {
   const ext = String(call.internalNumber);
 
@@ -50,38 +42,19 @@ async function resolveManagerName(call, transcript, roster) {
   return call.employeeName;
 }
 
-// Determines the call PURPOSE first, scores effectiveness ONLY for sales calls, resolves the
-// operator name, and saves. Shared by the fresh-call path and the pending-retry path so all of
-// this happens exactly once, right when the transcript first becomes available.
-//
-// Purpose-first is deliberate: a non-sales call (info/other — a routine "your car is ready", a
-// booking confirmation, a status query) must not spend any resource on sales effectiveness
-// evaluation. So the per-call MAP (which decides callPurpose) runs BEFORE classifyCall, and
-// classifyCall runs only when the call is a sales call.
 async function transcribeClassifyAndSave(call, roster) {
-  // Download the recording ONCE, archive it on disk, then transcribe from the same bytes. The
-  // client requires every recording to be kept, and this also means later re-analysis, report clips
-  // and archive playback no longer depend on Binotel still having the file. Storing is best-effort:
-  // audio.buffer is returned even when the write failed, so a disk problem can't cost us the call.
   const audio = await storeRecording(call.generalCallId, call.startTime);
   if (!audio.buffer) throw appError('SYS-NOFILE', { message: audio.error || 'Binotel не віддав запис' });
   console.log(
     `[processCalls]   audio ${audio.reused ? 'reused' : 'stored'}: ${audio.relPath ?? '(не збережено)'} (${audio.bytes} B)`
   );
 
-  // employeeName (Binotel, personal extensions) anchors speaker-role detection on our actual
-  // employee. Null for shared handsets — role detection falls back to operator-role heuristics.
-  // segments = timecoded diarized turns (null on the OpenAI fallback / single-speaker calls).
   const { transcript, segments } = await transcribeAudio(audio.buffer, {
     managerName: call.employeeName,
     audioPath: audio.path,
   });
   const managerName = await resolveManagerName(call, transcript, roster);
 
-  // Per-call "map": decides callPurpose (sales/info/other) and, for sales calls, tags manager
-  // behaviours + verbatim quotes (cached for the report reduce). Never fatal — if it fails we save
-  // the call without behaviors (backfill later) and, since the purpose is then unknown, fall back
-  // to treating it as a sales call below so a transient error never silently drops the scoring.
   let behaviors = null;
   try {
     behaviors = await analyzeCallBehaviors(transcript, segments, managerName);
@@ -89,9 +62,6 @@ async function transcribeClassifyAndSave(call, roster) {
     console.error(`[processCalls]   behavior analysis failed for ${call.generalCallId}: ${err.message}`);
   }
 
-  // Score success / weakest stage / communication ONLY for sales calls. Non-sales calls get NULL
-  // classification and NO classifyCall request at all (zero resources spent evaluating them). A
-  // null/unknown purpose (behaviors failed) is treated as sales so we don't lose scoring on errors.
   const purpose = behaviors?.callPurpose ?? null;
   const isSalesCall = purpose === null || purpose === 'sales';
   let classification = { isSuccess: null, weakestStage: null, communicationScore: null };
@@ -101,16 +71,10 @@ async function transcribeClassifyAndSave(call, roster) {
     console.log(`[processCalls]   ${call.generalCallId} purpose=${purpose} → non-sales, skipping effectiveness scoring`);
   }
 
-  // "Незакриті угоди": did the СТО itself turn this client away (fully booked / we don't do that)?
-  // Only asked when the deal did NOT close — a closed deal cannot be blocked by definition — which
-  // keeps this (deliberately stronger, gpt-4o) check cheap. NOT gated on call purpose: measured on
-  // live data, such calls are usually classified 'info', because the MAP sees a refusal rather than a
-  // sales opportunity. Never fatal: on failure the blocker stays NULL and the backfill decides later.
   let blocker = { blocker: NO_BLOCKER, quote: null };
   if (classification.isSuccess !== true) {
     try {
       blocker = await detectDealBlocker(transcript, segments, managerName);
-      // Рецензента збило — це «не перевірено», а не «чисто»: лишаємо NULL, беклог вирішить пізніше.
       if (blocker.unchecked) blocker = { blocker: null, quote: null };
       else if (blocker.blocker !== NO_BLOCKER) {
         console.log(`[processCalls]   ${call.generalCallId} deal blocker: ${blocker.blocker} — «${blocker.quote?.slice(0, 70)}»`);
@@ -136,32 +100,19 @@ async function transcribeClassifyAndSave(call, roster) {
     behaviors,
     analysisVersion: behaviors ? ANALYSIS_VERSION : null,
     callPurpose: behaviors?.callPurpose ?? null,
-    // Did he give his name / the service's name (core/managerIntro.js). Left NULL when the analysis
-    // itself failed, which is the marker the (free, rule-based) backfill selects on — so a transient
-    // error means "decided later", never a silent false.
     introName: behaviors?.intro ? behaviors.intro.name : null,
     introCompany: behaviors?.intro ? behaviors.intro.company : null,
     isSuccess: classification.isSuccess,
     weakestStage: classification.weakestStage,
     communicationScore: classification.communicationScore,
-    // 'none' = checked, no blocker. NULL only when the check itself failed or the deal closed, so the
-    // backfill can still pick it up later.
     dealBlocker: classification.isSuccess === true ? NO_BLOCKER : blocker.blocker,
     dealBlockerQuote: blocker.quote,
     audioPath: audio.relPath,
     audioBytes: audio.relPath ? audio.bytes : null,
-    // NULL, not 'unavailable', when the file couldn't be written: the recording DOES exist in
-    // Binotel (we just transcribed its bytes) - the disk was the problem. 'unavailable' means
-    // "Binotel has no recording", and the audio backfill skips those on re-runs, so using it here
-    // would permanently exclude a call from the archive after one transient disk error.
     audioStatus: audio.relPath ? 'stored' : null,
   });
 }
 
-// An excluded extension (the director's mobile) is still archived AS AUDIO, per the client's "keep
-// every recording" requirement — but nothing else: no transcription, no analysis, no row in `calls`,
-// so it stays out of the managers' statistics exactly as before. The file therefore has no
-// audio_path anywhere in the DB; the archive on disk is the record. Never throws.
 async function archiveExcludedAudio(call) {
   try {
     const audio = await storeRecording(call.generalCallId, call.startTime);
@@ -175,16 +126,11 @@ async function archiveExcludedAudio(call) {
   }
 }
 
-// One attempt at turning a discovered call into a saved transcript. Never throws - on failure
-// it records the call in the pending queue (or bumps its attempt count) so a later poll run
-// retries it, instead of silently losing it.
 async function processOneCall(call, roster) {
   const pendingLabel = call.employeeName || String(call.internalNumber);
   const excluded = EXCLUDED_EXTENSIONS.includes(String(call.internalNumber));
 
   if (excluded && call.durationSec > 0 && call.recordingStatus !== 'uploaded') {
-    // Archive-only call whose recording isn't uploaded yet. Queue it so the audio isn't lost just
-    // because the checkpoint has already moved past this window - retryPendingCalls archives it.
     console.log(`[processCalls]   ${call.generalCallId} (excluded) recording not ready (${call.recordingStatus}) - queued for audio archiving`);
     await upsertPending({ ...call, managerName: pendingLabel }, `excluded ext, recording status: ${call.recordingStatus}`);
     return;
@@ -245,24 +191,10 @@ async function processCallsForRange(start, end) {
   for (let i = 0; i < chunks.length; i += 1) {
     const [chunkStart, chunkEnd] = chunks[i];
     await processChunk(chunkStart, chunkEnd, roster);
-    // A near-empty chunk (e.g. a quiet historical day) processes almost instantly, back-to-back
-    // with the next chunk's own list-of-calls-for-period call - exactly the pattern that triggers
-    // Binotel's "requests are too frequent" throttling. A short pause between chunks costs nothing
-    // next to the per-call transcription/analysis work, but avoids hammering it on a multi-chunk
-    // range (backfills; a poll run after downtime).
-    //
-    // ⚠️ Configurable because a long backfill competes with the LIVE poller for the same Binotel
-    // quota: on 19.09.2026 a 101-chunk run died on code 106 ("requests are too frequent, retry
-    // after 3 sec") after exhausting all three retries. A failed listing deliberately aborts the
-    // whole range instead of being skipped - in the poller, skipping a window and then advancing
-    // the checkpoint is precisely how calls disappear - so pacing is the only safe lever.
     if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, chunkPauseMs()));
   }
 }
 
-// Дзвінок вибув із черги обробки - назавжди. Повідомлення будується з КЛАСУ помилки, а не з її
-// тексту: у базі лежить лише рядок (`last_error`), тож reviveError відновлює з нього сервіс і
-// HTTP-код, а describeError додає причину, що робити і рядок про долю даних.
 async function alertCallDropped(call, err, { title }) {
   const described = describeError(err, {
     title,
@@ -283,9 +215,6 @@ async function alertCallDropped(call, err, { title }) {
   );
 }
 
-// Retries everything still sitting in the pending queue before we look for brand-new calls.
-// Gives up (and alerts) after MAX_PENDING_ATTEMPTS so a permanently broken recording doesn't
-// retry forever.
 async function retryPendingCalls() {
   const pending = await getPendingCalls();
   if (pending.length === 0) return;
@@ -294,7 +223,6 @@ async function retryPendingCalls() {
   console.log(`[processCalls] retrying ${pending.length} pending call(s)`);
   for (const call of pending) {
     if (EXCLUDED_EXTENSIONS.includes(String(call.internalNumber))) {
-      // Excluded from analysis, but its recording is still archived (see archiveExcludedAudio).
       console.log(`[processCalls]   pending ${call.generalCallId} - extension ${call.internalNumber} is excluded from ingestion (audio only)`);
       if (call.durationSec > 0) await archiveExcludedAudio(call);
       await removePendingCall(call.generalCallId);
@@ -315,18 +243,10 @@ async function retryPendingCalls() {
       await transcribeClassifyAndSave(call, roster);
       console.log(`[processCalls]   pending call recovered: ${call.generalCallId}`);
     } catch (err) {
-      // A Binotel outage is not this call's fault, and every pending row would burn an attempt on
-      // every 15-minute poll for as long as the outage lasts (MAX_PENDING_ATTEMPTS = 20 is under
-      // five hours) - which would mark perfectly good calls "failed" and lose them for real. Abort
-      // the whole retry pass instead: there is nothing to retry against while the API is down, and
-      // the poller turns this into a single deduped outage alert.
       if (err?.binotelUnavailable) {
         console.error(`[processCalls]   aborting pending retries - Binotel is unavailable: ${err.message}`);
         throw err;
       }
-      // The other extreme: a failure that this call will never survive - the recording does not
-      // exist, or the conversation is too long for the model. Retrying it 20 times over five hours
-      // changes nothing except the delay before anyone is told, so drop it now and say why.
       const code = classify(err);
       if (isHopeless(code)) {
         console.error(`[processCalls]   ${call.generalCallId} is hopeless (${code}): ${err.message}`);

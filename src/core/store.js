@@ -3,9 +3,6 @@ import { PERSONAL_OPERATORS } from './phoneLines.js';
 
 const { Pool } = pg;
 
-// SSL policy. The DB is now a LOCAL Postgres (localhost, same VPS) which speaks no SSL, so forcing
-// it (the Neon-era default) would fail with "server does not support SSL connections". Disable SSL
-// for localhost / an explicit sslmode=disable; keep permissive SSL for any remote/managed DB.
 function sslConfig() {
   const url = process.env.DATABASE_URL || '';
   if (/\bsslmode=disable\b/i.test(url)) return false;
@@ -18,11 +15,6 @@ const pool = new Pool({
   ssl: sslConfig(),
 });
 
-// node-postgres виносить помилку ПРОСТІЙНОГО клієнта як подію 'error' на пулі. Без жодного
-// слухача Node вважає її необробленою і вбиває процес - тобто рестарт Postgres тихо клав і бота,
-// і інжест, без єдиного повідомлення. Слухач тут є завжди; хто хоче ще й сповістити людей,
-// реєструє обробник через onPoolError. Саме так, а не імпортом telegram сюди: telegram уже
-// імпортує store, і зворотний імпорт дав би цикл.
 let poolErrorHandler = null;
 pool.on('error', (err) => {
   console.error(`[store] помилка простійного підключення до Postgres: ${err.message}`);
@@ -262,12 +254,10 @@ async function migrate() {
   `);
 }
 
-// ---- Bot users / roles (access control) ---------------------------------------------------
 
 const BOT_USER_COLS = `id, telegram_id AS "telegramId", role, phone, username,
   display_name AS "displayName", operator_name AS "operatorName", status`;
 
-// Digits only; phones are matched by their last 9 digits so +380/0-prefix variants still line up.
 function normalizePhone(raw) {
   return String(raw || '').replace(/\D/g, '');
 }
@@ -293,8 +283,6 @@ async function getBotUsersByRole(role) {
   return rows;
 }
 
-// Insert or update a person identified by their Telegram id (the request_users path — we know
-// their id immediately). Non-null fields overwrite; nulls keep the existing value.
 async function upsertBotUserByTelegram({ telegramId, role, phone, username, displayName, operatorName, addedBy }) {
   const { rows } = await pool.query(
     `INSERT INTO bot_users (telegram_id, role, phone, username, display_name, operator_name, status, added_by)
@@ -312,7 +300,6 @@ async function upsertBotUserByTelegram({ telegramId, role, phone, username, disp
   return rows[0].id;
 }
 
-// Invite by phone before the person has opened the bot (telegram_id unknown yet).
 async function addPendingBotUser({ phone, role, displayName, addedBy }) {
   const { rows } = await pool.query(
     `INSERT INTO bot_users (telegram_id, role, phone, display_name, status, added_by)
@@ -322,7 +309,6 @@ async function addPendingBotUser({ phone, role, displayName, addedBy }) {
   return rows[0].id;
 }
 
-// When an unknown user shares their contact, match a pending invite by the last 9 phone digits.
 async function activatePendingByPhone(phone, { telegramId, username, displayName }) {
   const { rows } = await pool.query(
     `UPDATE bot_users SET telegram_id = $2, username = COALESCE($3, username),
@@ -348,8 +334,6 @@ async function deleteBotUser(id) {
   return rows[0] || null;
 }
 
-// Bootstrap: make sure a chat id is a director (used to seed TELEGRAM_BOOTSTRAP_CHAT_IDS at
-// startup so the owner can never lock themselves out). Never downgrades an existing row.
 async function seedDirector(telegramId) {
   await pool.query(
     `INSERT INTO bot_users (telegram_id, role, display_name, status)
@@ -364,7 +348,6 @@ async function callExists(generalCallId) {
   return rows.length > 0;
 }
 
-// JSONB params are stringified + cast (::jsonb) explicitly; null stays null.
 const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 
 async function saveCall(call) {
@@ -402,11 +385,7 @@ async function saveCall(call) {
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
 }
 
-// --- Local audio archive (see src/core/audioStore.js) ----------------------------------------
 
-// Where a call's recording lives locally (+ start_time, needed to derive the path for rows saved
-// before audio archiving existed). Used by the report clipper and the archive's playback button so
-// they read the local file instead of re-downloading from Binotel.
 async function getCallAudio(generalCallId) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
@@ -424,9 +403,6 @@ async function setCallAudio(generalCallId, { audioPath = null, audioBytes = null
   );
 }
 
-// Calls whose recording isn't archived yet, OLDEST FIRST — the oldest recordings are the ones
-// Binotel is most likely to age out, so they are fetched first. Rows already marked 'unavailable'
-// are skipped unless retryMissing is set (they have a permanent answer from Binotel).
 async function getCallsMissingAudio({ limit = null, retryMissing = false } = {}) {
   const statusClause = retryMissing
     ? `(audio_status IS NULL OR audio_status <> 'stored')`
@@ -454,9 +430,6 @@ async function getAudioArchiveStats() {
   return rows[0];
 }
 
-// Backfill / re-map: overwrite the analysis artifacts of an existing call (transcript + segments +
-// per-call behaviors + call_purpose) without touching its classification or attribution. Used by the
-// analysis backfill script (src/scripts/backfillAnalysis.js).
 async function updateCallAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose }) {
   await pool.query(
     `UPDATE calls SET transcript = COALESCE($2, transcript),
@@ -466,10 +439,6 @@ async function updateCallAnalysis(generalCallId, { transcript, segments, behavio
   );
 }
 
-// Full overwrite (transcript + segments + behaviors + call_purpose + classification), used by the
-// historical re-analysis backfill (src/scripts/backfillAnalysis.js) when it re-transcribes a call
-// via ElevenLabs and re-classifies it — unlike updateCallAnalysis, this ALSO replaces is_success/
-// weakest_stage/communication_score (null for non-sales calls, matching a fresh ingest's saveCall).
 async function updateCallFullAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose, isSuccess, weakestStage, communicationScore, introName, introCompany }) {
   await pool.query(
     `UPDATE calls SET transcript = COALESCE($2, transcript),
@@ -493,14 +462,9 @@ async function updateCallFullAnalysis(generalCallId, { transcript, segments, beh
   );
 }
 
-// --- Did the manager introduce himself (core/managerIntro.js) ---------------------------------
 
-// Personal extensions only - see that module's header for why a shared line cannot be measured this
-// way. Derived from the same map the ingest attributes calls with, so the two can't drift apart.
 const PERSONAL_EXTENSIONS = Object.keys(PERSONAL_OPERATORS);
 
-// Calls whose introduction hasn't been decided yet. NULL (not false) is the "not checked" marker, so
-// re-running the backfill never re-does settled rows.
 async function getCallsMissingIntro({ limit = null } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
@@ -512,9 +476,6 @@ async function getCallsMissingIntro({ limit = null } = {}) {
   return rows;
 }
 
-// The most recent N calls, whatever their current verdict — the selector for the MODEL pass
-// (npm run rescore:intro), which re-judges rather than fills gaps. Carries the existing verdict so
-// the run can report how far the model and the rules disagree.
 async function getRecentCallsForIntro(limit) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
@@ -530,18 +491,12 @@ async function getRecentCallsForIntro(limit) {
   return rows;
 }
 
-// --- Re-processing after a prompt change (bot/reprocess.js) ------------------------------------
 
-// Blocks are cut over ALL calls, newest first, and every job walks the same ordering — so "блок 2"
-// means the same 200 conversations no matter which analysis is being re-run. Each job then skips
-// the calls it does not apply to, and reports how many that was.
 async function countCallsWithText() {
   const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM calls WHERE ${HAS_TEXT}`);
   return rows[0].n;
 }
 
-// Just enough to decide whether a job applies to a call — no transcript, no segments. Used to price
-// a run before it starts, over the whole scope, without pulling megabytes of JSONB.
 async function getCallHeadsForReprocess({ limit, offset = 0 }) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber",
@@ -570,8 +525,6 @@ async function getCallsForReprocess({ limit, offset = 0 }) {
   return rows;
 }
 
-// The per-call MAP result only. Deliberately NOT updateCallFullAnalysis: that one also rewrites the
-// transcript and segments, which a prompt change has no business touching.
 async function updateCallMap(generalCallId, { behaviors, analysisVersion, callPurpose, introName, introCompany }) {
   await pool.query(
     `UPDATE calls SET behaviors = $2::jsonb, analysis_version = $3, call_purpose = $4,
@@ -597,9 +550,6 @@ async function updateCallIntro(generalCallId, { name, company }) {
   ]);
 }
 
-// Per manager x month: how often the introduction actually happened, split by direction. Restricted
-// to the personal extensions, where "whose call this is" is known from the number itself, so a
-// missing introduction is a service defect rather than an attribution problem.
 async function getIntroBreakdown() {
   const { rows } = await pool.query(
     `SELECT manager_name AS "manager", ${KYIV_MONTH} AS month,
@@ -620,9 +570,6 @@ async function getIntroBreakdown() {
   return rows;
 }
 
-// All calls still missing ElevenLabs timecodes (segments IS NULL) but with a stored transcript -
-// regardless of operator (named/bare/shared). Used by the historical re-analysis backfill to find
-// EVERYTHING that needs re-transcribing, not just a capped recent window per operator.
 async function getCallsMissingSegments() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName"
@@ -633,11 +580,6 @@ async function getCallsMissingSegments() {
   return rows;
 }
 
-// Historical calls ingested before call_purpose existed (call_purpose IS NULL) that still have a
-// stored transcript. The cheap purpose-only backfill (src/scripts/backfillPurpose.js) re-maps these
-// over the ALREADY-STORED transcript (no re-transcription) to set call_purpose, so routine info/
-// other calls stop being counted as sales by SALES_FILTER. Returns the existing segments too so the
-// backfill can pass them back unchanged (updateCallAnalysis overwrites segments unconditionally).
 async function getCallsMissingPurpose() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments
@@ -665,17 +607,12 @@ async function setCallPurpose(generalCallId, purpose) {
   await pool.query('UPDATE calls SET call_purpose = $2 WHERE general_call_id = $1', [generalCallId, purpose]);
 }
 
-// ---- Persisted analytics segments (report_segments) --------------------------------------------
-// Cache/reuse of the report "reduce" per (manager × time segment). See the table comment in
-// migrate(). period_start/period_end are absolute UTC instants (day-bounded, Kyiv, computed by the
-// bot); kind is 'scheduled' (frozen time series) or 'manual_tail' (ephemeral, deduped).
 
 const SEGMENT_COLS = `manager_name AS "managerName", period_start AS "periodStart",
   period_end AS "periodEnd", kind, findings, phrases, stats, call_ids AS "callIds",
   candidate_count AS "candidateCount", analysis_version AS "analysisVersion", meta,
   created_at AS "createdAt", updated_at AS "updatedAt"`;
 
-// One stored segment matching the exact (manager, start, end, kind), or null.
 async function getStoredSegment(managerName, start, end, kind) {
   const { rows } = await pool.query(
     `SELECT ${SEGMENT_COLS} FROM report_segments
@@ -685,8 +622,6 @@ async function getStoredSegment(managerName, start, end, kind) {
   return rows[0] || null;
 }
 
-// Most recent manual_tail for (manager, start) regardless of end — used to dedup a repeated
-// "Звіт зараз" (compare call_ids; unchanged → reuse without re-analysing).
 async function getLatestManualTail(managerName, start) {
   const { rows } = await pool.query(
     `SELECT ${SEGMENT_COLS} FROM report_segments
@@ -697,10 +632,6 @@ async function getLatestManualTail(managerName, start) {
   return rows[0] || null;
 }
 
-// Stored segments fully inside [rangeStart, rangeEnd), of the given kinds. Used by the reuse-only
-// report path (quarter), which must scrape together whatever analysis already exists — both the
-// day-level segments a week/month report cached and the slot-level 'scheduled' ones the auto-reports
-// froze. 'manual_tail' is excluded by the caller (ephemeral, and GC'd after two days).
 async function getStoredSegmentsInRange(managerName, rangeStart, rangeEnd, kinds = ['scheduled']) {
   const { rows } = await pool.query(
     `SELECT ${SEGMENT_COLS} FROM report_segments
@@ -712,7 +643,6 @@ async function getStoredSegmentsInRange(managerName, rangeStart, rangeEnd, kinds
   return rows;
 }
 
-// Insert or replace a segment (unique by manager+start+end+kind).
 async function upsertReportSegment(seg) {
   await pool.query(
     `INSERT INTO report_segments
@@ -732,8 +662,6 @@ async function upsertReportSegment(seg) {
   );
 }
 
-// The general_call_ids of processed calls in [start, end) for a manager — ordered, cheap. Used for
-// segment membership + late-call change detection (compare against a stored segment's call_ids).
 async function getCallIdsForOperator(managerName, start, end) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS id FROM calls
@@ -745,7 +673,6 @@ async function getCallIdsForOperator(managerName, start, end) {
   return rows.map((r) => r.id);
 }
 
-// Delete ephemeral manual_tail rows older than `before` (GC; scheduled segments are never GC'd).
 async function deleteOldManualTails(before) {
   await pool.query(
     `DELETE FROM report_segments WHERE kind = 'manual_tail' AND created_at < $1`,
@@ -753,11 +680,7 @@ async function deleteOldManualTails(before) {
   );
 }
 
-// ---- Operators (source of truth = Binotel names on the calls) -----------------------------
 
-// The set of named operators seen in calls - i.e. names Binotel put on personal extensions
-// (and names our shared-handset identification resolved to). Excludes bare numbers. Used as
-// the candidate list for identifying who spoke on a shared handset.
 async function getOperatorRoster() {
   const { rows } = await pool.query(
     `SELECT DISTINCT manager_name AS name FROM calls
@@ -766,8 +689,6 @@ async function getOperatorRoster() {
   return rows.map((r) => r.name);
 }
 
-// Everyone who appears in the call log (named operators + any still-unattributed shared
-// numbers), most active first - this is the bot's manager picker.
 async function getOperators() {
   const { rows } = await pool.query(
     `SELECT manager_name AS name, COUNT(*)::int AS n, MIN(start_time) AS "firstCall"
@@ -779,29 +700,11 @@ async function getOperators() {
   return rows;
 }
 
-// Numeric block for the report/stats. Sales-relevant = call_purpose 'sales' OR NULL (NULL = not yet
-// analysed → counted as sales for backward-compat). Conversion, avg score and the weakest stage are
-// computed over SALES-relevant calls only, so routine informational calls don't drag the numbers.
-// callCount is the total; salesCount/infoCount give the breakdown shown in the header.
 const SALES_FILTER = `(call_purpose = 'sales' OR call_purpose IS NULL)`;
 
-// "Незакриті угоди" — the СТО could not take the job (src/core/dealBlocker.js). Deliberately NOT
-// gated on call_purpose: measured on live data, blocked calls are usually classified 'info' (the MAP
-// sees a refusal, not a sales opportunity), so gating on 'sales' would count almost none of them.
-// NULL-safe: an unchecked row (deal_blocker IS NULL) counts as NOT blocked in both directions.
 const BLOCKED_FILTER = `deal_blocker IN ('no_slot','no_parts','out_of_scope')`;
 const NOT_BLOCKED_FILTER = `(deal_blocker IS NULL OR deal_blocker NOT IN ('no_slot','no_parts','out_of_scope'))`;
 
-// The blocker-aware numbers every screen shares. reachableCount is the CONVERSION DENOMINATOR: deals
-// the manager could actually have closed (sales calls minus the ones the СТО itself turned away), so
-// he is not scored down for business the service could not accept. The weakest stage is likewise
-// computed over non-blocked calls only - otherwise "закриття угоди" would top the funnel-problem list
-// purely because the shop was full.
-// NOTE the "OR is_success": a closed deal ALWAYS belongs in the denominator. By construction a blocked
-// call can't be successful (the blocker is only checked when the deal didn't close), but is_success is
-// rewritten later by backfill:analysis / rescore:sales, and if that ever flipped a blocked call to
-// successful, a plain "not blocked" denominator would put it in the numerator only — reporting a
-// conversion above 100%. Keeping it here makes successCount <= reachableCount true by construction.
 const BLOCKER_COLUMNS_SQL = `
        COUNT(*) FILTER (WHERE ${SALES_FILTER} AND (${NOT_BLOCKED_FILTER} OR is_success))::int AS "reachableCount",
        COUNT(*) FILTER (WHERE ${BLOCKED_FILTER})::int AS "blockedCount",
@@ -833,9 +736,6 @@ async function getOperatorStats(name, start, end) {
   return rows[0];
 }
 
-// The individual blocked calls of a period, for the report block that must appear even for a SINGLE
-// case. Carries the verified manager quote plus who called (so the director can ring the client back
-// when a slot frees up).
 async function getBlockedCalls(name, start, end) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
@@ -849,8 +749,6 @@ async function getBlockedCalls(name, start, end) {
   return rows;
 }
 
-// Calls whose blocker hasn't been decided yet. A CLOSED deal cannot be blocked by definition, so only
-// non-closed calls are checked - that keeps the (gpt-4o) cost proportional to what actually matters.
 async function getCallsMissingBlocker({ limit = null, relabel = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
@@ -911,10 +809,6 @@ async function getGlobalTotals() {
   return rows[0];
 }
 
-// Per-LINE volume, split by direction. The owner is buying advertising on the shared ("стаціонарні")
-// numbers, so incoming vs outgoing on each number is the point of this query — a line that is almost
-// entirely incoming is an advertising line, and its incoming count is what the ads move.
-// Grouped by month as well, because a lifetime total cannot show whether a campaign did anything.
 async function getManagerDailyTrend() {
   const { rows } = await pool.query(
     `SELECT manager_name AS manager,
@@ -946,10 +840,6 @@ async function getLineBreakdown() {
   return rows;
 }
 
-// WHO answered on each line, split by direction. Only the shared lines need this — a personal
-// extension has one owner by definition — but it is cheap to compute for all and it is also where
-// the "не розпізнано" slice comes from: on a shared line the operator is identified from the
-// recording, and when nobody introduced themselves manager_name stays the bare extension number.
 async function getLineManagerBreakdown() {
   const { rows } = await pool.query(
     `SELECT internal_number AS "number", manager_name AS "manager", ${KYIV_MONTH} AS month,
@@ -965,8 +855,6 @@ async function getLineManagerBreakdown() {
   return rows;
 }
 
-// How each call category splits between incoming and outgoing, for the whole period. Sits next to
-// the donut: the donut says what the line is spent on, this says who started those conversations.
 async function getPurposeDirectionSplit() {
   const { rows } = await pool.query(
     `SELECT COALESCE(call_purpose, 'sales') AS purpose,
@@ -1046,9 +934,6 @@ async function setCallBlocker(generalCallId, { blocker, quote = null, reason = n
   );
 }
 
-// Clears every blocker decision so the whole history can be re-judged (npm run backfill:blockers
-// -- --reset). Used when the detection RULES change: Черга/Профіль are a time series, so a period
-// judged by old rules is not comparable with one judged by new rules.
 async function resetAllBlockers() {
   const { rowCount } = await pool.query(
     `UPDATE calls SET deal_blocker = NULL, deal_blocker_quote = NULL WHERE deal_blocker IS NOT NULL`
@@ -1072,14 +957,7 @@ async function getBlockerStats() {
   return rows[0];
 }
 
-// Per-Kyiv-day numeric breakdown for a manager over [start, end) — the growth TREND shown in
-// multi-day reports (week/month/quarter). Live SQL (cheap, exact, deterministic); no LLM. Sales
 
-// Growth trajectory: the manager's numbers bucketed by Kyiv week or month, most recent `limit`
-// buckets (chronological order restored by the caller). Live SQL (retroactive over ALL history in
-// calls — the growth view works immediately, before report_segments accumulates). bucket ∈
-// 'week'|'month' (validated by the caller before it reaches date_trunc). topWeakStage per bucket
-// shows how the weakest sales stage evolves over time.
 async function getBucketedTrend(name, bucket, limit = 8) {
   const unit = bucket === 'month' ? 'month' : 'week';
   const { rows } = await pool.query(
@@ -1095,14 +973,9 @@ async function getBucketedTrend(name, bucket, limit = 8) {
      GROUP BY 1 ORDER BY 1 DESC LIMIT $3`,
     [name, unit, limit]
   );
-  return rows.reverse(); // chronological (oldest → newest)
+  return rows.reverse();
 }
 
-// All-time (no period filter) - the archive dropped its period-picker step in favor of paginating
-// straight through a manager's whole history, OLDEST FIRST (so paging right moves forward in time). Since 2026-07-27 the archive first asks for a CATEGORY
-// (call_purpose), so both queries take an optional purpose: 'sales' | 'info' | 'other' | 'none'
-// ('none' = call_purpose IS NULL, i.e. ingested before purpose detection / MAP failed), or null for
-// every call.
 const PURPOSE_FILTER = { none: 'AND call_purpose IS NULL' };
 
 function purposeClause(purpose, paramIndex) {
@@ -1136,8 +1009,6 @@ async function listOperatorCalls(name, limit, offset, purpose = null) {
   return rows;
 }
 
-// How many calls an operator has in each category — drives the archive's category picker (empty
-// categories aren't shown at all). Returns { sales, info, other, none }.
 async function getOperatorPurposeCounts(name) {
   const { rows } = await pool.query(
     `SELECT COALESCE(call_purpose, 'none') AS purpose, COUNT(*)::int AS count
@@ -1151,8 +1022,6 @@ async function getOperatorPurposeCounts(name) {
   return out;
 }
 
-// The N most recent calls of an operator (any period). Used by the one-off re-transcription script
-// and the analysis backfill (hasSegments lets the backfill skip calls already processed).
 async function getRecentCallsForOperator(name, limit = 5) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
@@ -1164,8 +1033,6 @@ async function getRecentCallsForOperator(name, limit = 5) {
   return rows;
 }
 
-// The N most recent calls overall (any operator), newest first — used by the one-off "re-run the
-// last few calls through ElevenLabs" script.
 async function getRecentCalls(limit = 7) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
@@ -1176,9 +1043,6 @@ async function getRecentCalls(limit = 7) {
   return rows;
 }
 
-// One manager's calls in [start, end) with the cached per-call analysis (behaviors + segments) and
-// metrics — feeds the report "reduce" (src/bot/analyze.js: reduceFindings). Same transcript filter
-// as getOperatorStats so counts line up. No LLM here: this is the cached "map" the reduce aggregates.
 async function getCallsForReport(name, start, end) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
@@ -1212,8 +1076,6 @@ async function getCallByGeneralId(generalCallId) {
   return rows[0] || null;
 }
 
-// All processed calls in [start, end) with transcript, for the periodic report (grouped by
-// manager_name in JS by the caller).
 async function getCallsWithTranscriptsInRange(start, end) {
   const { rows } = await pool.query(
     `SELECT manager_name AS "managerName", internal_number AS "internalNumber", transcript,
@@ -1227,13 +1089,6 @@ async function getCallsWithTranscriptsInRange(start, end) {
   return rows;
 }
 
-// Distinct operators that have processed calls in [start, end) — the set the periodic/manual
-// evidence report iterates over (one report per manager).
-// Excludes bare-numeric manager_name (901/902 - a shared handset never attributed to a person, see
-// identifyManager.js/SHARED_EXTENSIONS): a report exists to evaluate a MANAGER, so an unattributed
-// line has nothing to report on and would just produce an empty "insufficient data" report every
-// run. Calls originally on 901/902 that WERE identified to a real person are unaffected - they're
-// already grouped under that person's name here, same as any other call of theirs.
 async function getActiveOperatorsInRange(start, end) {
   const { rows } = await pool.query(
     `SELECT manager_name AS name, COUNT(*)::int AS n FROM calls
@@ -1242,10 +1097,6 @@ async function getActiveOperatorsInRange(start, end) {
      GROUP BY manager_name ORDER BY n DESC, manager_name`,
     [start, end]
   );
-  // A manager who took NO calls still gets a report. Zero is a reading, not an absence: without this
-  // a manager who stopped working simply vanishes from the daily reports, and nobody notices when.
-  // The roster is the closed set of real managers (PERSONAL_OPERATORS), not every name the calls
-  // table has ever seen — otherwise anyone who ever left would draw zeros forever.
   const seen = new Set(rows.map((r) => r.name));
   for (const name of Object.values(PERSONAL_OPERATORS)) {
     if (!seen.has(name)) rows.push({ name, n: 0 });
@@ -1253,8 +1104,6 @@ async function getActiveOperatorsInRange(start, end) {
   return rows;
 }
 
-// Calls whose manager_name is still a bare number (a shared handset we couldn't attribute to a
-// person, e.g. ingested before identification existed). Used by the reattribution backfill.
 async function getNumericManagerCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber",
@@ -1270,42 +1119,28 @@ async function updateManagerName(generalCallId, managerName) {
   await pool.query('UPDATE calls SET manager_name = $2 WHERE general_call_id = $1', [generalCallId, managerName]);
 }
 
-// ---- One-off operator-identity migration (src/scripts/normalizeOperators.js) --------------
 
-// Forces every call on a personal extension to the canonical name for that extension, regardless
-// of whatever manager_name it currently has (a bare number, or a mis-identified colleague).
 async function reassignCallsByExtension(internalNumber, managerName) {
   const { rowCount } = await pool.query('UPDATE calls SET manager_name = $2 WHERE internal_number = $1', [internalNumber, managerName]);
   return rowCount;
 }
 
-// Renames every call under an old manager_name spelling to the new one (e.g. a RU->UK rename),
-// regardless of which extension it came from - covers shared-handset calls that identifyManager
-// already matched to that person under the old spelling.
 async function renameManagerEverywhere(oldName, newName) {
   const { rowCount } = await pool.query('UPDATE calls SET manager_name = $2 WHERE manager_name = $1', [oldName, newName]);
   return rowCount;
 }
 
-// Permanently drops every call (and any queued retry) from an extension excluded from ingestion.
 async function deleteCallsByExtension(internalNumber) {
   const { rowCount } = await pool.query('DELETE FROM calls WHERE internal_number = $1', [internalNumber]);
   await pool.query('DELETE FROM pending_calls WHERE internal_number = $1', [internalNumber]);
   return rowCount;
 }
 
-// Wipes the cached report-segment analysis entirely, so the next report for every manager
-// recomputes fresh over the corrected `calls` table instead of reusing findings/call_ids frozen
-// before an operator-identity fix. Cheap to recompute (self-consistency reduce, per manager/day).
 async function clearAllReportSegments() {
   const { rowCount } = await pool.query('DELETE FROM report_segments');
   return rowCount;
 }
 
-// One-off historical backfill (src/scripts/backfillClientNumbers.js): fills the client's number and
-// name for a row that already exists but was ingested before those fields were captured. Each column
-// is guarded by its own `IS NULL`, so it only ever fills a gap and never overwrites a value a fresh
-// ingest already saved - safe to re-run. Returns rowCount (0 = nothing was missing).
 async function updateDirectionIfMissing(generalCallId, direction) {
   const { rowCount } = await pool.query(
     'UPDATE calls SET direction = $2::text WHERE general_call_id = $1 AND direction IS NULL AND $2::text IS NOT NULL',
@@ -1323,9 +1158,6 @@ async function getDirectionStats() {
 }
 
 async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName) {
-  // The ::text casts are required, not cosmetic: $2/$3 appear only inside COALESCE and `IS NOT NULL`,
-  // neither of which tells Postgres the parameter type, so without them the statement fails outright
-  // with "could not determine data type of parameter $2".
   const { rowCount } = await pool.query(
     `UPDATE calls SET
        client_number = COALESCE(client_number, $2::text),
@@ -1337,8 +1169,6 @@ async function updateClientInfoIfMissing(generalCallId, clientNumber, clientName
   return rowCount;
 }
 
-// Sales calls that have timecoded segments — the input for npm run rescore:sales (re-scoring under
-// the dialogue-mechanics rubric). Only these can be judged on interruptions/latency at all.
 async function getSalesCallsWithSegments() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments,
@@ -1351,17 +1181,10 @@ async function getSalesCallsWithSegments() {
   return rows;
 }
 
-// Updates ONLY the communication score, leaving is_success / weakest_stage alone (see
-// src/scripts/rescoreSales.js: a rubric change must not rewrite conversion history).
 async function updateCallScore(generalCallId, score) {
   await pool.query('UPDATE calls SET communication_score = $2 WHERE general_call_id = $1', [generalCallId, score]);
 }
 
-// ---- Взаємний нагляд двох процесів -------------------------------------------------------
-// Кожен процес відмічається «я живий», а сусід дивиться, чи давно була відмітка. Це закриває
-// найгірший сценарій: процес умер, і про це ніхто не знає (pm2 після max_restarts просто
-// перестає піднімати бота). Відмітка в базі, бо процеси не бачать один одного інакше.
-// ⚠️ Отже, обидва watchdog-и залежать від Postgres: якщо ляже сама база, вони теж мовчать.
 async function setHeartbeat(name, when = new Date()) {
   await setState(`heartbeat_${name}`, when.toISOString());
 }
@@ -1373,7 +1196,6 @@ async function getHeartbeat(name) {
   return Number.isNaN(at.getTime()) ? null : at;
 }
 
-// ---- Journal of incidents (see the error_log table above) --------------------------------
 
 async function insertErrorLog(entry) {
   await pool.query(
@@ -1414,7 +1236,6 @@ async function listErrorLog(limit = 10, { code = null } = {}) {
   return rows.map(mapErrorRow);
 }
 
-// The incident id is what the person forwards, so this is the main lookup path.
 async function getErrorLogByIncident(incident) {
   const { rows } = await pool.query(
     'SELECT * FROM error_log WHERE incident = $1 ORDER BY at DESC LIMIT 1',
@@ -1423,8 +1244,6 @@ async function getErrorLogByIncident(incident) {
   return rows[0] ? mapErrorRow(rows[0]) : null;
 }
 
-// Grouped by class: "OAI-QUOTA - 12 разів, останній 20:14" reads far better than 12 separate rows,
-// and it is what tells a developer whether something is a one-off or a pattern.
 async function summarizeErrorLog(since) {
   const { rows } = await pool.query(
     `SELECT code, COUNT(*)::int AS "count", MAX(at) AS "lastAt"
@@ -1440,17 +1259,12 @@ async function deleteOldErrorLog(before) {
   return rowCount;
 }
 
-// Earliest call currently on file - the backfill's start boundary (no point sweeping Binotel
-// further back than our own oldest row).
 async function getEarliestCallTime() {
   const { rows } = await pool.query('SELECT MIN(start_time) AS "min" FROM calls');
   return rows[0]?.min ?? null;
 }
 
-// ---- Knowledge base (RAG over uploaded manuals, pgvector) ---------------------------------
 
-// Separate from migrate() so a missing pgvector extension disables only the KB, not the whole
-// bot. Called (guarded) at bot startup.
 async function migrateKb() {
   await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
   await pool.query(`
@@ -1509,8 +1323,6 @@ async function insertKbDoc(filename, uploadedBy, fileId, mime, audience = 'mecha
   return rows[0].id;
 }
 
-// Multi-row INSERT of chunk batches on an existing client. Batched (not one-by-one) to keep the
-// parameter count per statement sane on a 300+ chunk textbook.
 const CHUNK_INSERT_BATCH = 100;
 
 async function insertChunkRows(client, docId, chunks) {
@@ -1531,9 +1343,6 @@ async function insertChunkRows(client, docId, chunks) {
   await client.query('UPDATE kb_docs SET chunk_count = $2 WHERE id = $1', [docId, chunks.length]);
 }
 
-// chunks: [{ ord, content, embedding: number[], pageStart?: number|null, pageEnd?: number|null }]
-// Transactional: a failure mid-way used to leave a half-indexed document with a chunk_count that
-// lied about it. Either every chunk lands or none does.
 async function insertKbChunks(docId, chunks) {
   const client = await pool.connect();
   try {
@@ -1548,9 +1357,6 @@ async function insertKbChunks(docId, chunks) {
   }
 }
 
-// Re-index an existing document in place (npm run kb:reindex): swap its chunks for freshly built
-// ones in ONE transaction, so the doc is never searchable in a half-rebuilt state. Keeps the
-// kb_docs row (id/filename/audience/file_id) untouched, so deep-links and roles survive.
 async function replaceKbDocChunks(docId, chunks) {
   const client = await pool.connect();
   try {
@@ -1566,10 +1372,6 @@ async function replaceKbDocChunks(docId, chunks) {
   }
 }
 
-// audiences: null/undefined => search everything (director/marketer); an array (e.g.
-// ['manager','both']) => only chunks from docs for that role, so KB answers never leak across roles.
-// Returns chunkId (dedup across multi-query search), page range (source citation) and docId
-// (deep-link to the original file) alongside the content.
 async function searchKbChunks(queryEmbedding, k = 6, audiences = null) {
   const params = [vecToStr(queryEmbedding), k];
   let filter = '';
@@ -1589,10 +1391,6 @@ async function searchKbChunks(queryEmbedding, k = 6, audiences = null) {
   return rows;
 }
 
-// Lexical half of the hybrid search. tsQuery is a ready to_tsquery('simple') string built by the
-// caller (kb.js: toPrefixTsQuery) — prefix terms OR'ed together, e.g. 'двигун:* | клапан:*', so
-// Ukrainian/Russian suffix morphology still matches without a stemmer. Same shape of rows as
-// searchKbChunks, so the two result sets can be fused rank-wise.
 async function searchKbChunksLexical(tsQuery, k = 12, audiences = null) {
   const params = [tsQuery, k];
   let filter = '';
@@ -1634,8 +1432,6 @@ async function getKbDoc(id) {
   return rows[0] || null;
 }
 
-// Docs whose original is still fetchable from Telegram (file_id present) — the input for
-// npm run kb:reindex, which rebuilds chunks with the current chunking/embedding pipeline.
 async function getKbDocsWithFile() {
   const { rows } = await pool.query(
     `SELECT id, filename, file_id AS "fileId", mime, audience, chunk_count AS "chunkCount"
@@ -1652,7 +1448,6 @@ async function deleteKbDoc(id) {
   await pool.query('DELETE FROM kb_docs WHERE id = $1', [id]);
 }
 
-// ---- Pending queue (ingest) ---------------------------------------------------------------
 
 async function upsertPending(call, errorMessage) {
   await pool.query(
@@ -1680,8 +1475,6 @@ async function markPendingFailed(generalCallId) {
   await pool.query(`UPDATE pending_calls SET status = 'failed', updated_at = now() WHERE general_call_id = $1`, [generalCallId]);
 }
 
-// Drops a pending entry outright (no retry, no 'failed' record) - used for calls from an excluded
-// extension that should never have been queued at all.
 async function removePendingCall(generalCallId) {
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [generalCallId]);
 }
@@ -1698,7 +1491,6 @@ async function getPendingCalls() {
   return rows;
 }
 
-// ---- App state (checkpoint + report scheduler) --------------------------------------------
 
 async function getState(key) {
   const { rows } = await pool.query('SELECT value FROM app_state WHERE key = $1', [key]);
@@ -1717,9 +1509,6 @@ async function deleteState(key) {
   await pool.query('DELETE FROM app_state WHERE key = $1', [key]);
 }
 
-// Analysis prompt (system instruction for the per-manager report / operator-quality analysis).
-// Editable by the owner via the bot's /prompt flow; null when unset -> analyze.js falls back to
-// its built-in default. Kept here (typed wrapper) like the other app_state keys.
 async function getStoredAnalyzePrompt() {
   return getState('analyze_prompt');
 }
@@ -1732,9 +1521,6 @@ async function clearStoredAnalyzePrompt() {
   await deleteState('analyze_prompt');
 }
 
-// Communication-score rubric (the tunable criteria for the per-call communicationScore 1-10).
-// Editable by the owner via the bot's /rubric flow; null when unset -> classifyCall falls back to
-// its built-in DEFAULT_SCORE_RUBRIC. Same typed-wrapper pattern as the analysis prompt.
 async function getStoredScoreRubric() {
   return getState('score_rubric');
 }
@@ -1747,11 +1533,6 @@ async function clearStoredScoreRubric() {
   await deleteState('score_rubric');
 }
 
-// Notification recipients (ingest failure alerts + daily PDF reports). Managed by admins in the
-// bot's /settings screen and stored here as a JSON array of { id, name }: id is a Telegram chat id
-// (a user who has started the bot, or a group), name is a human label shown in the settings list.
-// Replaces the old single TELEGRAM_CHAT_ID / BOT_REPORT_CHAT_ID env vars — both are now lists so a
-// message can fan out to several people. kind is 'alert' | 'report'.
 async function getRecipients(kind) {
   const raw = await getState(`${kind}_recipients`);
   if (!raw) return [];
@@ -1766,7 +1547,7 @@ async function getRecipients(kind) {
 async function addRecipient(kind, { id, name }) {
   const list = await getRecipients(kind);
   const sid = String(id);
-  if (list.some((r) => String(r.id) === sid)) return list; // already a recipient, no duplicate
+  if (list.some((r) => String(r.id) === sid)) return list;
   list.push({ id: sid, name: name || sid });
   await setState(`${kind}_recipients`, JSON.stringify(list));
   return list;
@@ -1805,25 +1586,8 @@ async function setReportUntil(date) {
   await setState('last_report_until', date.toISOString());
 }
 
-// Kyiv-local times the daily PDF report fires at, managed by admins in /settings (was the
-// BOT_REPORT_TIMES env var). Stored as a JSON array of canonical "HH:MM" strings. An ABSENT key
-// falls back to the default (so behaviour is unchanged until edited); an explicitly stored empty
-// array means "no scheduled reports". report.js reads this on every scheduler tick.
 const DEFAULT_REPORT_TIMES = ['13:00', '19:30'];
 
-// Dedup state for every watchdog alert of the ingest (Binotel outage, ElevenLabs balance and
-// permission, free disk space). ONE mechanism for all of them - see jobs/alerts.js: alertOnce.
-// Stored as JSON { since, lastAlertAt } while the problem is active, and DELETED once it clears,
-// so "no key" means "everything is fine".
-//
-// Kept in the database rather than in memory because the poller is a cron process that exits after
-// every run - in-memory dedup could never work here.
-//
-// The keys are the historical ones ('elevenlabs_balance_state', 'audio_space_state'), which used to
-// hold plain 'ok'/'low' strings. Such a value doesn't parse as an object and is therefore read as
-// "no active alert": right after the deploy an already-standing problem re-alerts once, and from
-// then on the dedup is exact. A stale 'ok' produces nothing at all.
-// Найдешевша перевірка «база відповідає» — для екрана /health. Кидає, якщо ні.
 async function pingDb() {
   await pool.query('SELECT 1');
   return true;
@@ -1836,7 +1600,7 @@ async function getAlertState(key) {
     const parsed = JSON.parse(raw);
     return parsed && typeof parsed === 'object' ? parsed : null;
   } catch {
-    return null; // legacy plain string or corrupted value - the next check re-arms it
+    return null;
   }
 }
 
@@ -1848,8 +1612,6 @@ async function clearAlertState(key) {
   await deleteState(key);
 }
 
-// Прибрати цілу групу станів за префіксом — потрібно, щоб здоровий прогін інжесту зняв усі
-// алерти про своє падіння, не перелічуючи класи помилок по одному.
 async function clearAlertStates(prefix) {
   const { rowCount } = await pool.query('DELETE FROM app_state WHERE key LIKE $1', [`${prefix}%`]);
   return rowCount;
@@ -1881,8 +1643,6 @@ async function removeReportTime(hhmm) {
   return list;
 }
 
-// Dedup of scheduled-report DELIVERIES across restarts. A slot key is "YYYY-MM-DD-HH:MM" (Kyiv).
-// Stored as a JSON array, pruned to the most recent keys (a day has only a few slots).
 async function getDeliveredSlots() {
   const raw = await getState('delivered_report_slots');
   if (raw == null) return [];

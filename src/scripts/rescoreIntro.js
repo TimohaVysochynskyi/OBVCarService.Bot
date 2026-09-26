@@ -3,15 +3,6 @@ import { migrate, getRecentCallsForIntro, updateCallIntro } from '../core/store.
 import { analyzeCallBehaviors } from '../core/analyzeCall.js';
 import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
 
-// Re-judge "did the manager introduce himself" on the most recent N calls USING THE MODEL, i.e. the
-// exact same judgement new calls get at ingest (core/analyzeCall.js). Named rescore, not backfill,
-// for the same reason as rescore:sales: it COSTS money, while every backfill:* script is free.
-//
-// Only intro_name / intro_company are written. The call's purpose, score and behaviours are left
-// alone on purpose — moving those would shift conversion and the manager scores underneath a report
-// the owner has already read.
-//
-// Safe to re-run: it overwrites its own two columns and nothing else.
 
 const arg = (flag, fallback) => {
   const i = process.argv.indexOf(flag);

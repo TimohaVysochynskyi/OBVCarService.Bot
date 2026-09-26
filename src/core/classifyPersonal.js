@@ -7,8 +7,6 @@ import { definePrompt } from './prompts.js';
 
 const MAX_CHARS = 8000;
 
-// The category list itself is injected from the shared 'purpose' prompt rather than duplicated —
-// two copies of the same definitions would drift, and the owner would have to edit both.
 const personalPrompt = definePrompt({
   key: 'personal',
   group: 'call',

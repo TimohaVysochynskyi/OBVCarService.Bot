@@ -2,14 +2,7 @@ import 'dotenv/config';
 import { migrate, updateClientInfoIfMissing, getEarliestCallTime } from '../core/store.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 
-// One-off: the CLIENT's phone number (Binotel's externalNumber) was never captured before
-// 2026-07-24 - the archive's call-detail screen had nothing to show but the internal call id,
-// which reads confusingly like a phone number (see CLAUDE.md "Поточний статус"). Fresh ingests
-// now save it directly; this script re-sweeps Binotel's call list for every row already in our DB
-// and fills in the gap. Cheap: only list-of-calls-for-period + DB writes, no transcription/LLM.
-// Idempotent (only ever fills client_number where it's still NULL) - safe to re-run, e.g. after a
-// concurrent historical backfill (npm run backfill) has added more rows for the same period.
-const MAX_CHUNK_MS = 23 * 60 * 60 * 1000; // Binotel's 24h cap on this endpoint
+const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;
 
 function splitIntoChunks(start, end) {
   const chunks = [];
@@ -53,9 +46,6 @@ async function main() {
       failedChunks += 1;
       console.error(`[backfillClientNumbers]   chunk ${chunkStart.toISOString()} -> ${chunkEnd.toISOString()} FAILED: ${err.message}`);
     }
-    // This loop fires nothing but list-of-calls-for-period back to back (no per-call work to pace
-    // it, unlike the main ingest) - a short pause keeps it under Binotel's rate limit instead of
-    // relying entirely on withRetry's backoff.
     if (i < chunks.length - 1) await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 

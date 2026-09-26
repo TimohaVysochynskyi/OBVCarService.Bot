@@ -3,10 +3,6 @@ import { LINE_KINDS } from '../core/phoneLines.js';
 import { formatPhone, formatLinePhone } from './operators.js';
 import { ALL } from './globalReportData.js';
 
-// Renders the report's index.html. Styles and behaviour are NOT inlined any more — they are
-// assets/app.css (built from tailwind/input.css) and assets/app.js, shipped beside this page by
-// globalReportBundle.js. The page therefore only works as part of its folder, which is exactly how
-// it is delivered: a zip now, a subdomain later.
 
 const PURPOSE_ORDER = ['sales', 'info', 'other', 'personal'];
 const PURPOSE_COLORS = { sales: '#3b6fb0', info: '#2f7d58', other: '#8c5aa8', personal: '#7b5334' };
@@ -65,24 +61,20 @@ function share(count, total) {
   return `${pct < 10 ? pct.toFixed(1) : Math.round(pct)}%`;
 }
 
-// The owner's own header format: the start without a year, the end with a short one.
 const periodSpan = (from, to) => {
   const a = new Date(from);
   const b = new Date(to);
   return `${pad2(a.getUTCDate())}.${pad2(a.getUTCMonth() + 1)} — ${formatDateShort(b)}`;
 };
 
-// One meaning per colour inside a card: green is incoming everywhere (arrow and bar), blue is
-// outgoing. Emoji arrows were dropped because every platform draws them differently and they carry
-// no colour of their own, so the split had to be read from the numbers instead of seen.
 const IN_COLOR = '#2f7d58';
 const OUT_COLOR = '#1d4ed8';
 
 function arrow(direction) {
   const path =
     direction === 'in'
-      ? 'M13 3 5 11M5 5v6h6' // diagonal down-left, arrowhead in the corner it points at
-      : 'M3 13 11 5M5 5h6v6'; // diagonal up-right
+      ? 'M13 3 5 11M5 5v6h6'
+      : 'M3 13 11 5M5 5h6v6';
   const color = direction === 'in' ? IN_COLOR : OUT_COLOR;
   return `<svg viewBox="0 0 16 16" class="inline-block h-3.5 w-3.5 shrink-0 align-[-0.15em]" aria-hidden="true" style="color:${color}"><path d="${path}" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 }
@@ -92,7 +84,6 @@ const clock = (seconds) => {
   return `${Math.floor(s / 60)}:${pad2(s % 60)}`;
 };
 
-// --- shared pieces ---------------------------------------------------------------------------
 
 const CARD = 'rounded-2xl border border-line bg-card p-4 sm:p-5 mb-4';
 const H2 = 'text-lg sm:text-xl font-semibold mb-3';
@@ -115,9 +106,6 @@ function tabStrip(items, attr, activeKey) {
 }
 
 function tip(title, body) {
-  // Opening the popover fills the circle and turns the "i" white — the client asked for exactly
-  // that, and it is the only sign of WHICH badge is open. It styles a child by the PARENT's [open]
-  // state, which utilities cannot express, so the rule lives in the components layer.
   return `<details data-tip class="relative shrink-0 no-print">
       <summary class="flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border border-line text-[11px] font-bold text-muted select-none transition" title="Пояснення">i</summary>
       <div class="absolute right-0 top-7 z-20 w-56 rounded-xl border border-line bg-white p-3 text-left text-xs leading-relaxed text-muted shadow-lg">
@@ -144,11 +132,7 @@ function donut(purposes, total) {
     </svg>`;
 }
 
-// --- audio evidence --------------------------------------------------------------------------
 
-// A clip is attached only when the quote had a timecode AND the cut succeeded, so the player never
-// appears over silence. Without one the quote still stands on its own — it is the evidence; the
-// audio is a convenience for checking it.
 function player(example) {
   if (!example.audio) return '';
   const length = clock(example.audioSeconds);
@@ -164,11 +148,7 @@ function player(example) {
     </div>`;
 }
 
-// --- call structure ---------------------------------------------------------------------------
 
-// The donut says what the line is spent ON; this table says WHO started those conversations. Both
-// are all-period on purpose — the donut would have to be redrawn in the browser to follow a month
-// switch, and the thing that genuinely needs a time axis is the per-number block below.
 function categoryTable(purposes, directions, total) {
   const rows = PURPOSE_ORDER.map((p) => {
     const count = purposes[p] || 0;
@@ -210,15 +190,6 @@ function categoryTable(purposes, directions, total) {
     </table></div>`;
 }
 
-// One card per internal number. The shared ("стаціонарні") lines come first: those are the numbers
-// that go into advertising, and the split bar is there so "almost all incoming" reads at a glance
-// rather than having to be worked out from two numbers.
-// Who actually picked up on a shared line. Only rendered for those: a personal extension has one
-// owner by definition, and a one-row table would be noise. The rows sum to the card's own total,
-// which is the point — the "не розпізнано" row is what closes that gap instead of hiding it.
-// Metrics down the side, people across the top — the shape the owner sketched. Incoming/outgoing
-// are sub-rows of "Усього" rather than a second number crammed into every cell: the split matters
-// most on the total, and two figures per cell in a half-width card is unreadable.
 const LM_ROWS = [
   { field: 'sales', label: 'Угоди' },
   { field: 'success', label: 'Записи' },
@@ -293,8 +264,6 @@ function lineCard(line) {
 function linesSection(report) {
   const lines = (report.lines || []).filter((l) => l.kind !== 'unknown');
   if (!lines.length) return '';
-  // Two grids on purpose: a shared line carries a breakdown table and needs the width, a personal
-  // one is a short card and three fit comfortably across.
   const shared = lines.filter((l) => l.kind === 'shared');
   const rest = lines.filter((l) => l.kind !== 'shared');
 
@@ -310,10 +279,7 @@ function linesSection(report) {
     ${grid(rest, 'sm:grid-cols-2 lg:grid-cols-3')}`;
 }
 
-// --- did the manager introduce himself -------------------------------------------------------
 
-// Green = the standard was met. These bars only ever measure compliance, so one colour is enough and
-// a second would invite reading a meaning into it that isn't there.
 const INTRO_COLOR = '#2f7d58';
 
 function introBar(field, label) {
@@ -341,8 +307,6 @@ function introCard(manager) {
     </article>`;
 }
 
-// Numbers are left EMPTY in the markup and filled by app.js, same as the line cards: otherwise the
-// first frame shows all-period figures under a month tab until the script runs.
 function introSection(report) {
   const intro = report.intro;
   if (!intro?.managers?.length || !intro.total?.checked) return '';
@@ -354,7 +318,6 @@ function introSection(report) {
   </section>`;
 }
 
-// --- manager card ----------------------------------------------------------------------------
 
 const SERIES = [
   { key: 'sales', title: 'Угоди', color: '#3b6fb0', axis: 'left' },
@@ -401,7 +364,7 @@ function trendBlock(manager) {
 }
 
 function findingBlock(finding, kind) {
-  const accent = kind === 'plus' ? 'border-l-plus' : 'border-l-minus';
+  const dot = kind === 'plus' ? 'bg-plus' : 'bg-minus';
   const quoteBorder = kind === 'plus' ? 'border-plus/40' : 'border-minus/40';
   const examples = finding.examples
     .map(
@@ -420,10 +383,12 @@ function findingBlock(finding, kind) {
         <ul class="mt-3 list-none p-0">${examples}</ul>
       </details>`
     : '';
-  return `<article class="break-avoid mb-3 rounded-xl border border-line border-l-4 ${accent} p-3">
-      <h4 class="text-[15px] font-semibold">${esc(finding.claim)}</h4>
-      ${finding.why ? `<p class="mt-1 text-sm text-muted">${esc(finding.why)}</p>` : ''}
-      ${finding.action ? `<p class="mt-1 text-sm">${esc(finding.action)}</p>` : ''}
+  return `<article class="break-avoid mb-3 rounded-xl border border-line p-3">
+      <h4 class="flex items-start gap-2 text-[15px] font-semibold">
+        <span class="mt-1.5 h-2 w-2 shrink-0 rounded-full ${dot}"></span>${esc(finding.claim)}
+      </h4>
+      ${finding.why ? `<p class="mt-1 pl-4 text-sm text-muted">${esc(finding.why)}</p>` : ''}
+      ${finding.action ? `<p class="mt-1 pl-4 text-sm">${esc(finding.action)}</p>` : ''}
       ${details}
     </article>`;
 }
@@ -455,7 +420,6 @@ function managerCard(manager, months) {
     </section>`;
 }
 
-// --- comparison ------------------------------------------------------------------------------
 
 const CMP_METRICS = [
   {
@@ -576,7 +540,6 @@ function compareSection(report) {
   </section>`;
 }
 
-// --- refusals --------------------------------------------------------------------------------
 
 function barList(items, { max }) {
   return items
@@ -678,7 +641,6 @@ function methodSection(report) {
     </section>`;
 }
 
-// --- page ------------------------------------------------------------------------------------
 
 function renderGlobalReport(report) {
   const { totals, months, managers, declines } = report;

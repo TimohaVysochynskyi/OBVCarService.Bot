@@ -7,41 +7,11 @@ import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
 import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
 
-// ============================================================================================
-// REDUCE step of the evidence-first report pipeline.
-//
-// The per-call MAP (src/core/analyzeCall.js) already tagged each call's manager behaviours with
-// VERBATIM, code-verified quotes (+ timecodes), cached in calls.behaviors. Here we only AGGREGATE
-// those cached behaviours for a period into a few evidence-backed findings — no transcript is
-// re-analysed, so day/week/month/quarter reports are cheap and consistent.
-//
-// Hard rules the CODE enforces regardless of the (tunable) guidance prompt:
-//   • the model may reference evidence ONLY by id from the candidate list we give it → it cannot
-//     invent a quote;
-//   • every referenced quote is re-verified against its call's segments (findQuote) → paraphrased /
-//     mismatched quotes are dropped;
-//   • one quote can back only ONE finding (no duplicate evidence across findings);
-//   • a finding with < MIN_EVIDENCE verified quotes is dropped entirely.
-// "Готові формулювання" are authored by the model as IDEAL phrasings — NEVER copied from transcripts
-// (so ASR/surzhyk artefacts can't leak in).
-// ============================================================================================
 
-// How many verified, distinct quotes a finding must have to survive. Lowered 3 -> 2 (2026-07-27,
-// owner's call): at ~1-3 sales calls a day, requiring three examples of the SAME behaviour meant
-// most reports had nothing to show. Every text that mentions the threshold interpolates this
-// constant, so the number can never drift out of sync with the code again.
 const MIN_EVIDENCE = 2;
-// Cap on "Готові формулювання" (recommended_phrases) shown in a report - kept low by request
-// (reduced from 7 to 5, 2026-07-24: too many phrases were being dumped on the reader at once).
 const MAX_PHRASES = 5;
 const reduceModel = () => process.env.OPENAI_REPORT_MODEL || 'gpt-4o';
 
-// The tunable GUIDANCE (owner edits it via /prompt). It shapes tone/wording of claim/why/action and
-// the recommended phrases — it does NOT control structure or the evidence rules (code does). Stored
-// in app_state.analyze_prompt; the legacy prose prompt is reset once by migrate().
-// Effective guidance = owner's custom text (app_state) or the built-in default. (Function names are
-// kept as *AnalyzePrompt* so the existing /prompt UI wiring in prompt.js / index.js is unchanged.)
-// ⚠️ storeKey keeps the original app_state row so the owner's existing custom guidance survives.
 const getAnalyzePrompt = definePrompt({
   key: 'reportGuidance',
   storeKey: 'analyze_prompt',
@@ -102,9 +72,6 @@ const FINDINGS_SCHEMA = {
   },
 };
 
-// Second-pass relevance check: for each finding, which of its (already existence-verified) quotes
-// ACTUALLY demonstrate the claim. Kills the "quote exists but is unrelated" failure the existence
-// check alone can't catch.
 const RELEVANCE_SCHEMA = {
   name: 'evidence_relevance',
   strict: true,
@@ -129,17 +96,6 @@ const RELEVANCE_SCHEMA = {
   },
 };
 
-// Flatten every call's cached behaviours into a candidate pool with stable ids ("e0","e1",…). Keeps
-// the source call + timecode so verification/audio can resolve back to the exact spot. Non-sales
-// calls (call_purpose 'info'/'other') are skipped entirely so a routine status update never becomes
-// a "sales mistake" finding. (NULL purpose = not yet analysed → included for backward-compat.)
-// Dialogue-mechanics candidates are detected in CODE from the call's timecoded segments
-// (core/dialogueMetrics.js), not by the per-call MAP. Two consequences, both deliberate:
-//   • they are retroactive and free — segments are already stored, so historical calls contribute
-//     these candidates without any re-ingest or extra LLM cost;
-//   • the count is verifiable rather than a model's impression.
-// The reduce model still decides whether a given one is worth reporting (a pause right after
-// "секунду, зараз перевірю" is not a mistake) — code measures, the model judges.
 function dialogueCandidates(call) {
   const segs = Array.isArray(call.segments) ? call.segments : null;
   if (!segs?.length) return [];
@@ -149,7 +105,7 @@ function dialogueCandidates(call) {
     if (!it.quote) continue;
     out.push({
       type: 'error',
-      stage: SALES_STAGES[0], // internal clustering hint only; both signals concern hearing the client
+      stage: SALES_STAGES[0],
       label: 'перебив клієнта на півслові',
       quote: it.quote,
       start: it.start,
@@ -168,9 +124,6 @@ function dialogueCandidates(call) {
       start: p.start,
       end: p.end,
       segIndex: p.segIndex,
-      // The manager's previous line is included on purpose: that is where a justification like
-      // "секунду, зараз перевірю" / "побудь на линії" sits, and the model needs it to tell a
-      // legitimate hold from real dead air.
       note:
         `клієнт сказав: «${p.clientText}», менеджер відповів лише через ${p.pauseSec}с` +
         (p.prevManagerText ? `; попередня репліка менеджера: «${p.prevManagerText}»` : ''),
@@ -194,17 +147,12 @@ function buildCandidates(calls) {
         startTime: c.startTime,
         segments: c.segments || null,
         type: it.type === 'strength' ? 'strength' : 'error',
-        // stage is internal hint metadata for the reduce; keep any stored value, but never emit a
-        // non-taxonomy fallback (shared 4 stages — core/stages.js). Old cached rows may still carry
-        // a legacy stage string; that's harmless (model input only, not shown in the finding).
         stage: it.stage || SALES_STAGES[0],
         label: it.label || '',
         quote: it.quote,
         start: it.start ?? null,
         end: it.end ?? null,
         segIndex: it.segIndex ?? null,
-        // Extra context for the reduce model (dialogue-mechanics candidates only) — what the client
-        // was saying, so the model can tell a rude interruption from a justified pause.
         note: it.note || null,
       };
       candidates.push(cand);
@@ -214,48 +162,24 @@ function buildCandidates(calls) {
   return { candidates, byId };
 }
 
-// One candidate rendered for the model: [e3] (error/закриття) label | "quote"
 function renderCandidate(c) {
   return `[${c.id}] (${c.type}/${c.stage}) ${c.label} | "${c.quote}"${c.note ? ` | ${c.note}` : ''}`;
 }
 
-// Re-verify a candidate's quote against its own call's segments (defensive; also refreshes the
-// timecode used for audio). Calls without segments (OpenAI fallback) were already verified at map
-// time, so keep them (no timecode → no clip). Returns the evidence object or null.
 function verifyCandidate(c) {
-  // note = the code-measured context of a dialogue-mechanics candidate (what the client was saying,
-  // how long the pause was). It travels WITH the evidence because such a quote can never prove the
-  // claim on its own: "перебив клієнта" is demonstrated by the turn order and the client's cut-off
-  // line, not by the manager's sentence in isolation. The relevance reviewer and the delivered
-  // report both need it to make sense of the evidence.
   const note = c.note || null;
   if (Array.isArray(c.segments) && c.segments.length) {
     const hit = findQuote(c.segments, c.quote, { requireRole: 'manager' });
     if (!hit) return null;
     return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end, note };
   }
-  // No segments to check against: trust the map-time verification, but require a non-trivial quote.
   if (String(c.quote).trim().length < 3) return null;
   return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note };
 }
 
-// PURE, code-enforced evidence rules (no LLM/DB) — the guarantee against fabricated/duplicated/
-// unsupported findings. Exported so it can be unit-tested directly. Given the model's raw findings
-// (which reference evidence only by candidate id) and the period's calls, it:
-//   • resolves each id to its cached behaviour candidate (unknown ids dropped);
-//   • drops evidence whose type ≠ the finding's type;
-//   • re-verifies each quote against its call's segments (findQuote) — paraphrased/mismatched dropped;
-//   • lets one quote back only ONE finding (global dedup);
-//   • drops any finding left with < MIN_EVIDENCE verified evidence;
-//   • orders errors before strengths (audio evidence attaches to errors).
 function assembleFindings(rawFindings, calls) {
   const { byId } = buildCandidates(calls);
   const usedIds = new Set();
-  // Dedup by the QUOTE ITSELF, not just by candidate id: since dialogue-mechanics candidates are
-  // generated in code alongside the MAP's behaviours, the SAME manager line can now legitimately
-  // arrive as two different candidates (e.g. tagged as a behaviour and measured as an interruption).
-  // Without this, one line could end up "proving" two separate findings — which is exactly what the
-  // one-quote-one-finding rule exists to prevent.
   const usedQuotes = new Set();
   const findings = [];
   for (const f of rawFindings || []) {
@@ -286,14 +210,6 @@ function assembleFindings(rawFindings, calls) {
   return findings;
 }
 
-// ---- Merging a multi-day period into ONE list ----------------------------------------------
-// A week/month report analyses each DAY separately (src/bot/segments.js), so the same recurring
-// behaviour shows up as a separate finding on every day it occurred. Rendering those as 20 dated
-// blocks is exactly the wall of text the owner rejected, so they are merged into one coherent list.
-//
-// The model ONLY groups and re-words: it returns member indices, and CODE unions their evidence
-// (deduped by call+quote, capped). It therefore cannot invent, move or duplicate a single quote —
-// the same guarantee assembleFindings gives for the per-day step.
 const MAX_PERIOD_FINDINGS = 6;
 const MAX_EVIDENCE_PER_FINDING = 6;
 
@@ -324,7 +240,6 @@ const MERGE_SCHEMA = {
   },
 };
 
-// Pure: turn model-chosen groups into merged findings. Exported for unit testing.
 function applyMergeGroups(groups, findings) {
   const usedQuotes = new Set();
   const out = [];
@@ -334,7 +249,7 @@ function applyMergeGroups(groups, findings) {
     const type = g.type === 'strength' ? 'strength' : 'error';
     const evidence = [];
     for (const m of members) {
-      if (m.type !== type) continue; // never mix a strength's evidence into an error and vice versa
+      if (m.type !== type) continue;
       for (const ev of m.evidence || []) {
         const key = `${ev.callId}|${normalize(ev.quote)}`;
         if (usedQuotes.has(key)) continue;
@@ -355,13 +270,11 @@ function applyMergeGroups(groups, findings) {
   }
   out.sort((a, b) => {
     if (a.type !== b.type) return a.type === 'error' ? -1 : 1;
-    return b.evidence.length - a.evidence.length; // strongest-evidenced first within a type
+    return b.evidence.length - a.evidence.length;
   });
   return out.slice(0, MAX_PERIOD_FINDINGS);
 }
 
-// Fallback when merging can't run (single finding, or the API failed): keep the per-day findings as
-// they are, strongest first, capped — never lose the report over a merge failure.
 function fallbackMerge(findings) {
   const usedQuotes = new Set();
   const out = [];
@@ -421,11 +334,6 @@ async function mergeFindings(managerName, findings) {
   }
 }
 
-// Relevance verification (LLM). Given assembled findings (each already has >= MIN_EVIDENCE existing
-// manager quotes), ask a strict reviewer which quotes REALLY demonstrate each claim; keep only those,
-// and drop a finding that falls below MIN_EVIDENCE. On any API failure, fall back to the assembled
-// findings unchanged (don't nuke the whole report over a transient error). Pure filtering — never
-// invents or edits text.
 async function verifyFindingsRelevance(findings) {
   if (!findings.length) return findings;
 
@@ -467,7 +375,7 @@ async function verifyFindingsRelevance(findings) {
   const kept = [];
   findings.forEach((f, fi) => {
     const sup = supMap.get(fi);
-    if (!sup) return; // finding the reviewer didn't confirm → drop (strict)
+    if (!sup) return;
     const evidence = f.evidence.filter((_, ei) => sup.has(ei));
     if (evidence.length < MIN_EVIDENCE) return;
     kept.push({ ...f, evidence });
@@ -475,9 +383,6 @@ async function verifyFindingsRelevance(findings) {
   return kept;
 }
 
-// One raw REDUCE pass (the gpt-4o findings call). Returns the model's raw output
-// {findings, recommended_phrases}; the caller verifies/assembles. Separated so self-consistency can
-// run it several times.
 async function runReducePass(managerName, candidates, stats) {
   const rate = stats.callCount ? Math.round((stats.successCount / stats.callCount) * 100) : 0;
   const metricsLine =
@@ -519,14 +424,8 @@ async function runReducePass(managerName, candidates, stats) {
   );
 }
 
-// A stable key identifying a piece of evidence across reduce passes (same call + same manager line).
 const evidenceKey = (e) => `${e.callId}|${normalize(e.quote)}`;
 
-// Self-consistency clustering. Given the assembled findings from several independent reduce passes,
-// keep only findings CORROBORATED by a majority of passes, so a one-off hallucinated grouping can't
-// survive into a frozen segment. Two findings match if they are the same type and share >= 2 pieces
-// of evidence. A cluster is kept if it appears in >= ceil(passes/2) distinct passes; its evidence is
-// the union across members (deduped), and claim/why/action come from the member with most evidence.
 function corroborate(runs, passes) {
   const all = [];
   runs.forEach((findings, ri) =>
@@ -549,7 +448,7 @@ function corroborate(runs, passes) {
     }
     if (!placed) clusters.push({ type: item.f.type, keys: new Set(item.keys), members: [item], runs: new Set([item.ri]) });
   }
-  const majority = Math.floor(passes / 2) + 1; // strict majority: 2→2, 3→2, 4→3 (1→1 = keep all)
+  const majority = Math.floor(passes / 2) + 1;
   const kept = [];
   for (const c of clusters) {
     if (c.runs.size < majority) continue;
@@ -570,9 +469,6 @@ function corroborate(runs, passes) {
   return kept;
 }
 
-// Consistency-hardened reduce for a FROZEN segment (analysed once, then cached). Runs the reduce
-// `passes` times, keeps only majority-corroborated findings, then does the single relevance pass.
-// passes<=1 collapses to the plain single-pass reduce (used by the live multi-day path).
 async function reduceFindingsConsistent(managerName, calls, stats, passes = 1) {
   const { candidates } = buildCandidates(calls);
   if (candidates.length < MIN_EVIDENCE) return { findings: [], phrases: [] };
@@ -583,10 +479,8 @@ async function reduceFindingsConsistent(managerName, calls, stats, passes = 1) {
 
   const assembledRuns = raws.map((raw) => assembleFindings(raw.findings, calls));
   const corroborated = n > 1 ? corroborate(assembledRuns, n) : assembledRuns[0];
-  // LLM relevance pass — drop quotes that don't actually demonstrate the claim.
   const findings = await verifyFindingsRelevance(corroborated);
 
-  // Phrases: union across passes, deduped, capped (they're ideal-phrasing samples, not evidence).
   const seen = new Set();
   const phrases = [];
   for (const raw of raws) {
@@ -602,9 +496,6 @@ async function reduceFindingsConsistent(managerName, calls, stats, passes = 1) {
   return { findings, phrases };
 }
 
-// calls: rows from store.getCallsForReport (with cached behaviors + segments). stats: numeric block
-// from store.getOperatorStats. Single-pass reduce (live path, e.g. multi-day stats). Returns
-// { findings, phrases } — each finding has >= MIN_EVIDENCE verified, distinct evidence, errors-first.
 async function reduceFindings(managerName, calls, stats) {
   return reduceFindingsConsistent(managerName, calls, stats, 1);
 }

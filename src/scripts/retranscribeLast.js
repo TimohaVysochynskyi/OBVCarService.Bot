@@ -5,13 +5,7 @@ import { transcribeDiarized } from '../core/elevenlabs.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { displayName } from '../bot/operators.js';
 
-// One-off: re-run the last N calls OVERALL through ElevenLabs. Use after a stretch where ElevenLabs
-// was unavailable (e.g. out of credits) and calls fell back to OpenAI — those have no diarization /
-// timecodes. This FORCES the ElevenLabs path (transcribeDiarized on the downloaded audio, no silent
-// OpenAI fallback), then refreshes segments + per-call behaviours + call_purpose. If ElevenLabs
-// fails for a call, that call is reported and skipped (не тихо падає на OpenAI).
-// Run on the VPS (needs DB + Binotel + ELEVENLABS_API_KEY + OPENAI_API_KEY):  npm run retranscribe:last
-const LIMIT = Number(process.env.RETRANSCRIBE_LAST_LIMIT || 7); // last 6 were OpenAI; 7 = with a buffer
+const LIMIT = Number(process.env.RETRANSCRIBE_LAST_LIMIT || 7);
 
 async function main() {
   if (!process.env.ELEVENLABS_API_KEY) {
@@ -31,7 +25,6 @@ async function main() {
   for (const c of calls) {
     const who = displayName(c.managerName) || c.managerName || c.internalNumber || '—';
     try {
-      // Local archive first (core/audioStore.js), Binotel only as a fallback.
       const audio = await getRecordingForCall(c.generalCallId);
       if (!audio) {
         console.warn(`   • ${c.generalCallId} (${who}) — no recording (local or Binotel), skip`);
@@ -39,7 +32,6 @@ async function main() {
       }
       const blob = new Blob([audio.buffer], { type: 'audio/mpeg' });
 
-      // Force ElevenLabs (throws if it fails — we do NOT fall back to OpenAI here on purpose).
       const { transcript, segments } = await transcribeDiarized(blob, who, { audioPath: audio.path });
       let behaviors = null;
       try {

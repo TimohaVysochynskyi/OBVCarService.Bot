@@ -2,32 +2,15 @@ import { getHeartbeat, setHeartbeat } from './store.js';
 import { alertOnce, humanDuration, kyivTime } from './alerts.js';
 import { NOTICES } from './errorTexts.js';
 
-// Взаємний нагляд двох процесів: кожен відмічається «я живий», а СУСІД дивиться, чи давно була
-// відмітка. Закриває найгірший клас аварії — той, після якого не приходить нічого:
-//
-//   • pm2 вичерпав `max_restarts` і більше не піднімає бота — разом із ним умирають авто-звіти;
-//   • Telegram обірвав getUpdates, бо десь запустили другий примірник бота (409 Conflict);
-//   • процес убило ядро за памʼяттю на великому PDF або довгому аудіо;
-//   • cron полера знято чи процес зупинено вручну й забуто.
-//
-// Чому heartbeat полера, а не чекпоінт: під час аварії Binotel чекпоінт НЕ рухається навмисно, і
-// нагляд по ньому кричав би «збір не запускався», хоча процес бігає щочверть години і про аварію
-// вже сповістив. Відмітка ставиться на початку прогону, незалежно від його результату.
-//
-// ⚠️ Обидва нагляди читають і пишуть у Postgres. Якщо ляже сама база, вони теж мовчать — це
-// відомий і задокументований край (див. CLAUDE.md, «свідомо не входить»).
 
-const DEFAULT_BOT_MAX_MIN = 10; // бот відмічається щохвилини
-const DEFAULT_POLL_MAX_MIN = 45; // cron полера — */15, тож 45 хв = три пропущені прогони
+const DEFAULT_BOT_MAX_MIN = 10;
+const DEFAULT_POLL_MAX_MIN = 45;
 
 const minutesFromEnv = (name, fallback) => {
   const value = Number(process.env[name] || fallback);
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
-// Відмічатись «я живий». Для persistent-процесу (бот) — раз на інтервал; cron-процес викликає
-// setHeartbeat один раз за прогін. Помилка запису не має валити нічого: якщо база недоступна,
-// сусід і так це побачить.
 function startHeartbeat(name, intervalMs = 60_000) {
   const beat = () =>
     setHeartbeat(name).catch((err) => console.error(`[liveness] відмітка ${name} не пройшла: ${err.message}`));
@@ -41,8 +24,6 @@ async function markAlive(name) {
   );
 }
 
-// Спільна перевірка для обох напрямків. `absent` (відмітки немає взагалі) — НЕ аварія: так
-// виглядає перший прогін після деплою цієї фічі, і будити власника власним оновленням безглуздо.
 async function checkAlive(name, { key, maxMinutes, message, recovered }) {
   const at = await getHeartbeat(name);
   if (!at) return false;
@@ -54,7 +35,6 @@ async function checkAlive(name, { key, maxMinutes, message, recovered }) {
   });
 }
 
-// Викликає ПОЛЕР (він бігає щочверть години й тим самим є природним таймером для бота).
 async function checkBotAlive() {
   return checkAlive('bot', {
     key: 'bot_down',
@@ -64,7 +44,6 @@ async function checkBotAlive() {
   });
 }
 
-// Викликає БОТ (він живе постійно, тож може стежити за тим, що cron перестав спрацьовувати).
 async function checkPollerAlive() {
   return checkAlive('poll', {
     key: 'poll_stale',

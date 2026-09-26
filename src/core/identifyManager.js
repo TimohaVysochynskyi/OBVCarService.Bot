@@ -3,13 +3,6 @@ import { definePrompt } from './prompts.js';
 import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 
-// Shared handsets (901/902) don't tell Binotel who answered, so we identify the operator from
-// what they say on the recording. The candidate list comes from Binotel itself (the operator
-// names seen on personal extensions - getOperatorRoster), so there's no hand-maintained table.
-// The model is constrained to return EXACTLY one of those names (or null), which also handles
-// colloquial variants ("Володя" -> "Владимир") and guarantees the result groups cleanly with
-// the personal-extension calls of the same person.
-// roster: array of candidate operator names. Returns one of them, or null.
 const identifyPrompt = definePrompt({
   key: 'identify',
   group: 'call',

@@ -3,7 +3,7 @@ import { fetchOk } from './http.js';
 import { getRecipients } from './store.js';
 
 const TELEGRAM_MAX_LENGTH = 4096;
-const CHUNK_TARGET_LENGTH = 3800; // margin below the hard limit for safety
+const CHUNK_TARGET_LENGTH = 3800;
 
 async function rawSend(token, chatId, text, parseMode) {
   const res = await fetchOk('telegram', 'надсилання повідомлення', `https://api.telegram.org/bot${token}/sendMessage`, {
@@ -13,8 +13,6 @@ async function rawSend(token, chatId, text, parseMode) {
   });
 }
 
-// Telegram hard-caps messages at 4096 chars - split on paragraph/line breaks so we don't
-// cut a sentence (or a markdown entity) in half whenever possible.
 function splitMessage(text) {
   if (text.length <= TELEGRAM_MAX_LENGTH) return [text];
 
@@ -70,13 +68,6 @@ async function sendMessage(text, { chatId } = {}) {
   }
 }
 
-// Резервні отримувачі: кому писати, коли основний список недоступний або порожній.
-//
-// Це остання ланка, якої бракувало. Список отримувачів живе в `app_state`, тобто в тій самій
-// базі, падіння якої і треба повідомити — тож `getRecipients` кидав, і алерт про недоступний
-// Postgres не доходив НІКОМУ. Тепер у такому разі беруться id з env, і нічого налаштовувати не
-// треба: `TELEGRAM_BOOTSTRAP_CHAT_IDS` (сід директорів) — це вже ті самі люди.
-// ALERT_FALLBACK_CHAT_IDS дозволяє задати інший список, якщо потрібно.
 function fallbackRecipients() {
   const raw = process.env.ALERT_FALLBACK_CHAT_IDS || process.env.TELEGRAM_BOOTSTRAP_CHAT_IDS || '';
   return raw
@@ -86,10 +77,6 @@ function fallbackRecipients() {
     .map((id) => ({ id, name: id }));
 }
 
-// Alerts fan out to every recipient configured in the bot's /settings → "Сповіщення про поломки"
-// (app_state.alert_recipients, managed by admins), and fall back to the env list above when that
-// is unreachable or empty. With neither, the alert is still written to the log, never dropped
-// silently. A failed send to one recipient doesn't block the others.
 async function sendAlert(text, { icon = '⚠️' } = {}) {
   let recipients = [];
   let unreachable = false;
@@ -103,8 +90,6 @@ async function sendAlert(text, { icon = '⚠️' } = {}) {
   let body = `${icon} ${text}`;
   if (!recipients.length) {
     recipients = fallbackRecipients();
-    // Читач мусить знати, що це резервний шлях: інакше «алерт прийшов» виглядає як «усе гаразд,
-    // просто одна поломка», хоча насправді не працює й сам список отримувачів.
     if (recipients.length && unreachable) {
       body +=
         '\n\n(надіслано резервним каналом — база даних недоступна, ' +

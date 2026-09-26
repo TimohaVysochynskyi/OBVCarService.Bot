@@ -38,13 +38,8 @@ import { recordError } from '../core/errorLog.js';
 import { sendAlert } from '../core/telegram.js';
 import { alertText } from '../core/alerts.js';
 
-// Knowledge base needs pgvector; migrateKb() at startup flips this on. Handlers degrade
-// gracefully when it's false.
 const kbState = { ready: false };
 
-// One Telegram bot serves everything: the interactive report bot here AND the ingest's
-// outbound alerts (core/telegram.js) - same token. sendMessage (alerts) does not conflict with
-// getUpdates (this bot). Must be a clean bot with no webhook (NOT @obvcarservicebot).
 installProcessTraps('bot');
 
 const token = process.env.TELEGRAM_BOT_TOKEN;
@@ -53,21 +48,15 @@ if (!token) {
 }
 
 const bot = new Bot(token);
-// Track outgoing message ids so showScreen knows whether a tapped menu is still at the bottom.
 installMessageTracker(bot);
 
-// Session first, so ctx.session is available to the auth middleware (self-claim / menus).
 bot.use(session({ initial: () => ({ awaiting: null, screenId: null }) }));
 
-// Error guard next - BEFORE the access check on purpose. The auth middleware reads the role from
-// the database on every update, so a Postgres outage throws right there; catching only further
-// down the chain would leave the bot looking dead to everyone with nothing on screen.
 bot.use(errorGuard);
 
 const cancelKeyboard = () => ({ remove_keyboard: true });
 const isCancel = (t) => /^\s*(✖️|❌)?\s*скасувати\b/i.test(t || '');
 
-// --- Access control (role lookup + per-feature gate + self-claim) ---------------------------
 bot.use(async (ctx, next) => {
   const id = ctx.from?.id;
   const user = await getUser(id);
@@ -84,8 +73,6 @@ bot.use(async (ctx, next) => {
     return next();
   }
 
-  // Unknown user. Allow self-claim: if they share THEIR OWN contact and a pending invite matches
-  // their phone, activate it. Otherwise deny and offer the share-contact button.
   const contact = ctx.message?.contact;
   if (contact && (contact.user_id == null || contact.user_id === id)) {
     const activated = await activatePendingByPhone(contact.phone_number, {
@@ -119,7 +106,6 @@ bot.use(async (ctx, next) => {
   }
 });
 
-// --- Per-role native command list -----------------------------------------------------------
 const CMD = {
   menu: { command: 'menu', description: '☰ Головне меню' },
   stats: { command: 'stats', description: '📊 Статистика менеджера' },
@@ -140,7 +126,7 @@ function commandsForRole(role) {
   if (isAdmin(role))
     return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health, CMD.globalReport];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
-  return [CMD.menu, CMD.ask]; // mechanic
+  return [CMD.menu, CMD.ask];
 }
 
 async function setCommandsForRole(api, chatId, role) {
@@ -149,7 +135,6 @@ async function setCommandsForRole(api, chatId, role) {
     .catch((e) => console.error(`[bot] setMyCommands(chat) failed: ${e.message}`));
 }
 
-// --- Main menu / navigation helpers --------------------------------------------------------
 async function openMenu(ctx) {
   ctx.session.awaiting = null;
   await setCommandsForRole(ctx.api, ctx.chat.id, ctx.role);
@@ -177,23 +162,18 @@ async function openFilesMenu(ctx) {
   await openFiles(ctx, kbState);
 }
 
-// Report is content, not a screen: after it, bring the menu back to the bottom (in focus).
 async function runReport(ctx) {
   await sendManualReport(ctx.api, ctx.chat.id);
   await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
 }
 
-// --- Commands (native "Menu" button next to the input lists these) -------------------------
 bot.command('start', async (ctx) => {
-  // Deep-link from a KB source citation: /start kbdoc_<id> → resend that original file (role-checked
-  // inside openKbDocById), then stop — don't show the welcome/menu over it.
   const payload = (ctx.match || '').trim();
   const kbDoc = /^kbdoc_(\d+)$/.exec(payload);
   if (kbDoc) {
     await openKbDocById(ctx, Number(kbDoc[1]), ctx.role);
     return;
   }
-  // The persistent quick keyboard was removed; clear it from existing clients once, then menu.
   await ctx.reply('Вітаю! Керування — кнопкою «Menu» біля поля вводу або в меню нижче.', {
     reply_markup: { remove_keyboard: true },
   });
@@ -208,13 +188,10 @@ bot.command('prompt', openPromptMenu);
 bot.command('report', runReport);
 bot.command('roles', openRolesMenu);
 bot.command('settings', openSettings);
-// Діагностика — лише в нативному списку команд, без inline-кнопки: те саме рішення, що для
-// /files і /settings, щоб не перевантажувати меню.
 bot.command('log', openIncidents);
 bot.command('health', (ctx) => openHealth(ctx, kbState));
 bot.command('myreport', openMyReport);
 
-// --- Inline callbacks ----------------------------------------------------------------------
 bot.callbackQuery('menu', async (ctx) => {
   ctx.session.awaiting = null;
   await ctx.answerCallbackQuery();
@@ -226,7 +203,6 @@ bot.callbackQuery('report:now', async (ctx) => {
   await runReport(ctx);
 });
 
-// --- Feature modules -----------------------------------------------------------------------
 registerStats(bot);
 registerArchive(bot);
 registerKnowledgeBase(bot, kbState);
@@ -239,9 +215,6 @@ registerIncidents(bot);
 registerHealth(bot, kbState);
 registerGlobalReport(bot);
 
-// A manager saving their own phone number (request_users doesn't return a phone). Last in the
-// contact chain — the roles.js and settings.js contact handlers pass non-add contacts through via
-// next() until they reach here.
 bot.on('message:contact', async (ctx) => {
   const st = ctx.session.awaiting;
   if (st?.type !== 'save_phone') return;
@@ -257,7 +230,6 @@ bot.on('message:contact', async (ctx) => {
   await showScreen(ctx, 'Оберіть дію:', mainMenu(ctx.role));
 });
 
-// --- Free-text input: routed by the current "awaiting" step --------------------------------
 bot.on('message:text', async (ctx) => {
   const st = ctx.session.awaiting;
 
@@ -283,15 +255,12 @@ bot.on('message:text', async (ctx) => {
     return;
   }
 
-  // Any editable AI instruction (report guidance, score rubric, …) — which one is in st.key.
   if (st?.type === 'prompt') {
     await savePromptText(ctx, st.key, ctx.message.text);
     return;
   }
 
   if (st?.type === 'kb_question') {
-    // Stay in question mode so follow-up questions keep working. The user leaves by opening the
-    // menu (/menu or « Меню).
     try {
       const { text, sources } = await withProgress(
         ctx.api,
@@ -301,16 +270,12 @@ bot.on('message:text', async (ctx) => {
         { notice: '⏳ Бот обробляє запит, це може зайняти деякий час…' }
       );
       const ids = await sendLong(ctx.api, ctx.chat.id, text);
-      // The proof for the answer: a mini-PDF of the cited pages per source, threaded under it.
-      // Never the whole manual, and never just a quote — the excerpt IS the evidence.
       if (sources.length) {
         await withProgress(ctx.api, ctx.chat.id, 'upload_document', () =>
           sendAnswerSources(ctx.api, ctx.chat.id, sources, { replyToMessageId: ids[0] })
         );
       }
     } catch (err) {
-      // Свій catch, а не errorGuard: після повідомлення про помилку треба лишити людину в режимі
-      // питань і сказати про це - інакше вона не зрозуміє, що можна просто спитати ще раз.
       await reportToUser(ctx, err, { action: 'kb_ask' });
     }
     await ctx.reply('Ще питання? Напишіть його наступним повідомленням, або відкрийте /menu, щоб вийти.');
@@ -320,7 +285,6 @@ bot.on('message:text', async (ctx) => {
   await ctx.reply('Скористайтеся кнопкою «Menu» біля поля вводу або командою /menu.');
 });
 
-// Last resort for anything thrown outside the middleware chain (see errorReply.js).
 installBotCatch(bot);
 
 async function main() {
@@ -329,7 +293,6 @@ async function main() {
   const seeded = await seedDirectors();
   console.log(`[bot] seeded ${seeded} director(s) from env`);
 
-  // Knowledge base is optional - if pgvector isn't available, the rest of the bot still runs.
   try {
     await migrateKb();
     kbState.ready = true;
@@ -338,8 +301,6 @@ async function main() {
     console.error(`[bot] knowledge base DISABLED: ${err.message}`);
   }
 
-  // Default command list (shown before a role-scoped list is set for a chat). Per-role lists are
-  // applied lazily via setCommandsForRole when a user opens the menu.
   await bot.api
     .setMyCommands([CMD.menu, CMD.ask])
     .catch((e) => console.error(`[bot] setMyCommands failed: ${e.message}`));
@@ -347,12 +308,8 @@ async function main() {
     .setChatMenuButton({ menu_button: { type: 'commands' } })
     .catch((e) => console.error(`[bot] setChatMenuButton failed: ${e.message}`));
 
-  // Recipients for the auto-reports are managed in-bot (/settings → "Щоденні звіти"), read from
-  // the DB on each slot — so the scheduler always runs and needs no env chat.
   startScheduler(bot.api);
 
-  // Взаємний нагляд: бот відмічається щохвилини (за ним стежить полер), і сам раз на 5 хвилин
-  // перевіряє, чи полер узагалі бігає — cron міг бути знятий або процес зупинений і забутий.
   startHeartbeat('bot');
   setInterval(() => {
     checkPollerAlive().catch((e) => console.error(`[bot] poller liveness check failed: ${e.message}`));
@@ -364,10 +321,6 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  // Старт — окремий клас проблем: зламаний .env, недоступний Postgres на migrate(), або 409
-  // Conflict, коли той самий бот уже запущено десь іще (типово — залишили запущеним на компʼютері
-  // розробника). Раніше все це давало лише стек у лозі pm2: бот тихо ходив по колу рестартів,
-  // доки pm2 не здавався, і ніхто не дізнавався ні що сталось, ні що бот більше не працює.
   const described = describeError(err, { action: 'startup', icon: '⚠️' });
   console.error(`[bot] ${described.code} інцидент ${described.incident}: ${described.technicalLine}`);
   console.error(err);

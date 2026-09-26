@@ -5,16 +5,6 @@ import { fileURLToPath } from 'node:url';
 import { renderGlobalReport } from './globalReportHtml.js';
 import { attachClips, siteDir, AUDIO_DIR } from './globalReportAudio.js';
 
-// The report is a small static site, not a single file any more:
-//
-//   <REPORT_SITE_DIR>/
-//     index.html          rewritten on every build
-//     assets/app.css      built from tailwind/input.css, committed
-//     assets/app.js       page behaviour
-//     audio/<hash>.mp3    evidence clips — ACCUMULATE and are reused across builds
-//
-// The same directory is both what gets zipped for Telegram today and what a web server points at
-// once the subdomain exists, so there is no second layout to keep in step.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const STATIC_DIR = join(HERE, 'site');
@@ -29,8 +19,6 @@ async function copyStatic(dir) {
     try {
       await copyFile(from, join(out, name));
     } catch (err) {
-      // app.css is a BUILD artefact. If it is missing the page renders as unstyled text, which is
-      // worse than an honest failure, so say exactly what to run.
       const hint = name === 'app.css' ? ' — зібрати його: npm run build:css' : '';
       throw new Error(`не знайдено ${from}${hint}: ${err.message}`);
     }
@@ -51,8 +39,6 @@ async function audioStats(dir) {
   }
 }
 
-// Writes the whole site into `dir` (default REPORT_SITE_DIR) and returns what happened, so the
-// caller can tell the owner whether the audio actually made it in.
 async function buildSite(report, { dir = siteDir() } = {}) {
   await mkdir(dir, { recursive: true });
   const clips = await attachClips(report, { dir });
@@ -71,8 +57,6 @@ function run(cmd, args, opts) {
   });
 }
 
-// Zips the directory's CONTENTS (not the directory itself), so the owner unpacks straight into a
-// folder with index.html at its root rather than one wrapper deep.
 async function zipSite(dir, zipPath) {
   await run('zip', ['-r', '-q', resolve(zipPath), '.'], { cwd: dir });
   return zipPath;

@@ -4,15 +4,8 @@ import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { displayName, hasAlias } from '../bot/operators.js';
 
-// One-off: re-transcribe the last N calls of each "person" operator (named managers + any number
-// aliased via OPERATOR_ALIASES) via ElevenLabs, so the diarized "Менеджер:/Клієнт:" dialogue can
-// be reviewed in the archive. Bare shared extensions (901/902) are skipped. Only the transcript is
-// updated — classification/stats are left as-is. Run on the VPS (needs DB + Binotel +
-// ELEVENLABS_API_KEY in .env):  npm run retranscribe:recent
 const PER_OPERATOR = Number(process.env.RETRANSCRIBE_LIMIT || 5);
 
-// Target = a named person (non-numeric manager_name) OR an aliased number (Богдан). NOT a bare
-// extension like 901/902.
 function isPersonOperator(name) {
   if (!name) return false;
   return !/^[0-9]+$/.test(name) || hasAlias(name);
@@ -39,11 +32,8 @@ async function main() {
     console.log(`[retranscribe] ${displayName(op.name)} — ${calls.length} call(s):`);
     for (const c of calls) {
       try {
-        // Local archive first (core/audioStore.js), Binotel only as a fallback.
         const audio = await getRecordingForCall(c.generalCallId);
         if (!audio) throw new Error('no recording (local or Binotel)');
-        // Pass the operator's display name so speaker-role detection anchors on OUR employee
-        // (e.g. picks the speaker who says "це Андрій"), not on "who plays the service operator".
         const { transcript } = await transcribeAudio(audio.buffer, {
           managerName: displayName(op.name),
           audioPath: audio.path,

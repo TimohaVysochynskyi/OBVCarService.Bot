@@ -6,19 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { ffmpegAvailable, cutMp3 } from '../core/ffmpeg.js';
 
-// Audio evidence for the PUBLISHED report. Unlike the Telegram clips (bot/audioClip.js), which are
-// cut into memory and sent once, these are files on disk that the page links to — so they are cut
-// once and reused by every later report. That is what makes regenerating the document cheap: the
-// expensive parts (the model's findings, and now the clips) are both cached.
-//
-// Clips cover BOTH strengths and weaknesses. In Telegram only the negatives got audio, because a
-// chat message with fifty audio files is unusable; a page has room, and "listen to what he did
-// right" is worth as much to the owner as the other half.
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const AUDIO_DIR = 'audio';
 const PAD = Number(process.env.AUDIO_CLIP_PAD_SEC || 3);
-const MAX_CLIP_SEC = 90; // a runaway end timecode must not cut half the call
+const MAX_CLIP_SEC = 90;
 
 function siteDir() {
   const configured = process.env.REPORT_SITE_DIR;
@@ -26,8 +18,6 @@ function siteDir() {
   return join(REPO_ROOT, 'data', 'report-site');
 }
 
-// Deterministic name: the same (call, timecode) is always the same file, which is what lets a
-// repeat run skip ffmpeg entirely and what keeps the audio folder from growing a duplicate per run.
 function clipName(callId, start, end) {
   const key = `${callId}:${start}:${end}`;
   return `${createHash('sha1').update(key).digest('hex').slice(0, 16)}.mp3`;
@@ -54,8 +44,6 @@ function everyExample(report) {
   return out;
 }
 
-// Full recording to cut from. Calls archived at ingest are read in place — no download at all.
-// Only pre-archive calls fall back to Binotel, and what comes back is archived on the way.
 async function sourceRecording(callId, tmp) {
   const audio = await getRecordingForCall(callId);
   if (!audio) return null;
@@ -65,8 +53,6 @@ async function sourceRecording(callId, tmp) {
   return path;
 }
 
-// Annotates each example in place with `audio` (a path relative to the page) and `audioSeconds`.
-// Never throws: an example without audio simply renders as the quote alone, which is still evidence.
 async function attachClips(report, { dir = siteDir() } = {}) {
   const stats = { wanted: 0, cut: 0, reused: 0, noTimecode: 0, noRecording: 0, failed: 0 };
   const examples = everyExample(report);
@@ -108,8 +94,6 @@ async function attachClips(report, { dir = siteDir() } = {}) {
             stats.noRecording += 1;
             continue;
           }
-          // Written aside and renamed: a run killed mid-cut would otherwise leave a truncated file
-          // that every later run treats as a finished clip and never re-cuts.
           const part = `${out}.part`;
           await cutMp3(src, part, Math.max(0, example.start - PAD), span);
           await rename(part, out);

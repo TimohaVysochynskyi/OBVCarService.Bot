@@ -12,22 +12,9 @@ import {
 import { run, estimate, stop, isRunning, blockCount, BLOCK, invalidateReportCache } from './reprocess.js';
 import { sendLong, showScreen } from './ui.js';
 
-// The owner-facing home for every instruction the project gives an AI (/prompt, admin-only).
-//
-// Three levels, because thirteen prompts in one keyboard is a wall: groups → prompts in a group →
-// one prompt. Every screen is generated from the registry, so adding a prompt anywhere adds it here
-// with no UI work — and the wording cannot drift between entries.
-//
-// ⚠️ Editing changes WORDING. The guarantees live in code and are not editable: JSON schemas, "the
-// quote must be a real manager line", the minimum number of examples, the 1-10 scale, the four
-// stages and the four call categories. Whatever is written here, an unproven claim still cannot
-// reach a report.
 
-// Deliberately generic wording ("текст"), identical for every entry. Ukrainian gender agreement
-// would otherwise force per-entry sentence variants, which is exactly how two earlier screens drifted.
 const MENU = '« Назад до меню';
 
-// --- helpers ---------------------------------------------------------------------------------
 
 const money = (usd) => (usd < 0.01 ? 'менше цента' : `~$${usd.toFixed(2)}`);
 const plural = (n, one, few, many) => {
@@ -43,7 +30,6 @@ const parseScope = (raw) => (raw === 'all' ? { kind: 'all' } : { kind: 'block', 
 const scopeLabel = (scope) =>
   scope.kind === 'all' ? 'усі дзвінки' : `блок ${scope.block} (${(scope.block - 1) * BLOCK + 1}-${scope.block * BLOCK})`;
 
-// --- level 1: groups ---------------------------------------------------------------------------
 
 function hubScreen() {
   const kb = new InlineKeyboard();
@@ -58,7 +44,6 @@ function hubScreen() {
   };
 }
 
-// --- level 2: prompts in a group ---------------------------------------------------------------
 
 function groupScreen(group) {
   const items = promptsInGroup(group);
@@ -70,7 +55,6 @@ function groupScreen(group) {
   return { text: `${title}\n\nОберіть інструкцію:`, kb };
 }
 
-// --- level 3: one prompt -----------------------------------------------------------------------
 
 async function detailScreen(key) {
   const e = await promptInfo(key);
@@ -92,7 +76,6 @@ async function detailScreen(key) {
   return { text: `${e.title}\n\n${status}\n\n${e.about}${applies}`, kb };
 }
 
-// --- editing -----------------------------------------------------------------------------------
 
 async function openPromptMenu(ctx) {
   ctx.session.awaiting = null;
@@ -100,8 +83,6 @@ async function openPromptMenu(ctx) {
   await showScreen(ctx, text, kb);
 }
 
-// The owner sent the new text. It is NOT saved yet: confirmation first, with a preview, because a
-// prompt is the thing the whole analysis hangs on and a mis-paste is easy.
 async function savePromptText(ctx, key, text) {
   ctx.session.awaiting = null;
   const e = entryOf(key);
@@ -122,7 +103,6 @@ async function savePromptText(ctx, key, text) {
   await showScreen(ctx, '❓ Дійсно замінити цю інструкцію?', kb);
 }
 
-// --- applying to already-processed calls --------------------------------------------------------
 
 async function applyScreen(key) {
   const e = entryOf(key);
@@ -159,8 +139,6 @@ async function blockScreen(key) {
   return { text: '🎯 *Оберіть блок*\n\nБлок 1 — найновіші дзвінки, далі вглиб історії.', kb };
 }
 
-// Priced from the database before a single request is made, so the number on this screen is the
-// real one — not a guess the owner discovers afterwards on the OpenAI dashboard.
 async function confirmScreen(key, scopeRaw) {
   const job = jobOf(key);
   if (!job) return null;
@@ -186,7 +164,6 @@ async function confirmScreen(key, scopeRaw) {
   };
 }
 
-// --- the run ------------------------------------------------------------------------------------
 
 const PROGRESS_MS = 5000;
 
@@ -223,9 +200,6 @@ async function startRun(ctx, key, scopeRaw) {
     return;
   }
 
-  // The stored report findings were built from the analysis that just changed, so they now describe
-  // data that no longer exists. Clearing them is free; rebuilding the report is not, and that is a
-  // separate question rather than a silent charge.
   await invalidateReportCache().catch(() => {});
 
   const took = Math.max(1, Math.round((Date.now() - result.startedAt) / 60000));
@@ -249,7 +223,6 @@ async function startRun(ctx, key, scopeRaw) {
   );
 }
 
-// --- wiring --------------------------------------------------------------------------------------
 
 function registerPrompt(bot) {
   const screen = async (ctx, built) => {
@@ -278,7 +251,6 @@ function registerPrompt(bot) {
     const key = ctx.match[1];
     const e = await promptInfo(key);
     if (!e) return;
-    // Plain text: these contain * _ • «» that would break Markdown parsing.
     await sendLong(ctx.api, ctx.chat.id, `Поточний текст (${e.isCustom ? 'власний' : 'стандартний'}):\n\n${e.value}`);
     await screen(ctx, await detailScreen(key));
   });

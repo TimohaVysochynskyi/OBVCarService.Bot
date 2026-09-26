@@ -4,18 +4,7 @@ import { fetchOk } from "./http.js";
 import { SALES_STAGES } from "./stages.js";
 import { definePrompt } from "./prompts.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
-// Per-call classification: isSuccess (booked/confirmed), weakestStage (one of the shared 4 sales
-// stages — core/stages.js), and communicationScore (1-10). isSuccess and weakestStage are objective
-// and fixed in the prompt; the communicationScore RUBRIC is the tunable "characteristic by which we
-// judge effectiveness" — the owner (director/marketer) edits it from the bot (/rubric), it lives in
-// app_state.score_rubric, and getScoreRubric() falls back to the built-in default below. Only the
-// wording of the score criteria is tunable; the JSON structure / 1-10 range / stage enum are code.
 
-// Default communication-score rubric. Anchored 1-10 so the model scores consistently across calls
-// instead of guessing. Editable via /rubric; owner's text (app_state.score_rubric) overrides this.
-// Backed by the shared registry, so the owner edits it in the same place as every other prompt.
-// ⚠️ storeKey keeps the original app_state row: the owner's existing custom rubric must survive the
-// move, and a fresh key would silently reset it to the default.
 const getScoreRubric = definePrompt({
   key: 'score',
   storeKey: 'score_rubric',
@@ -28,8 +17,6 @@ const getScoreRubric = definePrompt({
     'і який етап був найслабшим. ⚠️ Сама шкала 1-10 і перелік етапів фіксовані кодом.',
 });
 
-// The rubric is injected as the communicationScore criteria; the rest (context, isSuccess,
-// weakestStage over the shared 4 stages) is fixed.
 function buildSystemPrompt(rubric) {
   return `Контекст бізнесу: менеджер приймає вхідні дзвінки та здійснює вихідні.
 Успішний дзвінок = клієнт записаний на сервіс або підтвердив дату приїзду.
@@ -59,13 +46,7 @@ const SCHEMA = {
   },
 };
 
-// segments (calls.segments, when the call went through ElevenLabs) let us show the model the dialogue
-// WITH timecodes and hand it the code-measured dialogue mechanics (interruptions / long pauses, see
-// core/dialogueMetrics.js). Those measurements are injected as FACTS outside the rubric on purpose:
-// the rubric is owner-editable, so if it is ever rewritten the model must still receive the numbers —
-// code supplies the facts, the rubric only decides how much they weigh.
 async function classifyCall(transcript, segments = null) {
-  // Read the (possibly owner-edited) rubric once, outside the retry loop.
   const system = buildSystemPrompt(await getScoreRubric());
   const timecoded = timecodedDialogue(segments);
   const facts = metricsPromptBlock(dialogueMetrics(segments));

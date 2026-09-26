@@ -3,11 +3,6 @@ import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
 import { transcribeDiarized } from './elevenlabs.js';
 
-// Business is a Ukrainian auto-service. Ukrainian phone speech is full of dialect/surzhyk
-// ("да" замість "так", "шо", "тіки"), which the ASR often mislabels as Russian and writes in
-// Russian. So: transcribe with a Ukrainian-leaning prompt, then detect what was ACTUALLY
-// spoken vs what got written, and re-transcribe with the correct language forced if they
-// disagree. CALL_LANGUAGE, if set, forces a language and skips detection entirely.
 const PROMPTS = {
   uk: 'Це телефонна розмова автосервісу українською мовою. Часто трапляються розмовні форми та суржик (напр. "да", "шо", "тіки", "нема") — це все українська мова, транскрибуй українською.',
   ru: 'Это телефонный разговор автосервиса на русском языке.',
@@ -80,11 +75,6 @@ async function detectLanguages(text) {
   );
 }
 
-// Accepts the audio itself (Buffer/Blob — what the ingest passes now that recordings are downloaded
-// once and archived locally, see core/audioStore.js) or, for convenience, a URL to fetch. Passing
-// bytes is the normal path: it means the recording is downloaded exactly ONCE per call.
-// audioPath (optional) points at the locally stored file so the channel probe can read it directly
-// instead of writing the bytes to a temp file again.
 async function toBlob(audio) {
   if (typeof audio === 'string') {
     const blob = await withRetry(
@@ -98,7 +88,7 @@ async function toBlob(audio) {
     return blob;
   }
   if (Buffer.isBuffer(audio)) return new Blob([audio], { type: 'audio/mpeg' });
-  if (audio && typeof audio.arrayBuffer === 'function') return audio; // already a Blob
+  if (audio && typeof audio.arrayBuffer === 'function') return audio;
   throw new Error('transcribeAudio: expected a Buffer, Blob or URL string');
 }
 
@@ -106,10 +96,6 @@ async function transcribeAudio(audio, { managerName, audioPath } = {}) {
   const audioBlob = await toBlob(audio);
   console.log(`[transcribe] audio ready: ${audioBlob.size} bytes`);
 
-  // Primary path: ElevenLabs (Scribe) — transcription + speaker diarization in one call, returning
-  // a ready "Менеджер:/Клієнт:" dialogue AND timecoded segments (for audio clipping). If it fails
-  // (no key / API error / quota), fall through to the OpenAI path below so no call is lost — that
-  // path has no diarization/timecodes, so segments is null (report shows text quotes, no clips).
   if (process.env.ELEVENLABS_API_KEY) {
     try {
       const result = await transcribeDiarized(audioBlob, managerName, { audioPath });
@@ -122,7 +108,6 @@ async function transcribeAudio(audio, { managerName, audioPath } = {}) {
 
   console.log('[transcribe] transcribing via OpenAI (plain, no diarization)...');
 
-  // Explicit override: force a language, skip detection.
   const forced = process.env.CALL_LANGUAGE;
   if (forced) {
     const text = await transcribeOnce(audioBlob, { language: forced, prompt: PROMPTS[forced] });
@@ -130,10 +115,8 @@ async function transcribeAudio(audio, { managerName, audioPath } = {}) {
     return { transcript: text, segments: null };
   }
 
-  // Pass 1: Ukrainian-leaning transcription.
   let text = await transcribeOnce(audioBlob, { prompt: DEFAULT_PROMPT });
 
-  // Detect spoken vs written language; re-transcribe if they disagree (the uk-said-as-ru case).
   try {
     const { spoken, transcriptLanguage } = await detectLanguages(text);
     console.log(`[transcribe] detected spoken=${spoken}, transcript=${transcriptLanguage}`);

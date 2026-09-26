@@ -6,19 +6,6 @@ import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { classifyCall } from '../core/classifyCall.js';
 import { displayName } from '../bot/operators.js';
 
-// Historical re-analysis backfill for the evidence-first report. Every call still missing
-// ElevenLabs timecodes (calls.segments IS NULL - an old OpenAI-fallback transcript, or a call
-// ingested before ElevenLabs was wired up) is re-transcribed via ElevenLabs to capture per-turn
-// TIMECODES (segments) AND diarized speakers, then run through the FULL per-call pipeline exactly
-// like a fresh ingest: per-call MAP (behaviors + call_purpose) and, for sales calls, classifyCall
-// (isSuccess/weakestStage/communicationScore) — so old calls get scored on the current rubric/
-// taxonomy too, not just given timecodes. Covers EVERY operator (named/bare-number/shared), not a
-// capped recent window - this used to be "last BACKFILL_LIMIT(30) calls per person operator"; that
-// cap is gone since the whole point now is to clear the WHOLE backlog, however large.
-// Idempotent: a call that already has segments is skipped, so re-runs only pick up stragglers
-// (e.g. ones that fell back to OpenAI last time because ElevenLabs credits ran out mid-run). A call
-// whose recording is gone from Binotel is skipped with a warning.
-// Run on the VPS (needs DB + Binotel + ELEVENLABS_API_KEY + OPENAI_API_KEY):  npm run backfill:analysis
 async function main() {
   if (!process.env.ELEVENLABS_API_KEY) {
     console.error('[backfill] ELEVENLABS_API_KEY is not set — timecodes need ElevenLabs. Aborting.');
@@ -38,8 +25,6 @@ async function main() {
   for (const c of calls) {
     const name = displayName(c.managerName);
     try {
-      // Local archive first (core/audioStore.js) — re-analysis no longer depends on Binotel still
-      // holding the recording, and costs no Binotel traffic once the audio backfill has run.
       const audio = await getRecordingForCall(c.generalCallId);
       if (!audio) {
         skipped += 1;
@@ -58,8 +43,6 @@ async function main() {
         console.error(`   ! ${c.generalCallId} behavior analysis failed: ${err.message}`);
       }
 
-      // Same purpose-first gate as a fresh ingest (processCalls.js): only sales calls get scored;
-      // an unknown purpose (MAP failed) is treated as sales so a transient error doesn't drop scoring.
       const purpose = behaviors?.callPurpose ?? null;
       const isSalesCall = purpose === null || purpose === 'sales';
       let classification = { isSuccess: null, weakestStage: null, communicationScore: null };

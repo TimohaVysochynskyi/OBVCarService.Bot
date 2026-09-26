@@ -145,9 +145,6 @@ function topFindings(findings, type, name) {
         quote: e.quote,
         note: e.note || null,
         at: e.startTime || null,
-        // Carried so the published report can cut an audio clip for this exact line. `at` is the
-        // call's own start time (used for the date shown under the quote); `start`/`end` are the
-        // timecodes INSIDE the recording, and only those can address a fragment.
         callId: e.callId ?? null,
         start: e.start ?? null,
         end: e.end ?? null,
@@ -170,9 +167,6 @@ function inputHash(findings) {
 }
 
 async function mergeCached(name, start, end, findings) {
-  // The row is keyed by inputHash alone: mergeFindings depends only on the manager and the findings,
-  // so the period adds nothing. It used to end at dayEnd(end), which moves the moment a new call is
-  // ingested -- every single report then missed the cache and re-merged. Pinned to the first day.
   const from = dayStart(start);
   const to = dayEnd(start);
   const hash = inputHash(findings);
@@ -201,10 +195,6 @@ async function mergeCached(name, start, end, findings) {
 
 const EMPTY_FINDINGS = { strengths: [], weaknesses: [], analysedDays: 0, days: 0, partial: false };
 
-// A swallowed failure here is indistinguishable from "this manager has no patterns": the report
-// renders, the cards are empty, and nothing anywhere says why. That is exactly how a broken SQL
-// column list once produced a whole report with zero findings and no error. Still non-fatal — the
-// rest of the report is worth having — but never silent again.
 const reuseFailed = (name) => (err) => {
   console.error(`[globalReport] кеш аналізу для ${name} не прочитався: ${err.message}`);
   return null;
@@ -212,9 +202,6 @@ const reuseFailed = (name) => (err) => {
 
 async function collectWithFallback(name, start, end, opts) {
   if (!opts.analyze) {
-    // Reuse-only. `partial` used to be hardcoded true here, which printed "покриття неповне" even
-    // when every day of the period was already cached — a warning about nothing, on the one path
-    // that is guaranteed to cost nothing. It is partial only if days are genuinely missing.
     const collected = await collectRangeFindings(name, start, end, { analyze: false }).catch(reuseFailed(name));
     return { collected, partial: !collected || Boolean(collected.missingDays) };
   }
@@ -297,13 +284,8 @@ function buildDeclines(blockedCalls, reasonRows, coverage) {
 
 const emptyLine = () => ({ calls: 0, incoming: 0, outgoing: 0, sales: 0, success: 0 });
 
-// One entry per internal number, with a month breakdown. Ordered shared-first: those are the
-// numbers that go on advertising, so they are what the owner opens this block to look at.
 const LINE_ORDER = { shared: 0, personal: 1, other: 2 };
 
-// Fills in every month of the period and adds the all-period total. Months a line was quiet in must
-// still exist as zeros, or the switcher would leave the previous month's numbers on screen when
-// someone clicks a silent one.
 function closeMonths(monthsMap, months) {
   const total = emptyLine();
   for (const value of monthsMap.values()) {
@@ -314,12 +296,6 @@ function closeMonths(monthsMap, months) {
   return Object.fromEntries([...monthsMap.entries()]);
 }
 
-// Did the manager introduce himself — per manager, per month, plus an all-period total.
-//
-// ⚠️ Only personal extensions are in these rows (see core/managerIntro.js): on a shared handset a
-// missing introduction is what MAKES the call unattributable, and it is already reported as that
-// line's "None" column. Counting it twice would overstate it, and the attributed calls would be a
-// tautology (they were attributed BECAUSE somebody introduced themselves).
 const INTRO_FIELDS = ['checked', 'checkedIn', 'checkedOut', 'withName', 'withCompany', 'withBoth', 'withNameIn', 'withNameOut'];
 const emptyIntro = () => Object.fromEntries(INTRO_FIELDS.map((f) => [f, 0]));
 
@@ -404,10 +380,6 @@ const asBucket = (row) => ({
   success: row.success,
 });
 
-// On a shared line the operator is identified from the recording, so when nobody introduced
-// themselves manager_name stays the bare extension number. Those calls are the "не розпізнано"
-// slice: they belong to the line they came in on AND are reported separately, because the owner
-// wants to see how much of the line nobody can be credited with.
 const isUnattributed = (manager, number) => manager === number;
 
 function buildLines(rows, managerRows, months) {
@@ -417,7 +389,6 @@ function buildLines(rows, managerRows, months) {
     byNumber.get(row.number).set(row.month, asBucket(row));
   }
 
-  // number -> manager -> month -> bucket, plus the unattributed slice across all lines
   const perLine = new Map();
   for (const row of managerRows) {
     if (!perLine.has(row.number)) perLine.set(row.number, new Map());
@@ -427,9 +398,6 @@ function buildLines(rows, managerRows, months) {
 
   }
 
-  // EVERY shared line lists the SAME people, in the same order, even where one of them took no
-  // calls on it. A column that disappears on one card and not the other makes the two impossible to
-  // compare, and "nobody answered here" is itself worth seeing — it reads as a zero, not as absence.
   const sharedNumbers = [...byNumber.keys()].filter((n) => lineInfo(n).kind === 'shared');
   const peopleTotals = new Map();
   for (const number of sharedNumbers) {
@@ -450,8 +418,6 @@ function buildLines(rows, managerRows, months) {
       unknown,
       byMonth: closeMonths(new Map(managers.get(name) || []), months),
     });
-    // The unattributed column always sits last: it is not a person, and keeping it out of the
-    // ranking leaves the actual people comparable at a glance.
     return [...people.map((name) => column(name, false)), column(number, true)];
   };
 
@@ -459,7 +425,6 @@ function buildLines(rows, managerRows, months) {
   for (const [number, monthsMap] of byNumber) {
     const info = lineInfo(number);
     const line = { ...info, byMonth: closeMonths(monthsMap, months) };
-    // Only shared lines render a breakdown — a personal extension has one owner by definition.
     if (info.kind === 'shared') line.managers = managerTable(number);
     lines.push(line);
   }
@@ -470,9 +435,6 @@ function buildLines(rows, managerRows, months) {
     return (b.byMonth[ALL]?.calls || 0) - (a.byMonth[ALL]?.calls || 0);
   });
 
-  // The unattributed slice is NOT a line of its own: it lives as a row inside the shared cards it
-  // belongs to. It used to get a card here too, but that invited adding six cards up and landing on
-  // a number that does not exist, so it was dropped on the owner's call.
   return lines;
 }
 

@@ -23,28 +23,22 @@ import { definePrompt } from '../core/prompts.js';
 
 const EMBED_MODEL = () => process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
 const CHAT_MODEL = () => process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024; // Telegram bot getFile limit
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
-// KB documents have an audience: which role a manual is FOR. mechanic / manager / both.
 const AUDIENCE_LABEL = { mechanic: '🔧 Механікам', manager: '💼 Менеджерам', both: '👥 Обом' };
 
-// Which doc audiences a role may read. Manager/mechanic are restricted to their own manuals (+ the
-// "both" ones); director/marketer (admin) get null => no filter, they see everything.
 function audiencesForRole(role) {
   if (role === ROLES.MANAGER) return ['manager', 'both'];
   if (role === ROLES.MECHANIC) return ['mechanic', 'both'];
   return null;
 }
 
-// --- Text extraction -----------------------------------------------------------------------
 
-// Returns pages: [{ page, text }]. For PDF, page is the 1-based page number (so answers can cite
-// exact pages); for DOCX/TXT there is no page concept, so a single { page: null, text } is returned.
 async function extractPages(buffer, filename) {
   const ext = (filename.split('.').pop() || '').toLowerCase();
   if (ext === 'pdf') {
     const pdf = await getDocumentProxy(new Uint8Array(buffer));
-    const { text } = await pdfExtractText(pdf, { mergePages: false }); // string[] — one per page
+    const { text } = await pdfExtractText(pdf, { mergePages: false });
     const arr = Array.isArray(text) ? text : [text];
     return arr.map((t, i) => ({ page: i + 1, text: t || '' }));
   }
@@ -58,17 +52,11 @@ async function extractPages(buffer, filename) {
   throw appError('FMT-UNSUP', { message: `формат .${ext} не підтримується` });
 }
 
-// Merged plain text (backward-compatible helper, e.g. for the exported API / tests).
 async function extractText(buffer, filename) {
   const pages = await extractPages(buffer, filename);
   return pages.map((p) => p.text).join('\n\n');
 }
 
-// --- Chunking ------------------------------------------------------------------------------
-// Chunks are deliberately SMALL (~1300 chars, was 2400): a chunk is both the retrieval unit and
-// the citation unit, so a big one drags in off-topic text AND spans several pages, which makes the
-// page reference in an answer useless. PDF text also arrives as hard-wrapped lines with running
-// heads, so raw page text needs cleaning before it can be split on meaning.
 
 const CHUNK_MAX = 1300;
 const CHUNK_OVERLAP = 200;
@@ -79,11 +67,6 @@ const rawLines = (text) =>
     .split('\n')
     .map((l) => l.trim());
 
-// Running heads/feet ("Розділ 3. Двигуни", "В. Ф. Кисликов", a bare page number) repeat on nearly
-// every page and pollute both the chunk text and its embedding. A line is boilerplate when it is
-// short, sits at the TOP or BOTTOM of its page, and repeats on >=30% of pages (min 5). Frequency
-// alone is not enough: body text can legitimately repeat across pages (a standard warning, a table
-// row), and stripping that would silently delete content — position is what makes a running head.
 const EDGE_LINES = 3;
 
 function detectBoilerplate(pages) {
@@ -99,9 +82,6 @@ function detectBoilerplate(pages) {
   return new Set([...counts.entries()].filter(([, n]) => n >= min).map(([l]) => l));
 }
 
-// PDF extraction breaks a paragraph into one line per rendered row, often hyphenating across them
-// ("двига-\nтель"). Join a line onto the previous one when the previous one looks mid-sentence
-// (long and not ending in terminal punctuation); otherwise it's a heading/list item/new paragraph.
 const joinWrapped = (a, b) => (/\p{L}-$/u.test(a) ? a.slice(0, -1) + b : `${a} ${b}`);
 
 function pageParagraphs(text, boilerplate) {
@@ -128,7 +108,6 @@ function pageParagraphs(text, boilerplate) {
   return paras.map((p) => p.replace(/\s+/g, ' ').trim()).filter(Boolean);
 }
 
-// A paragraph longer than the budget is split on sentence boundaries (never mid-word if avoidable).
 function splitSentences(text, maxChars) {
   if (text.length <= maxChars) return [text];
   const out = [];
@@ -149,7 +128,6 @@ function splitSentences(text, maxChars) {
   return out;
 }
 
-// pages [{ page, text }] -> flat list of {text, page} units small enough to pack into chunks.
 function buildUnits(pages) {
   const boilerplate = detectBoilerplate(pages);
   const units = [];
@@ -161,10 +139,6 @@ function buildUnits(pages) {
   return units;
 }
 
-// Pack units into chunks, tracking the page range each chunk spans. A small trailing overlap is
-// carried into the next chunk so a fact sitting on a boundary is retrievable from one of the two;
-// only units that FIT inside the overlap budget are carried (carrying a big trailing unit would
-// re-emit it as a near-duplicate chunk). Works for page-less input too (page stays null).
 function chunkDocument(pages, { maxChars = CHUNK_MAX, overlap = CHUNK_OVERLAP } = {}) {
   const units = buildUnits(pages);
   const chunks = [];
@@ -172,9 +146,6 @@ function chunkDocument(pages, { maxChars = CHUNK_MAX, overlap = CHUNK_OVERLAP } 
   let cur = [];
   let len = 0;
 
-  // Identical chunks are dropped: a paragraph repeated across the document (a disclaimer, a
-  // repeated table) would otherwise burn embeddings and crowd out other results with copies of
-  // itself. The first occurrence keeps the citation.
   const emit = () => {
     if (!cur.length) return;
     const content = cur.map((u) => u.text).join('\n\n');
@@ -208,11 +179,7 @@ function chunkDocument(pages, { maxChars = CHUNK_MAX, overlap = CHUNK_OVERLAP } 
   return chunks;
 }
 
-// --- OpenAI embeddings + chat --------------------------------------------------------------
 
-// What actually gets embedded for a chunk: the document name (and page) prepended to the text.
-// An isolated 1300-char excerpt is often ambiguous on its own ("Він складається з двох частин…");
-// the title restores the topic, which measurably helps retrieval on multi-manual bases.
 function embedInput(filename, chunk) {
   const pg =
     chunk.pageStart != null
@@ -319,15 +286,6 @@ async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 
   );
 }
 
-// --- Retrieval: hybrid (vector + lexical) -> LLM rerank --------------------------------------
-// Vector search alone has two known weaknesses here: the same question phrased differently used to
-// miss, and exact technical terms (a part name, a spec) get smeared into the surrounding topic. So:
-//   1. multi-query — the model rephrases the question, every variant is embedded and searched;
-//   2. lexical FTS pass on the original wording, for the exact-term hits vectors lose;
-//   3. Reciprocal Rank Fusion merges all result lists (rank-based, so incomparable scores — cosine
-//      distance vs ts_rank — never have to be normalised against each other);
-//   4. an LLM rerank pass scores the survivors and drops everything below a relevance floor, so
-//      "close in topic, wrong in substance" chunks stop reaching the answering prompt.
 
 async function expandQueries(question) {
   try {
@@ -350,9 +308,6 @@ async function expandQueries(question) {
   }
 }
 
-// Words -> a 'simple'-config tsquery of PREFIX terms OR'ed together ("двигун:* | клапан:*").
-// Postgres ships no Ukrainian stemmer, so prefix matching is what makes "двигуна"/"двигуном" hit
-// the same lexeme. OR (not AND) keeps recall: ts_rank_cd still ranks multi-term matches higher.
 function toPrefixTsQuery(text) {
   const words = (String(text).toLowerCase().match(/[\p{L}\p{N}]{3,}/gu) || []).map((w) => w.slice(0, 24));
   const uniq = [...new Set(words)].slice(0, 12);
@@ -361,16 +316,11 @@ function toPrefixTsQuery(text) {
 
 const RETRIEVE_PER_QUERY = 8;
 const LEXICAL_LIMIT = 12;
-const RRF_K = 60; // standard Reciprocal Rank Fusion damping
+const RRF_K = 60;
 const RERANK_CANDIDATES = 24;
 const RERANK_KEEP = 8;
-const RERANK_MIN_SCORE = 4; // of 10 — below this a chunk is "related topic, not an answer"
+const RERANK_MIN_SCORE = 4;
 
-// Returns { candidates, degraded }. The two halves fail INDEPENDENTLY on purpose: OpenAI's
-// embeddings endpoint went fully down on 2026-07-25 (500 on every embedding model while chat kept
-// answering), which under a vector-only design takes the whole knowledge base down with it. The
-// lexical half needs nothing but Postgres, so a question still gets answered — degraded, and the
-// answer says so. Only losing BOTH is a real failure.
 async function retrieve(question, audiences) {
   const lists = [];
   let vectorOk = false;
@@ -417,9 +367,6 @@ async function retrieve(question, audiences) {
 const pageNote = (h) =>
   h.pageStart != null ? ` (стор. ${h.pageStart}${h.pageEnd && h.pageEnd !== h.pageStart ? `–${h.pageEnd}` : ''})` : '';
 
-// Score candidates 0-10 for whether they actually ANSWER the question, keep the top ones above the
-// floor. Returning [] is a valid, meaningful outcome: nothing in the manuals is relevant, and the
-// answering step will say so instead of hallucinating around loosely-related text.
 async function rerankChunks(question, candidates) {
   if (candidates.length <= 3) return candidates;
   const listing = candidates
@@ -452,10 +399,6 @@ async function rerankChunks(question, candidates) {
   }
 }
 
-// --- Evidence: PDF cut-outs, sent automatically ----------------------------------------------
-// The owner's requirement: an answer is followed by the CUT-OUT pages where that answer lives —
-// one mini-PDF per source file — and nothing else. No inline text quotes, no "whole file" button:
-// the excerpt IS the proof, so it is delivered, not offered.
 
 const MAX_EVIDENCE_DOCS = 3;
 const MAX_RANGES_PER_DOC = 2;
@@ -472,10 +415,6 @@ function mergeRanges(ranges) {
   return merged;
 }
 
-// The fragments the answer actually used, collapsed into what has to be sent: per source document,
-// the merged page ranges to cut out. Adjacent/overlapping citations become one excerpt instead of
-// several near-identical files. A document with no page info (DOCX/TXT) yields an empty range list
-// — pages cannot be cut out of it, so the original is sent instead (the only evidence available).
 function answerSources(hits) {
   const byDoc = new Map();
   for (const h of hits) {
@@ -503,17 +442,11 @@ async function answerStructured(question, hits) {
   );
 }
 
-// question -> { text, keyboard }: the answer, the fragments it rests on, and buttons that send the
-// cut-out pages of each source. role limits which docs are searched (a mechanic never gets a
-// manager's manual and vice versa; admins search everything).
 async function answerQuestion(question, role) {
   const { candidates, degraded } = await retrieve(question, audiencesForRole(role));
   const hits = await rerankChunks(question, candidates);
   const { answer, usedSources, usedGeneralKnowledge } = await answerStructured(question, hits);
 
-  // Plain text on purpose: the answer carries no markup of its own, and the evidence now ships as
-  // separate PDF documents — so there is nothing to format and no parse_mode to break on a
-  // filename full of underscores.
   const used = (usedSources || []).map((i) => hits[i - 1]).filter(Boolean);
   let text = String(answer || '').trim();
   if (usedGeneralKnowledge) {
@@ -528,10 +461,6 @@ async function answerQuestion(question, role) {
   return { text, sources: answerSources(used) };
 }
 
-// Deliver the evidence for an answer: one mini-PDF of the cited pages per source document, sent
-// right after the answer text. api-based (not ctx-based) so the same path serves any caller.
-// Returns how many excerpts went out; failures are logged and skipped, never thrown — a missing
-// excerpt must not take down an answer that is already correct.
 async function sendAnswerSources(api, chatId, sources, { replyToMessageId } = {}) {
   let sent = 0;
   for (const s of sources) {
@@ -541,8 +470,6 @@ async function sendAnswerSources(api, chatId, sources, { replyToMessageId } = {}
       if (!doc?.fileId) continue;
       const isPdf = /pdf/i.test(doc.mime || '') || /\.pdf$/i.test(doc.filename);
       if (!isPdf || !s.ranges.length) {
-        // No pages to cut (DOCX/TXT, or citations without page info): the original is the evidence.
-        // No caption — the document name is already visible on the file.
         await api.sendDocument(chatId, doc.fileId, {
           ...(replyToMessageId ? { reply_parameters: { message_id: replyToMessageId, allow_sending_without_reply: true } } : {}),
         });
@@ -559,10 +486,7 @@ async function sendAnswerSources(api, chatId, sources, { replyToMessageId } = {}
   return sent;
 }
 
-// --- Upload ingestion ----------------------------------------------------------------------
 
-// Core ingestion from page-structured text: chunk (with page ranges) -> embed -> store.
-// fileId/mime let us later resend the original document or cut pages out of it.
 async function ingestPages(filename, pages, uploadedBy, fileId, mime, audience = 'mechanic') {
   const chunks = chunkDocument(pages);
   if (chunks.length === 0) throw new Error('порожній текст');
@@ -575,13 +499,10 @@ async function ingestPages(filename, pages, uploadedBy, fileId, mime, audience =
   return { docId, chunkCount: chunks.length };
 }
 
-// Backward-compatible plain-text entry point (no page info — e.g. tests / a future importer).
 async function ingestText(filename, text, uploadedBy, fileId, mime, audience = 'mechanic') {
   return ingestPages(filename, [{ page: null, text }], uploadedBy, fileId, mime, audience);
 }
 
-// Step 1 of upload: capture the document and ask WHO it's for. The actual ingestion is deferred
-// until the audience is chosen (kb:aud:*), so we stash the file reference in the session.
 async function askAudienceForUpload(ctx) {
   const doc = ctx.message.document;
   if (!doc) return;
@@ -596,13 +517,10 @@ async function askAudienceForUpload(ctx) {
   await ctx.reply(`📎 «${name}» — для кого цей файл у базі знань?`, { reply_markup: audienceKeyboard('kb:aud:') });
 }
 
-// Step 2 of upload: run the ingestion for the stashed document with the chosen audience.
 async function ingestPendingDoc(ctx, pending, audience) {
   const { fileId, name, mime } = pending;
   await ctx.reply(`⏳ Файл «${name}» (${AUDIENCE_LABEL[audience]}) обробляється… Для великих файлів це може зайняти до хвилини.`);
   try {
-    // Download + text extraction + chunking + embeddings can take ~30s; keep a "typing"
-    // indicator alive for the whole time so the chat doesn't look frozen.
     const result = await withProgress(ctx.api, ctx.chat.id, 'typing', async () => {
       const buffer = await downloadOriginal(fileId);
       const pages = await extractPages(buffer, name);
@@ -612,22 +530,14 @@ async function ingestPendingDoc(ctx, pending, audience) {
       const { chunkCount } = await ingestPages(name, pages, author, fileId, mime, audience);
       return { chunkCount, textLength };
     });
-    // Текст не витягся: PDF без текстового шару (скан або фото сторінок). Клас відомий тут,
-    // тому кидаємо його з кодом - формулювання прийде з core/errorTexts.js, як і в решти помилок.
     if (!result) throw appError('PDF-SCANNED');
     await ctx.reply(`✅ Додано «${name}» для ${AUDIENCE_LABEL[audience]} — ${result.chunkCount} фрагм. (~${result.textLength} симв.). Тепер можна ставити питання.`);
   } catch (err) {
-    // subject -> у заголовок потрапляє назва файлу: директор часто заливає кілька підряд, і
-    // «Не вдалося опрацювати файл» без назви не дає зрозуміти, який саме не пройшов.
     await reportToUser(ctx, err, { action: 'kb_edit', subject: name });
   }
 }
 
-// --- Menus / handlers ----------------------------------------------------------------------
 
-// All KB screens render as PLAIN text (no parse_mode): filenames routinely contain characters
-// that break Telegram Markdown (e.g. "_"), which previously made the "Files" screen silently
-// fail to render. Filenames are shown in «guillemets» instead of markdown.
 
 async function filesListContent() {
   const docs = await listKbDocs();
@@ -656,7 +566,6 @@ async function fileDetailContent(id) {
   return { text: `📄 «${d.filename}»\nФрагментів: ${d.chunkCount}\nДля кого: ${AUDIENCE_LABEL[d.audience] || d.audience}`, kb };
 }
 
-// Inline keyboard for choosing/changing a doc's audience. cbPrefix builds the callback per option.
 function audienceKeyboard(cbPrefix, back) {
   const kb = new InlineKeyboard()
     .text(AUDIENCE_LABEL.mechanic, `${cbPrefix}mechanic`)
@@ -667,13 +576,10 @@ function audienceKeyboard(cbPrefix, back) {
   return kb;
 }
 
-// KB screens render as plain text (filenames contain _ etc. that break Markdown). showScreen
-// keeps the active screen at the bottom / in focus (edit-in-place when newest, else resend).
 async function showPlain(ctx, text, kb) {
   await showScreen(ctx, text, kb, { parseMode: null });
 }
 
-// Prompt the user to type a question (shared by the button, command and quick keyboard).
 async function promptQuestion(ctx, kbState) {
   if (!kbState.ready) {
     await ctx.reply('База знань тимчасово недоступна.');
@@ -687,8 +593,6 @@ async function promptQuestion(ctx, kbState) {
   await ctx.reply('📚 База знань. Напишіть ваше питання одним повідомленням.');
 }
 
-// Open the files list as a NEW message (used by the /files command so the native Menu button
-// matches the inline menu; the kb:menu callback edits the current message instead).
 async function openFiles(ctx, kbState) {
   if (!kbState.ready) {
     await ctx.reply('База знань тимчасово недоступна (немає pgvector).');
@@ -698,7 +602,6 @@ async function openFiles(ctx, kbState) {
   await showPlain(ctx, text, kb);
 }
 
-// A doc the caller's role is allowed to read, or null (with the reason already sent to the chat).
 async function docForRole(ctx, id, role) {
   const d = await getKbDoc(id);
   if (!d) {
@@ -717,8 +620,6 @@ async function docForRole(ctx, id, role) {
   return d;
 }
 
-// Resend the original file. Used by the "whole file" button under an answer and by the legacy
-// deep-link (t.me/bot?start=kbdoc_<id>) still present in older chat messages.
 async function openKbDocById(ctx, id, role, { replyToMessageId } = {}) {
   const d = await docForRole(ctx, id, role);
   if (!d) return;
@@ -801,7 +702,6 @@ function registerKnowledgeBase(bot, kbState) {
     await askAudienceForUpload(ctx);
   });
 
-  // Audience chosen for a just-uploaded file → run the deferred ingestion.
   bot.callbackQuery(/^kb:aud:(mechanic|manager|both)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const pending = ctx.session.pendingKbDoc;
@@ -813,7 +713,6 @@ function registerKnowledgeBase(bot, kbState) {
     await ingestPendingDoc(ctx, pending, ctx.match[1]);
   });
 
-  // Change an existing file's audience: show the picker, then apply and return to the file detail.
   bot.callbackQuery(/^kb:audset:(\d+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const id = Number(ctx.match[1]);

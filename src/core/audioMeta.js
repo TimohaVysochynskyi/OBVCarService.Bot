@@ -3,10 +3,6 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-// Probe how many audio channels a recording has, so the STT path can use ElevenLabs multichannel
-// mode (perfect per-channel speaker separation) for stereo calls and plain diarization for mono.
-// Uses system ffprobe (ships with ffmpeg, already required for audio clips). Any failure — no
-// ffprobe, unknown format — returns null, and the caller falls back to the mono/diarization path.
 
 const FFPROBE = process.env.FFPROBE_PATH || 'ffprobe';
 
@@ -22,9 +18,6 @@ function runFfprobe(args) {
   });
 }
 
-// Returns the channel count (integer) of the first audio stream, or null if it can't be determined.
-// Accepts a Blob (written to a temp file, since ffprobe needs a real path) or - now that recordings
-// are archived locally (core/audioStore.js) - the path of the stored file, which skips that copy.
 async function probeChannels(input) {
   let dir;
   try {

@@ -41,9 +41,6 @@ async function sendGlobalReport(ctx) {
     notice: NOTICE,
   });
 
-  // The site is written to its permanent home (REPORT_SITE_DIR) — that is what a web server will
-  // serve later, and what lets the next build reuse the audio clips instead of re-cutting them.
-  // Only the zip handed to Telegram is temporary.
   const built = await buildSite(report);
 
   const dir = await mkdtemp(join(tmpdir(), 'obv-global-'));

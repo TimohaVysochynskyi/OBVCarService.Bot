@@ -31,8 +31,6 @@ const PURPOSE_LABELS = {
   },
 };
 
-// The four category NAMES are fixed by the schema and by what is already stored in the database;
-// only the explanation of where the line between them runs is the owner's to tune.
 const purposeRules = definePrompt({
   key: 'purpose',
   group: 'call',

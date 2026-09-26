@@ -2,18 +2,6 @@ import 'dotenv/config';
 import { migrate, getSalesCallsWithSegments, updateCallScore } from '../core/store.js';
 import { classifyCall } from '../core/classifyCall.js';
 
-// One-off: re-run ONLY the communicationScore for sales calls that already have timecoded segments,
-// so historical scores are judged by the same criteria as new ones.
-//
-// Why this is needed: dialogue mechanics (interruptions / response latency — core/dialogueMetrics.js)
-// were added to the scoring rubric on 2026-07-28. Findings get them retroactively for free (they are
-// detected in code at report time), but the per-call score is frozen at ingest. Left alone, old calls
-// would keep pre-rubric scores while new ones get stricter ones — and the "Динаміка" screen would
-// then show a fake decline caused purely by the criteria change, not by the manager.
-//
-// Deliberately surgical: updates ONLY communication_score. isSuccess / weakestStage are untouched,
-// so conversion history and the weak-stage series stay exactly as they were.
-// Idempotent in the sense that re-running just recomputes the same thing (LLM scores may wobble ±1).
 
 async function main() {
   await migrate();

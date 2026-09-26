@@ -2,10 +2,6 @@ import { withRetry } from '../core/retry.js';
 import { modelContent } from '../core/errors.js';
 import { fetchOk } from '../core/http.js';
 
-// Turns a raw (mono, single-channel, unlabelled) call transcript into a readable dialogue with
-// "Менеджер:" / "Клієнт:" turns. The recording has no channel separation, so the model infers who
-// speaks from context. It must NOT invent or reword content — only segment into turns, label them,
-// and lightly fix punctuation/casing. Used on-demand when viewing a call in the archive.
 const DIALOGUE_SYSTEM = `Тобі дано транскрипт телефонної розмови в автосервісі між МЕНЕДЖЕРОМ (працівник сервісу) і КЛІЄНТОМ. Запис моно, без розділення каналів, тому репліки не розмічені.
 
 Подай цю саму розмову у форматі діалогу:

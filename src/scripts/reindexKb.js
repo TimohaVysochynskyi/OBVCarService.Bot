@@ -3,18 +3,6 @@ import { migrateKb, getKbDocsWithFile, replaceKbDocChunks } from '../core/store.
 import { extractPages, chunkDocument, embedTexts, embedInput } from '../bot/kb.js';
 import { downloadOriginal } from '../bot/kbClip.js';
 
-// One-off / repeatable: rebuild the chunks + embeddings of every knowledge-base document with the
-// CURRENT pipeline (smaller page-aware chunks, boilerplate stripping, contextual embeddings, the
-// FTS column). Needed after any change to chunking or to what gets embedded — the stored vectors
-// and page ranges are only as good as the code that produced them.
-//
-// The owner does NOT have to re-upload anything: kb_docs keeps the Telegram file_id, so the
-// original is re-downloaded from Telegram here. The kb_docs row itself (id, filename, audience,
-// file_id) is untouched, so roles and existing links keep working; only kb_chunks is swapped, in
-// one transaction per document.
-//
-//   npm run kb:reindex            — every doc that has a file_id
-//   npm run kb:reindex -- 5       — only doc id 5
 
 async function main() {
   const only = process.argv.slice(2).map(Number).filter(Number.isInteger);
@@ -57,8 +45,6 @@ async function main() {
     }
   }
   console.log(`[kb:reindex] готово: ${ok}/${docs.length}`);
-  // Non-zero on a partial run so a shell can retry it (`until npm run kb:reindex; do sleep …; done`)
-  // — embeddings outages are the realistic failure here, and a half-reindexed base is not "done".
   return ok === docs.length;
 }
 

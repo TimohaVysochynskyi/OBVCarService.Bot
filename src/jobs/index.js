@@ -15,13 +15,9 @@ async function main() {
   console.log(`[index] starting job: ${jobType}`);
 
   await migrate();
-  // Відмітка «прогін відбувся» — саме на початку й незалежно від результату: бот стежить за нею,
-  // і мовчання полера має означати «процес не бігає», а не «Binotel лежить».
   await markAlive('poll');
 
   if (jobType === 'poll') {
-    // The single deployed job: pull new calls from Binotel, transcribe, classify and store
-    // them. Reporting/stats live in a separate bot project that reads the same database.
     await pollNewCalls();
   } else {
     throw new Error(`Unknown JOB_TYPE "${jobType}" - only "poll" is supported`);
@@ -31,20 +27,11 @@ async function main() {
 }
 
 main().catch(async (err) => {
-  // Раніше тут у Telegram летів сирий текст винятку - саме це власник і отримував що 15 хвилин
-  // під час аварії Binotel: з такого повідомлення не зрозуміти ні що зламалось, ні чи втрачені
-  // дані, ні чи це взагалі його проблема. Тепер алерт збирається за шаблоном із errorTexts.js.
   const described = describeError(err, { action: 'ingest', icon: '⚠️' });
   console.error(`[index] ${described.code} інцидент ${described.incident}: ${described.technicalLine}`);
   console.error(err);
   await recordError(described, { source: 'poll', feature: 'ingest' });
   try {
-    // A Binotel outage is already reported (once, then on a reminder cadence) by the poller's
-    // outage watchdog - re-alerting here would put the every-15-minutes spam straight back.
-    // Через alertOnce, а не напряму: якщо причина не зникає (недоступна база, відкликаний ключ),
-    // cron бив би тим самим повідомленням щочверть години. Ключ включає КЛАС помилки, тож нова
-    // проблема все одно про себе скаже. Стан цього дедупу переживає навіть падіння Postgres —
-    // core/alerts.js тримає резервну копію у файлі.
     if (!err?.alertSent) {
       await alertOnce(`ingest_${described.code}`, {
         active: true,

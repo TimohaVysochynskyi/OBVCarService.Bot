@@ -13,17 +13,13 @@ import { operatorLabels } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
 import { showScreen } from './ui.js';
 
-// Only these three roles are managed from the UI (directors are seeded from env / promoted in DB;
-// there's deliberately no "add role" and no way to create/remove a director from the buttons, so
-// a marketer can't delete the seed owner). Order = how the buttons appear.
 const MANAGEABLE_ROLES = [ROLES.MARKETER, ROLES.MANAGER, ROLES.MECHANIC];
-const REQUEST_USERS_ID = 1; // request_id echoed back in users_shared; intent is tracked via awaiting
+const REQUEST_USERS_ID = 1;
 
 function fullName(ctx) {
   return [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || null;
 }
 
-// A short human line describing a member for the list / detail screens.
 function memberLine(u) {
   const name = u.displayName || (u.username ? `@${u.username}` : null) || (u.phone ? formatPhone(u.phone) : `id${u.telegramId ?? '—'}`);
   const bits = [];
@@ -34,7 +30,6 @@ function memberLine(u) {
   return bits.length ? `${name} (${bits.join(', ')})` : name;
 }
 
-// --- Screens -------------------------------------------------------------------------------
 
 function rolesMenu() {
   const kb = new InlineKeyboard();
@@ -70,7 +65,6 @@ async function memberScreen(id) {
   return { text, kb };
 }
 
-// Roster of known operators (names Binotel gave) so a director can link a manager to their calls.
 async function operatorPickScreen(memberId) {
   const operators = await getOperators();
   const kb = new InlineKeyboard();
@@ -83,9 +77,6 @@ async function operatorPickScreen(memberId) {
   };
 }
 
-// Reply keyboard for the "add person" step: pick from contacts (request_users, gives us their
-// Telegram id instantly) or share/enter a phone. Sent as a normal reply keyboard because
-// request_users only works there, not on inline keyboards.
 function addKeyboard() {
   return new Keyboard()
     .requestUsers('👤 Обрати з контактів', REQUEST_USERS_ID, {
@@ -102,10 +93,7 @@ function addKeyboard() {
     .oneTime();
 }
 
-// --- Add flow ------------------------------------------------------------------------------
 
-// After a person is added: managers need an operator link (offer the roster), others go straight
-// back to the role list. Always clears the reply keyboard first.
 async function afterAdded(ctx, role, memberId, who) {
   await ctx.reply(`✅ Додано на роль «${ROLE_LABELS[role]}»: ${who}.`, { reply_markup: { remove_keyboard: true } });
   if (role === ROLES.MANAGER) {
@@ -117,8 +105,6 @@ async function afterAdded(ctx, role, memberId, who) {
   await showScreen(ctx, text, kb, { parseMode: null });
 }
 
-// Add via the request_users picker: we get the Telegram id (+ name/username) with no need for the
-// person to have opened the bot first.
 async function addByUsersShared(ctx, role) {
   const shared = ctx.message.users_shared;
   const users = shared?.users || [];
@@ -141,8 +127,6 @@ async function addByUsersShared(ctx, role) {
   await afterAdded(ctx, role, lastId, who);
 }
 
-// Add via a shared contact card. If the contact is a Telegram user we get user_id → active
-// immediately; otherwise we only have a phone → store a pending invite the person claims on /start.
 async function addByContact(ctx, role) {
   const c = ctx.message.contact;
   const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || (c.phone_number ? formatPhone(c.phone_number) : 'контакт');
@@ -164,8 +148,6 @@ async function addByContact(ctx, role) {
   await afterAdded(ctx, role, memberId, name);
 }
 
-// Add by a typed phone number (fallback): always a pending invite, claimed when the person shares
-// their contact on /start.
 async function addByPhoneText(ctx, role) {
   const phone = ctx.message.text.replace(/\D/g, '');
   if (phone.length < 9) {
@@ -180,7 +162,6 @@ async function addByPhoneText(ctx, role) {
   await afterAdded(ctx, role, memberId, formatPhone(phone));
 }
 
-// --- Registration --------------------------------------------------------------------------
 
 async function openRolesMenu(ctx) {
   ctx.session.awaiting = null;
@@ -272,11 +253,8 @@ function registerRoles(bot) {
     if (screen) await showScreen(ctx, screen.text, screen.kb, { parseMode: null });
   });
 
-  // Adding people: request_users picker and shared contacts. Guarded by the awaiting role_add
-  // state so a stray shared contact from someone not in the add flow is ignored here.
   bot.on('message:users_shared', async (ctx, next) => {
     const st = ctx.session.awaiting;
-    // Not our add flow (e.g. a settings recipient pick) — let later handlers run.
     if (st?.type !== 'role_add') {
       if (next) await next();
       return;
@@ -290,7 +268,6 @@ function registerRoles(bot) {
       await addByContact(ctx, st.role);
       return;
     }
-    // Not part of an add flow (e.g. a manager saving their own number) — let other handlers run.
     if (next) await next();
   });
 }

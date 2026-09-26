@@ -10,19 +10,12 @@ import {
 import { formatPhone } from './operators.js';
 import { showScreen } from './ui.js';
 
-// Admin-only "Налаштування" (/settings, native "Menu" button — deliberately NOT an inline main-menu
-// button). Two recipient lists live here, both stored in app_state as JSON { id, name } arrays:
-//   alert  — where ingest failure alerts are sent (core/telegram.js sendAlert)
-//   report — where the daily PDF auto-reports are sent (report.js scheduler)
-// Each list can hold several people, so a message fans out to everyone on it. This replaces the old
-// single TELEGRAM_CHAT_ID / BOT_REPORT_CHAT_ID env vars.
 const KINDS = {
   alert: { title: 'Сповіщення про поломки', emoji: '⚠️' },
   report: { title: 'Щоденні звіти', emoji: '📊' },
 };
-const REQUEST_USERS_ID = 2; // distinct from roles.js's request_id (1); intent is tracked via awaiting
+const REQUEST_USERS_ID = 2;
 
-// --- Screens -------------------------------------------------------------------------------
 
 function settingsMenu() {
   const kb = new InlineKeyboard()
@@ -43,8 +36,7 @@ function settingsMenu() {
   };
 }
 
-// --- Report times (Kyiv) — button picker so the format is always standard --------------------
-const MINUTE_STEP = 10; // 00,10,20,30,40,50
+const MINUTE_STEP = 10;
 const pad2 = (n) => String(n).padStart(2, '0');
 
 async function timesScreen() {
@@ -90,8 +82,6 @@ async function listScreen(kind) {
   return { text: `${meta.emoji} ${meta.title}\nКому надсилати:\n${body}`, kb };
 }
 
-// Reply keyboard for the add step: pick from contacts (request_users → Telegram id instantly) or
-// share a contact card. request_users only works on a normal reply keyboard, not inline.
 function addKeyboard() {
   return new Keyboard()
     .requestUsers('👤 Обрати з контактів', REQUEST_USERS_ID, {
@@ -108,7 +98,6 @@ function addKeyboard() {
     .oneTime();
 }
 
-// --- Add flow ------------------------------------------------------------------------------
 
 async function afterAdded(ctx, kind, who) {
   await ctx.reply(`✅ Додано отримувача: ${who}.`, { reply_markup: { remove_keyboard: true } });
@@ -116,8 +105,6 @@ async function afterAdded(ctx, kind, who) {
   await showScreen(ctx, text, kb, { parseMode: null });
 }
 
-// request_users picker: gives us the Telegram id (+ name/username) without the person having opened
-// the bot. NOTE: the bot still can't message them until they press Start (Telegram rule).
 async function addByUsersShared(ctx, kind) {
   const users = ctx.message.users_shared?.users || [];
   if (!users.length) return;
@@ -131,8 +118,6 @@ async function addByUsersShared(ctx, kind) {
   await afterAdded(ctx, kind, names.join(', '));
 }
 
-// Shared contact card. We need a Telegram user_id to be able to message them; a phone-only contact
-// has no chat we can send to, so it's rejected with an explanation.
 async function addByContact(ctx, kind) {
   const c = ctx.message.contact;
   if (!c.user_id) {
@@ -152,8 +137,6 @@ async function addByContact(ctx, kind) {
   await afterAdded(ctx, kind, name);
 }
 
-// Typed numeric chat id fallback (routed from index.js's text handler). Lets an admin add a chat we
-// can't reach via contacts — e.g. a GROUP (negative id) for alerts.
 async function addRecipientByIdText(ctx, kind) {
   const raw = ctx.message.text.trim();
   if (!/^-?\d+$/.test(raw)) {
@@ -168,7 +151,6 @@ async function addRecipientByIdText(ctx, kind) {
   await afterAdded(ctx, kind, `ID ${raw}`);
 }
 
-// --- Registration --------------------------------------------------------------------------
 
 async function openSettings(ctx) {
   ctx.session.awaiting = null;
@@ -213,7 +195,6 @@ function registerSettings(bot) {
     await showScreen(ctx, text, kb, { parseMode: null });
   });
 
-  // --- Report times ---
   bot.callbackQuery('set:times', async (ctx) => {
     ctx.session.awaiting = null;
     await ctx.answerCallbackQuery();
@@ -249,8 +230,6 @@ function registerSettings(bot) {
     await showScreen(ctx, text, kb, { parseMode: null });
   });
 
-  // Adding: request_users picker and shared contacts. Guarded by the awaiting settings_add state;
-  // when it's not our flow we pass through (next) so roles.js / the save_phone handler still work.
   bot.on('message:users_shared', async (ctx, next) => {
     const st = ctx.session.awaiting;
     if (st?.type !== 'settings_add') {

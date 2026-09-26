@@ -3,23 +3,11 @@ import { parseModelJson } from './errors.js';
 import { fetchOk, fetchRaw } from './http.js';
 import { probeChannels } from './audioMeta.js';
 
-// ElevenLabs Speech-to-Text (Scribe): transcription + speaker separation in ONE request.
-// Endpoint: POST https://api.elevenlabs.io/v1/speech-to-text (auth header: xi-api-key).
-// We build a ready-to-store "Менеджер:/Клієнт:" dialogue right here at ingest, so the archive can
-// show it instantly with no extra request.
-//   • STEREO calls (2 channels) → multichannel mode: each channel is one party, so speaker
-//     separation is PERFECT and comes straight from ElevenLabs (use_multi_channel=true, diarize
-//     off, combined output → words carry speaker_id/channel_index). Role (manager vs client) is
-//     then picked on cleanly-separated text → far more reliable than content-only diarization.
-//   • MONO calls → content-based diarization (diarize=true), same as before.
-// Who is the manager vs the client still isn't given by ElevenLabs, so pickManagerSpeaker decides.
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 const SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
 const sttModel = () => process.env.ELEVENLABS_STT_MODEL || 'scribe_v1';
-const numSpeakers = () => process.env.ELEVENLABS_NUM_SPEAKERS || '2'; // phone call = 2 parties
+const numSpeakers = () => process.env.ELEVENLABS_NUM_SPEAKERS || '2';
 
-// Raw STT call. Returns the ElevenLabs JSON ({ text, words:[{text,type,speaker_id,channel_index,...}] }).
-// multichannel=true switches to per-channel speaker separation (for stereo recordings).
 async function sttDiarize(audioBlob, { multichannel = false } = {}) {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new Error('ELEVENLABS_API_KEY is not set');
@@ -29,8 +17,6 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
       form.append('file', audioBlob, 'call.mp3');
       form.append('model_id', sttModel());
       if (multichannel) {
-        // Each channel = one speaker; diarization must be OFF in this mode. "combined" returns a
-        // single words[] sorted by start time, each word tagged with its channel (speaker_id).
         form.append('use_multi_channel', 'true');
         form.append('diarize', 'false');
         form.append('multichannel_output_style', 'combined');
@@ -38,8 +24,6 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
         form.append('diarize', 'true');
         form.append('num_speakers', numSpeakers());
       }
-      // CALL_LANGUAGE (uk/ru) forces the language; otherwise Scribe auto-detects (uk & ru are both
-      // "excellent accuracy"), which also removes the old OpenAI uk-vs-ru re-transcription dance.
       if (process.env.CALL_LANGUAGE) form.append('language_code', process.env.CALL_LANGUAGE);
 
       const res = await fetchOk('elevenlabs', 'транскрипція розмови', STT_URL, {
@@ -53,25 +37,8 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
   );
 }
 
-// ⚠️ ElevenLabs НЕ віддає ЖОДНОГО поля з грошима — перевірено наживо 11.09.2026 на цьому
-// акаунті: ні /v1/user, ні /v1/user/subscription, ні /v1/usage/character-stats. Є тільки
-// кредити. Тому сума в доларах — ЗАВЖДИ ОЦІНКА: залишок кредитів × курс нижче.
-//
-// КАЛІБРУВАННЯ 11.09.2026: дашборд ElevenLabs показував $5.85 при 16 063 кредитах залишку
-// (character_limit 37 291 − character_count 21 228) → 5.85 / 16.063 × 1000 = 0.3642 за 1000.
-// Було 0.22 — тобто бот показував $3.53 замість $5.85, суму в 1.65 раза МЕНШУ за реальну.
-// Для власника це виглядало так, ніби він обманює клієнта, коли називав правильне число.
-//
-// ЯК ПЕРЕКАЛІБРУВАТИ, коли число знову розійдеться з дашбордом:
-//     новий курс = (сума з дашборду) ÷ (залишок кредитів) × 1000
-// Залишок кредитів видно і в /health, і в алерті про низький баланс — тобто обидва числа
-// для перерахунку завжди під рукою, лізти в API не треба.
 const DEFAULT_USD_PER_1000_CREDITS = 0.3642;
 
-// Поріг «низький баланс». ⚠️ Прив'язаний до курсу вище: $3.31 ≈ 9 100 кредитів ≈ 27 хв розмов
-// (Scribe STT — 330 кредитів/хв) ≈ 25 середніх дзвінків запасу. Міняючи курс, ОБОВ'ЯЗКОВО
-// перерахуй і поріг: інакше попередження тихо почне приходити раніше або пізніше, ніж задумано,
-// і про закінчення кредитів дізнаються вже по зіпсованій якості розшифровок.
 const DEFAULT_MIN_BALANCE_USD = 3.31;
 
 const envNumber = (name, fallback) => {
@@ -79,9 +46,6 @@ const envNumber = (name, fallback) => {
   return Number.isFinite(value) && value > 0 ? value : fallback;
 };
 
-// ЄДИНЕ місце, де кредити перетворюються на долари. Раніше та сама формула стояла двома копіями —
-// в алерті інжесту і на екрані /health, — тож вони могли розійтися між собою й показувати
-// користувачу різні суми за той самий баланс.
 function creditsToUsd(credits) {
   const amount = Number(credits);
   if (!Number.isFinite(amount) || amount <= 0) return 0;
@@ -92,10 +56,6 @@ function minBalanceUsd() {
   return envNumber('ELEVENLABS_MIN_BALANCE_USD', DEFAULT_MIN_BALANCE_USD);
 }
 
-// Remaining ElevenLabs balance (credits). The subscription endpoint returns character_count /
-// character_limit (unified credits) — remaining = limit - count. Needs the API key to have the
-// `user_read` permission; without it the endpoint 401s (reason 'missing_permission'), which the
-// caller surfaces so the owner can grant it. Best-effort: never throws.
 async function getElevenLabsBalance() {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) return { ok: false, reason: 'no_key' };
@@ -117,10 +77,6 @@ async function getElevenLabsBalance() {
   }
 }
 
-// Group the flat words[] into speaker turns, KEEPING each turn's timecode (start of its first word,
-// end of its last) — the report needs these to cut an audio clip around a quoted line. 'spacing'
-// tokens carry the whitespace and have no speaker of their own, so they just extend the current
-// turn; a real word with a different speaker_id starts a new turn.
 function buildTurns(words) {
   const turns = [];
   let cur = null;
@@ -163,9 +119,6 @@ const ROLE_SCHEMA = {
   },
 };
 
-// Phrases the SERVICE OPERATOR (manager) uses far more than the client, uk + ru. Substring match,
-// lowercased. Used as (a) the deterministic fallback when the LLM call fails and (b) a tie-breaker
-// when the LLM is unsure — much more reliable than the old "first speaker = manager" guess.
 const MANAGER_MARKERS = [
   'автосервіс', 'автосервис', 'сервіс', 'сервис', 'сто', 'наш майстер', 'майстер', 'мастер',
   'запиш', 'записати', 'запишу', 'запишемо', 'запис на', 'на яку годину', 'на яке авто', 'яка марка',
@@ -175,11 +128,6 @@ const MANAGER_MARKERS = [
   'у нас є', 'наша адреса', 'запчастин', 'запчаст',
 ];
 
-// STRONGEST signal: the manager self-introduces by their known name (e.g. "Это Андрей вас
-// беспокоит", "мене звати Андрій"). Works even when our manager is the CALLER acting like a
-// customer (an outbound call to a supplier) — the content-role heuristics fail there, this doesn't.
-// Returns the speaker id that self-introduces, or null. Exact (lowercased) match on the name — name
-// spelling variants (Андрій/Андрей) are left to the LLM.
 function selfIntroManager(turns, speakerIds, managerName) {
   const n = String(managerName || '').trim().toLowerCase();
   if (n.length < 3) return null;
@@ -195,8 +143,6 @@ function selfIntroManager(turns, speakerIds, managerName) {
   return null;
 }
 
-// Score each speaker by how many operator-markers their lines contain; the highest = manager.
-// Returns null when nobody used any marker (no signal to decide on).
 function heuristicManager(turns, speakerIds) {
   const score = Object.fromEntries(speakerIds.map((s) => [s, 0]));
   for (const t of turns) {
@@ -211,16 +157,9 @@ function heuristicManager(turns, speakerIds) {
       best = sid;
     }
   }
-  return best; // null when all scores are 0
+  return best;
 }
 
-// Decide which speaker id is OUR MANAGER. The goal is to find our specific employee, NOT "whoever
-// plays the service-operator role" — on an outbound call our manager is the caller and sounds like
-// a customer, so role-based guessing flips. Layers, most-reliable first:
-//   1) self-introduction by the known manager name (deterministic) — e.g. "Это Андрей вас беспокоит";
-//   2) LLM over the WHOLE dialogue, framed as "which speaker is our employee «<name>»" when we know
-//      the name, else "who is the service operator";
-//   3) keyword heuristic (operator markers) then first speaker as last resorts.
 async function pickManagerSpeaker(turns, speakerIds, managerName) {
   const intro = selfIntroManager(turns, speakerIds, managerName);
   if (intro) {
@@ -272,8 +211,6 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
     );
 
     if (!speakerIds.includes(out.manager)) return keyword ?? turns[0].speaker;
-    // Without a name to anchor on, a low-confidence answer that contradicts a clear operator-marker
-    // signal is overridden by the heuristic.
     if (!managerName && out.confidence === 'low' && keyword && keyword !== out.manager) {
       console.log(`[elevenlabs] low-confidence role (LLM=${out.manager}, keyword=${keyword}) → using keyword heuristic`);
       return keyword;
@@ -285,15 +222,7 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
   }
 }
 
-// Full pipeline: STT + diarize -> a ready "Менеджер:/Клієнт:" dialogue AND the same dialogue as
-// timecoded segments. Returns { transcript, segments } where:
-//   transcript: the string stored in calls.transcript (instant archive view), same as before;
-//   segments:   [{ role:'manager'|'client', text, start, end }] with per-turn timecodes for audio
-//               clipping, or null when there's nothing to diarize (voicemail / single speaker).
-// managerName (when known from Binotel) anchors role detection on our specific employee.
 async function transcribeDiarized(audioBlob, managerName, { audioPath } = {}) {
-  // Stereo → per-channel separation (much better roles); mono → content diarization. When the
-  // recording is already on disk (core/audioStore.js) ffprobe reads that file directly.
   const channels = await probeChannels(audioPath || audioBlob);
   const multichannel = (channels ?? 1) >= 2;
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);

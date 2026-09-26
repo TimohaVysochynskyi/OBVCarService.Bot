@@ -10,23 +10,6 @@ import {
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { displayName } from '../bot/operators.js';
 
-// One-off (safely repeatable): decide "незакриті угоди" (src/core/dealBlocker.js) for the calls
-// already in the DB, so the Черга/Профіль columns and the report block work over the whole history
-// instead of starting from the day the feature shipped.
-//
-// Usage:
-//   npm run backfill:blockers                 # every unchecked non-closed call, oldest first
-//   npm run backfill:blockers -- --limit 20   # smoke test
-//   npm run backfill:blockers -- --keep-cache # don't clear the cached report findings at the end
-//
-// Only calls that did NOT close are checked — a closed deal cannot have been blocked — which is what
-// keeps a gpt-4o pass over the history cheap. Idempotent: a decided call (deal_blocker NOT NULL) is
-// skipped, so an interrupted run costs nothing to repeat, and a call that errors keeps deal_blocker
-// NULL so the next run retries it.
-//
-// PACING IS REQUIRED, not politeness: gpt-4o on this account is capped at 30k tokens/min, and each
-// check is ~1.3k tokens (a confirmed candidate costs a second, verification call). Without a pause the
-// run 429s within seconds.
 
 const PAUSE_MS = Number(process.env.BACKFILL_BLOCKER_PAUSE_MS || 2600);
 
@@ -44,9 +27,6 @@ async function main() {
   const { limit, keepCache, reset, relabel } = parseArgs(process.argv.slice(2));
   await migrate();
 
-  // --reset re-decides calls that were already decided. Needed when the detection RULES change: the
-  // Черга/Профіль counts are a time series, so the whole history must be judged by one set of rules,
-  // otherwise older weeks are simply measured differently from newer ones.
   if (reset) {
     const n = await resetAllBlockers();
     console.log(`[backfillBlockers] --reset: скинуто ${n} раніше визначених дзвінків — усю історію буде перевірено за поточними правилами`);
@@ -81,7 +61,6 @@ async function main() {
     try {
       const r = await detectDealBlocker(c.transcript, c.segments, who);
       if (r.unchecked) {
-        // Нічого не пишемо: рядок лишається NULL і потрапить у наступний прогін.
         unchecked += 1;
         console.warn(`[backfillBlockers] ${i + 1}/${calls.length} ${c.generalCallId} — не перевірено (збій рецензента), лишається на потім`);
         if (i < calls.length - 1) await new Promise((r2) => setTimeout(r2, PAUSE_MS));
@@ -117,9 +96,6 @@ async function main() {
   console.log(`  не перевірено (лишились NULL): ${unchecked}`);
   console.log(`  у БД тепер: черга ${after.noSlot}, профіль ${after.outOfScope}, не перевірено ${after.unchecked}`);
 
-  // Cached report findings were produced when blocked calls still counted as ordinary failed deals;
-  // clearing the cache makes the next report recompute with the blockers excluded. Skipped with
-  // --keep-cache (e.g. on a --limit smoke run, where throwing the whole cache away would be wasteful).
   if (!keepCache && (noSlot || outOfScope)) {
     const n = await clearAllReportSegments();
     console.log(`  кеш звітів очищено: ${n} відрізок(ів) — findings перерахуються з урахуванням блокерів`);

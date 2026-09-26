@@ -2,22 +2,6 @@ import 'dotenv/config';
 import { migrate, getCallsMissingAudio, setCallAudio, getAudioArchiveStats } from '../core/store.js';
 import { fetchRecording, saveRecording, readStoredRecording, storageRoot, freeSpaceMb } from '../core/audioStore.js';
 
-// One-off (but safely repeatable): download the recording of EVERY call already in our database and
-// archive it locally, so the audio archive doesn't start from the day archiving was added. From then
-// on the ingest stores each new recording itself (jobs/processCalls.js).
-//
-// Usage:
-//   npm run backfill:audio                  # every call with no archived recording yet, oldest first
-//   npm run backfill:audio -- --limit 50    # first 50 only (smoke test)
-//   npm run backfill:audio -- --retry-missing  # also retry calls previously marked 'unavailable'
-//
-// Idempotent and resumable: a call already archived is skipped by audio_status, and a file already on
-// disk is reused without re-downloading (so an interrupted run costs nothing to repeat). Oldest calls
-// go first deliberately — those are the ones Binotel is most likely to age out.
-//
-// Rate limiting matters here: this script does two Binotel requests per call (record URL + the file)
-// with none of the natural pauses the live ingest has (transcription/analysis time), which is exactly
-// the pattern that trips Binotel's "Requests are too frequent" throttle. Hence PAUSE_MS between calls.
 
 const PAUSE_MS = Number(process.env.BACKFILL_AUDIO_PAUSE_MS || 1500);
 const MB = 1024 * 1024;
@@ -62,7 +46,6 @@ async function main() {
     const c = calls[i];
     const label = `${i + 1}/${calls.length} ${c.generalCallId} (${c.managerName || '?'}, ${c.durationSec}s)`;
     try {
-      // Already on disk from an interrupted run: just record it, no Binotel traffic.
       const local = await readStoredRecording({ generalCallId: c.generalCallId, startTime: c.startTime });
       if (local) {
         const size = local.buffer.length;
@@ -75,8 +58,6 @@ async function main() {
 
       const buffer = await fetchRecording(c.generalCallId);
       if (!buffer) {
-        // A definitive answer from Binotel: there is no recording for this call. Marked so re-runs
-        // skip it, but it stays visible in the DB and in the summary below.
         await setCallAudio(c.generalCallId, { audioStatus: 'unavailable' });
         unavailable += 1;
         failures.push({ id: c.generalCallId, reason: 'Binotel не має запису' });
@@ -93,7 +74,6 @@ async function main() {
         console.log(`[backfillAudio] ${label} — ${saved.relPath} (${fmtMb(saved.bytes)})`);
       }
     } catch (err) {
-      // Transient (network/throttle/disk): audio_status stays NULL so the next run retries it.
       failed += 1;
       failures.push({ id: c.generalCallId, reason: err.message });
       console.error(`[backfillAudio] ${label} — ПОМИЛКА: ${err.message}`);
@@ -117,8 +97,6 @@ async function main() {
     if (failures.length > 50) console.log(`  … і ще ${failures.length - 50}`);
   }
 
-  // Non-zero exit on a partial run so a wrapper/retry loop can tell it isn't finished (the same
-  // convention kb:reindex uses). "Unavailable in Binotel" is a final answer, not a partial run.
   if (failed > 0) {
     console.error(`\n[backfillAudio] прогін НЕПОВНИЙ: ${failed} помилок — запустіть команду ще раз, вона продовжить з того ж місця.`);
     process.exit(1);

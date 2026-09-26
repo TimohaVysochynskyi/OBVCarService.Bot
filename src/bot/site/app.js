@@ -1,6 +1,3 @@
-// Behaviour for the call report page. Shipped as-is (no build step) and served from assets/app.js.
-// The page's own numbers arrive as JSON in #report-data, so this file stays static and cacheable
-// across every report we ever publish.
 (function () {
   'use strict';
 
@@ -18,8 +15,6 @@
     }
   }
 
-  // Ukrainian counts: 1 дзвінок, 2 дзвінки, 5 дзвінків. Getting this wrong is the kind of thing a
-  // reader notices immediately in their own language.
   function plural(n, one, few, many) {
     var mod10 = n % 10;
     var mod100 = n % 100;
@@ -38,7 +33,6 @@
     });
   }
 
-  // --- manager tabs --------------------------------------------------------------------------
   function initManagerTabs() {
     var tabs = document.querySelectorAll('[data-manager-tab]');
     var cards = document.querySelectorAll('[data-manager-card]');
@@ -61,7 +55,6 @@
     show(tabs[0].dataset.managerTab);
   }
 
-  // --- month switch inside one manager card --------------------------------------------------
 
   var TREND_SERIES = [
     { key: 'sales', title: 'Угоди', color: '#3b6fb0', axis: 'left' },
@@ -240,10 +233,6 @@
     });
   }
 
-  // --- manager comparison --------------------------------------------------------------------
-  // Rows keep the order they were rendered in, on purpose: re-sorting them by value on every month
-  // switch made the managers swap places under the reader, and a ranking you have to re-learn on
-  // each click is worse than no ranking.
   var METRICS = {
     conv: {
       get: function (b) {
@@ -321,12 +310,6 @@
     applyCompare(ALL);
   }
 
-  // --- phone lines ---------------------------------------------------------------------------
-  // The split bar is scaled to the calls whose direction is KNOWN, not to the total: a line with
-  // unclassified calls would otherwise show a bar that does not fill its track, which reads as data
-  // missing rather than as a ratio.
-  // Returns markup, not text: the counts are bold so the eye lands on them first. Every value
-  // here is an integer from our own JSON, so there is nothing to escape.
   function lineSummary(bucket) {
     var calls = bucket.calls || 0;
     if (!calls) return 'за цей місяць дзвінків не було';
@@ -349,8 +332,6 @@
       card.querySelector('[data-line-bar-in]').style.width = known ? ((incoming / known) * 100).toFixed(1) + '%' : '0%';
       card.querySelector('[data-line-bar-out]').style.width = known ? ((outgoing / known) * 100).toFixed(1) + '%' : '0%';
     });
-    // Who answered, inside the shared-line cards. The rows sum to the card's own total, so they
-    // follow the same month as the card they sit in.
     each(document.querySelectorAll('[data-lm-field]'), function (cell) {
       var perManager = (DATA.lineManagers || {})[cell.dataset.lmLine] || {};
       var bucket = (perManager[cell.dataset.lmName] || {})[month] || {};
@@ -370,7 +351,6 @@
     applyLines(ALL);
   }
 
-  // --- did the manager introduce himself -----------------------------------------------------
   function ratio(part, whole) {
     return whole ? Math.round((part / whole) * 100) : 0;
   }
@@ -397,8 +377,6 @@
         cell.textContent = checked ? value + ' з ' + checked + ' · ' + ratio(value, checked) + '%' : '—';
       });
 
-      // The direction split is about the NAME only: it is the part a manager controls on every call,
-      // incoming or outgoing, so it is the one worth comparing between the two.
       card.querySelector('[data-intro-dir]').textContent = checked
         ? 'імʼя: вхідні ' + (b.withNameIn || 0) + ' з ' + (b.checkedIn || 0) +
           ' · вихідні ' + (b.withNameOut || 0) + ' з ' + (b.checkedOut || 0)
@@ -417,7 +395,6 @@
     applyIntro(ALL);
   }
 
-  // --- refusals table ------------------------------------------------------------------------
   function initDeclineTabs() {
     var tabs = document.querySelectorAll('[data-decline-tab]');
     var rows = document.querySelectorAll('[data-decline-month]');
@@ -438,7 +415,6 @@
     show(ALL);
   }
 
-  // --- "i" popovers --------------------------------------------------------------------------
   function initTips() {
     document.addEventListener('click', function (event) {
       each(document.querySelectorAll('[data-tip][open]'), function (tip) {
@@ -447,9 +423,6 @@
     });
   }
 
-  // --- audio evidence ------------------------------------------------------------------------
-  // One shared <audio>: starting a clip stops whatever was playing, so the page never talks over
-  // itself. Clips are short cuts around the quoted line, served from audio/ next to this file.
   function initClips() {
     var players = document.querySelectorAll('[data-clip]');
     if (!players.length) return;

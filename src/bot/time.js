@@ -1,7 +1,3 @@
-// Kyiv-time helpers for the bot: report scheduling (13:00 / 19:30 local) and stat period
-// boundaries (day / week-from-Monday / month / quarter). Everything is computed via
-// Intl.DateTimeFormat so the EET/EEST DST switch is handled correctly, never a hardcoded
-// +2/+3 offset. Boundaries are returned as absolute UTC instants (calls.start_time is UTC).
 
 const TZ = 'Europe/Kyiv';
 
@@ -27,7 +23,6 @@ function kyivParts(date) {
   };
 }
 
-// 1 = Monday ... 7 = Sunday
 function kyivWeekday(date) {
   const wd = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'short' }).format(date);
   return { Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6, Sun: 7 }[wd];
@@ -36,7 +31,7 @@ function kyivWeekday(date) {
 function kyivOffsetMinutes(date) {
   const s = new Intl.DateTimeFormat('en-US', { timeZone: TZ, timeZoneName: 'shortOffset' })
     .formatToParts(date)
-    .find((p) => p.type === 'timeZoneName').value; // e.g. "GMT+3" or "GMT+2"
+    .find((p) => p.type === 'timeZoneName').value;
   const mt = s.match(/GMT([+-]\d+)(?::(\d+))?/);
   if (!mt) return 180;
   const h = Number(mt[1]);
@@ -44,14 +39,12 @@ function kyivOffsetMinutes(date) {
   return h * 60 + (h < 0 ? -min : min);
 }
 
-// UTC instant of Kyiv-local midnight for the given Kyiv calendar date.
 function kyivMidnightUtc(year, month, day) {
   const approx = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
   const off = kyivOffsetMinutes(approx);
   return new Date(approx.getTime() - off * 60 * 1000);
 }
 
-// Shift a Kyiv calendar date by whole days, returning {year, month, day}.
 function shiftKyivDate({ year, month, day }, deltaDays) {
   const d = new Date(Date.UTC(year, month - 1, day));
   d.setUTCDate(d.getUTCDate() + deltaDays);
@@ -87,18 +80,11 @@ const PERIODS = {
   quarter: { label: 'цей квартал', start: startOfQuarter },
 };
 
-// { start, end, label } for a named period ending "now".
 function periodRange(period, now = new Date()) {
   const def = PERIODS[period] || PERIODS.week;
   return { start: def.start(now), end: now, label: def.label };
 }
 
-// Day-bounded segment boundaries for the Kyiv calendar day containing `now`, from the report-time
-// slots (["13:00","19:30"]). Returns consecutive [start,end) intervals as absolute UTC instants:
-//   [00:00, slot1), [slot1, slot2), …, [lastSlot, 24:00)
-// so a day is fully tiled with no gaps (evening calls after the last slot land in the final
-// segment). Slots are clamped to (00:00, 24:00) and de-duplicated/sorted; invalid ones ignored.
-// Adding slot-minutes to Kyiv midnight is offset-correct except on the ~2 DST-transition days/year.
 function slotMinutes(s) {
   const m = /^(\d{1,2}):(\d{2})$/.exec(String(s).trim());
   if (!m) return null;
@@ -118,14 +104,12 @@ function kyivDaySegments(now, slots = []) {
   return segs;
 }
 
-// "08.07.2026 14:35" in Kyiv time.
 function formatKyiv(date) {
   const p = kyivParts(date);
   const pad = (n) => String(n).padStart(2, '0');
   return `${pad(p.day)}.${pad(p.month)}.${p.year} ${pad(p.hour)}:${pad(p.minute)}`;
 }
 
-// "01.02.26" (dd.mm.yy) in Kyiv time — compact form for inline-button labels.
 function shortDate(date) {
   const p = kyivParts(new Date(date));
   const pad = (n) => String(n).padStart(2, '0');

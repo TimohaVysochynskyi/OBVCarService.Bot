@@ -1,14 +1,3 @@
-// Display aliases for operators. Maps a raw manager_name (as stored on calls — a Binotel name
-// or a bare number/phone) to a friendly display name shown everywhere in the bot (archive list,
-// stats, call detail, reports).
-//
-// Only the RENDERING is aliased: DB rows and callback data keep the raw value, so grouping,
-// queries and attribution are untouched and the mapping is fully reversible. Add more via the
-// OPERATOR_ALIASES env var ("num=Name" pairs, comma-separated), which merges over the defaults.
-//
-// No built-in defaults: the director's mobile (0674738200) used to alias to "Богдан" here, but
-// that number is now excluded from ingest entirely (src/jobs/processCalls.js:
-// EXCLUDED_EXTENSIONS) - it never reaches the bot's DB, so it needs no display alias.
 const DEFAULT_ALIASES = {};
 
 function parseAliases(raw) {
@@ -25,20 +14,14 @@ function parseAliases(raw) {
 
 const OPERATOR_ALIASES = parseAliases(process.env.OPERATOR_ALIASES);
 
-// Raw manager_name -> friendly name (or the raw value unchanged when there's no alias).
 function displayName(name) {
   return (name != null && OPERATOR_ALIASES[name]) || name;
 }
 
-// Whether this raw name has a human alias (used to decide the 👤 vs ☎️ label).
 function hasAlias(name) {
   return name != null && Object.prototype.hasOwnProperty.call(OPERATOR_ALIASES, name);
 }
 
-// Format a Ukrainian phone for display as +380XXXXXXXXX. Handles the shapes we see: 12-digit with
-// country code (380…), 10-digit with a leading 0 (0…), and 9-digit without the 0 (Binotel sometimes
-// drops it). Short internal extensions (901/902, ≤4 digits) and anything of an unexpected length are
-// returned unchanged — never turn an extension into "+380901". Display-only; the DB keeps raw values.
 function formatPhone(raw) {
   const d = String(raw ?? '').replace(/\D/g, '');
   if (d.length <= 4) return String(raw ?? '');
@@ -48,11 +31,6 @@ function formatPhone(raw) {
   return String(raw ?? '');
 }
 
-// Format one of OUR OWN line numbers the way the owner writes them and the way they get printed in
-// advertising: "073 473 82 00" — no country code, grouped 3-3-2-2. Deliberately different from
-// formatPhone: that one is for calling a CLIENT back (+380… is what a dialler wants), this one is a
-// number the reader is meant to recognise from a billboard. Anything that is not a 10-digit local
-// number comes back unchanged rather than half-formatted.
 function formatLinePhone(raw) {
   const d = String(raw ?? '').replace(/\D/g, '');
   let local = d;

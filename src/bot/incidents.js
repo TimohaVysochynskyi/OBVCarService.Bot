@@ -4,19 +4,10 @@ import { LOG } from '../core/errorTexts.js';
 import { showScreen, sendLong } from './ui.js';
 import { formatKyiv } from './time.js';
 
-// Екран «🩺 Журнал» (`/log`, admin) — журнал інцидентів у самому боті.
-//
-// Це пряма відповідь на «щоб клієнт міг передати інфу розробнику». До цього повна правда була
-// лише в логах pm2 на VPS, тобто за SSH: клієнт не міг ні побачити її, ні переслати. Тепер
-// достатньо коду інциденту з повідомлення про помилку.
-//
-// Тексти — у core/errorTexts.js (розділ LOG), як і решта текстів про помилки.
 
 const SUMMARY_DAYS = 7;
 const RECENT_LIMIT = 8;
 
-// Час у моноширинному вигляді для кнопки: «07.09 16:20». formatKyiv дає повну дату - для кнопки
-// вона задовга, а секунди тут не потрібні.
 function buttonTime(at) {
   return new Intl.DateTimeFormat('uk-UA', {
     timeZone: 'Europe/Kyiv',
@@ -39,7 +30,6 @@ async function summaryScreen() {
 
   const total = summary.reduce((n, row) => n + row.count, 0);
   const lines = [LOG.title, '', LOG.period(SUMMARY_DAYS, total), ''];
-  // Згруповано за класом: «OAI-QUOTA — 9 разів» одразу показує, це поодинокий випадок чи патерн.
   for (const row of summary) lines.push(LOG.summaryRow(row.code, row.count, buttonTime(row.lastAt)));
   lines.push('', LOG.pickHint);
 
@@ -48,7 +38,6 @@ async function summaryScreen() {
     kb.text(`${buttonTime(row.at)} · ${row.code}`, `log:i:${row.incident}`).row();
   }
   kb.text('« Назад до меню', 'menu');
-  // Простим текстом: технічні рядки й назви файлів рясніють _ * [, і Markdown на них падає.
   return { text: lines.join('\n'), kb, parseMode: null };
 }
 
@@ -75,8 +64,6 @@ function incidentScreen(row) {
   return { text: lines.join('\n'), kb, parseMode: null };
 }
 
-// Готовий блок на пересилання. Окремим повідомленням і без розмітки — щоб його можна було
-// затиснути й переслати одним рухом, не вибираючи з-під кнопок.
 function copyBlock(row) {
   return [
     LOG.copyHeader(row.incident),

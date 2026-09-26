@@ -3,19 +3,6 @@ import { migrate, getCallsMissingIntro, updateCallIntro, getIntroBreakdown } fro
 import { detectIntro } from '../core/managerIntro.js';
 import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
 
-// Decide "did the manager introduce himself" for calls stored before the flag existed.
-//
-// RULES, NOT THE MODEL, and that is the owner's call: the history is ~1900 calls, the rule-based
-// detector costs nothing, and it gives the SAME answer on every re-run — so re-running this can
-// never quietly rewrite the numbers the owner has already seen. New calls get the model's judgement
-// instead, inside the per-call analysis that already runs on them (core/analyzeCall.js).
-//
-// ⚠️ It reads PRESENCE of the name in the manager's opening lines, so a manager greeting a client
-// who shares his name reads as "introduced". That direction of error is deliberate: it can only
-// UNDERSTATE the problem being reported, never invent one.
-//
-// Idempotent: selects on intro_name IS NULL, so settled rows are never revisited. Costs nothing and
-// touches no external service — the unit test checks this file imports no paid module.
 
 const LIMIT = process.argv.includes('--limit')
   ? Number(process.argv[process.argv.indexOf('--limit') + 1])
@@ -37,8 +24,6 @@ async function main() {
     const intro = detectIntro({
       segments: call.segments,
       transcript: call.transcript,
-      // The personal-extension map is the reliable name: it is what the ingest attributes by, and
-      // manager_name on a shared line can be a bare number, which no stem could match anyway.
       managerName: PERSONAL_OPERATORS[String(call.internalNumber)] || call.managerName,
     });
     await updateCallIntro(call.generalCallId, intro);

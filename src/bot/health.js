@@ -18,19 +18,6 @@ import { ffmpegAvailable } from '../core/ffmpeg.js';
 import { showScreen } from './ui.js';
 import { formatKyiv } from './time.js';
 
-// Екран «🩺 Перевірка» (`/health`, admin) — стан кожної залежності на вимогу.
-//
-// Журнал (`/log`) показує, що вже зламалось; цей екран відповідає на інше питання: «що саме
-// лежить ЗАРАЗ». Без нього дізнатися це можна було лише наткнувшись на помилку в конкретній дії —
-// а коли не працює одразу кілька речей, по одній помилці не зрозуміти, скільки їх.
-//
-// Правила, яких тут треба триматись:
-//   • жодна перевірка не має права ні кинути, ні висіти — інакше екран не намалюється взагалі;
-//   • усі йдуть паралельно, бо послідовно це були б десятки секунд;
-//   • перевірки безкоштовні: список моделей OpenAI, а не запит до моделі; вікно в одну хвилину
-//     в Binotel; читання балансу ElevenLabs. Натискання цієї кнопки не має нічого коштувати.
-//
-// Тексти — у core/errorTexts.js (розділ HEALTH).
 
 const PROBE_TIMEOUT_MS = 8000;
 
@@ -39,8 +26,6 @@ const WARN = 'warn';
 const FAIL = 'fail';
 const ICON = { ok: '✅', warn: '⚠️', fail: '❌' };
 
-// Обгортка: будь-яке падіння перевірки перетворюється на її ж червоний рядок із класом помилки,
-// а не валить увесь екран.
 async function probe(label, fn) {
   try {
     const { status, detail } = await fn();
@@ -54,9 +39,6 @@ function ageMinutes(at) {
   return at ? Math.round((Date.now() - new Date(at).getTime()) / 60000) : null;
 }
 
-// ffprobe немає окремої перевірки в проєкті (він потрібен лише для визначення стерео/моно), тож
-// найпростіше — спитати його версію. Мовчазна деградація без ffprobe тиха: стерео-дзвінки
-// вважаються моно, і якість розділення реплік падає без жодного сигналу.
 function ffprobeAvailable() {
   return new Promise((resolve) => {
     try {
@@ -93,7 +75,6 @@ async function checkBinotel() {
 async function checkOpenAi() {
   if (!process.env.OPENAI_API_KEY) return { status: FAIL, detail: HEALTH.noKey };
   const model = process.env.OPENAI_ANALYZE_MODEL || 'gpt-4o-mini';
-  // Список моделей нічого не коштує й нічого не витрачає — перевіряє саме доступність і ключ.
   await fetchOk(
     'openai',
     'перевірка ключа',
@@ -101,8 +82,6 @@ async function checkOpenAi() {
     { headers: { Authorization: `Bearer ${process.env.OPENAI_API_KEY}` } },
     { timeoutMs: PROBE_TIMEOUT_MS }
   );
-  // ⚠️ Ключ приймається ≠ на рахунку є кошти: залишок цей ендпоінт не показує, і саме тому
-  // OAI-QUOTA виявляється лише на справжньому запиті.
   return { status: OK, detail: HEALTH.openAiOk };
 }
 
@@ -141,14 +120,11 @@ async function checkDisk() {
   };
 }
 
-// Не «чи бігає процес прямо в цю мілісекунду», а чи він бігав недавно: cron полера — */15.
 async function checkIngest() {
   const [beat, checkpoint] = await Promise.all([getHeartbeat('poll'), getCheckpoint()]);
   const beatAge = ageMinutes(beat);
   if (beatAge == null) return { status: WARN, detail: HEALTH.ingestUnknown };
   const maxMin = Number(process.env.POLL_STALE_MAX_MIN || 45);
-  // Чекпоінт може відставати від прогону законно (аварія Binotel), тож він тут довідково —
-  // сам факт «процес бігає» визначає саме відмітка.
   return {
     status: beatAge > maxMin ? FAIL : OK,
     detail: HEALTH.ingest(beatAge, ageMinutes(checkpoint)),
@@ -192,8 +168,6 @@ async function healthReport(kbState) {
   return lines.join('\n');
 }
 
-// Перевірки ходять у мережу, тож екран не з'явиться миттєво — краще одразу сказати про це, ніж
-// лишити людину дивитись на нерухоме меню.
 async function openHealth(ctx, kbState) {
   const kb = new InlineKeyboard()
     .text(HEALTH.refresh, 'health:r')

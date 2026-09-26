@@ -3,14 +3,6 @@ import { migrate } from '../core/store.js';
 import { buildGlobalReport } from '../bot/globalReportData.js';
 import { buildSite, zipSite } from '../bot/globalReportBundle.js';
 
-// Rebuilds the published report into REPORT_SITE_DIR without going through Telegram — which is how
-// the subdomain gets refreshed. Same code path as /globalreport, minus the delivery.
-//
-//   npm run build:site                 rebuild in place (a web server serves that folder)
-//   npm run build:site -- --zip out.zip   also write an archive to hand over
-//   npm run build:site -- --no-analyze    reuse only what is already analysed; costs nothing
-//
-// Audio clips are cut once and reused, so a repeat run re-cuts nothing.
 
 function arg(name) {
   const i = process.argv.indexOf(name);
