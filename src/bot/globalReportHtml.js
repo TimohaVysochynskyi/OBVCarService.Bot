@@ -441,6 +441,8 @@ const CMP_METRICS = [
   },
 ];
 
+const tickLabel = (v) => (Number.isInteger(v) ? String(v) : v.toFixed(1).replace('.', ','));
+
 function lineChart(managers, months, key, { max, suffix = '', title }) {
   if (!months.length) return '';
   const W = 340;
@@ -459,7 +461,7 @@ function lineChart(managers, months, key, { max, suffix = '', title }) {
     .map(
       (t) =>
         `<line x1="${L}" y1="${py(t).toFixed(1)}" x2="${W - R}" y2="${py(t).toFixed(1)}" class="chart-grid"/>` +
-        `<text x="${L - 6}" y="${(py(t) + 3.5).toFixed(1)}" text-anchor="end" class="chart-axis">${esc(String(Math.round(t)) + suffix)}</text>`
+        `<text x="${L - 6}" y="${(py(t) + 3.5).toFixed(1)}" text-anchor="end" class="chart-axis">${esc(tickLabel(t) + suffix)}</text>`
     )
     .join('');
 
