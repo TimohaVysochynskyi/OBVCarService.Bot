@@ -9,15 +9,6 @@ import { fetchOk } from './http.js';
 // The model is constrained to return EXACTLY one of those names (or null), which also handles
 // colloquial variants ("Володя" -> "Владимир") and guarantees the result groups cleanly with
 // the personal-extension calls of the same person.
-const DEFAULT_IDENTIFY = `Це транскрипт телефонної розмови автосервісу. Запис моно: обидва голоси (працівник і клієнт) в одному тексті, без розділення. Дзвінок надійшов на спільний телефон, тому працівник представляється на початку розмови.
-
-Твоє завдання: визначити, ХТО зі списку відомих операторів вів цю розмову — за тим, як представився САМЕ ПРАЦІВНИК автосервісу (не клієнт).
-
-Правила:
-- Поверни рівно одне ім'я зі списку кандидатів (враховуй розмовні форми: Володя=Владимир, Вова=Владимир, Андрей=Андрій тощо).
-- Якщо працівник не назвався, або впевнено зіставити з жодним кандидатом не вдається — поверни null.
-- Не вгадуй. Краще null, ніж помилкова атрибуція.`;
-
 // roster: array of candidate operator names. Returns one of them, or null.
 const identifyPrompt = definePrompt({
   key: 'identify',
@@ -28,7 +19,6 @@ const identifyPrompt = definePrompt({
   about:
     'На спільних номерах Бінотел не знає, хто відповів, тож AI визначає це з розмови. ' +
     '⚠️ Впливає на те, кому зараховані дзвінки зі спільних номерів.',
-  def: DEFAULT_IDENTIFY,
 });
 
 async function identifyManager(transcript, roster = []) {

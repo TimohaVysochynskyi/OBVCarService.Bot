@@ -915,6 +915,22 @@ async function getGlobalTotals() {
 // numbers, so incoming vs outgoing on each number is the point of this query — a line that is almost
 // entirely incoming is an advertising line, and its incoming count is what the ads move.
 // Grouped by month as well, because a lifetime total cannot show whether a campaign did anything.
+async function getManagerDailyTrend() {
+  const { rows } = await pool.query(
+    `SELECT manager_name AS manager,
+            to_char(start_time AT TIME ZONE 'Europe/Kyiv', 'YYYY-MM-DD') AS day,
+            COUNT(*) FILTER (WHERE ${SALES_FILTER})::int AS sales,
+            COUNT(*) FILTER (WHERE is_success AND ${SALES_FILTER})::int AS success,
+            COUNT(*) FILTER (WHERE ${SALES_FILTER} AND (${NOT_BLOCKED_FILTER} OR is_success))::int AS reachable,
+            ROUND(AVG(communication_score) FILTER (WHERE ${SALES_FILTER})::numeric, 1) AS "avgScore"
+     FROM calls
+     WHERE ${HAS_TEXT} AND manager_name IS NOT NULL AND manager_name <> '' AND manager_name !~ '^[0-9]+$'
+     GROUP BY 1, 2
+     ORDER BY 2`
+  );
+  return rows;
+}
+
 async function getLineBreakdown() {
   const { rows } = await pool.query(
     `SELECT internal_number AS "number", ${KYIV_MONTH} AS month,
@@ -1913,6 +1929,7 @@ export {
   getGlobalTotals,
   getMonthlyPurposeBreakdown,
   getLineBreakdown,
+  getManagerDailyTrend,
   getLineManagerBreakdown,
   getPurposeDirectionSplit,
   getMonthlySalesStats,

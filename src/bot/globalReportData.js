@@ -13,6 +13,7 @@ import {
   getLineBreakdown,
   getLineManagerBreakdown,
   getPurposeDirectionSplit,
+  getManagerDailyTrend,
   getIntroBreakdown,
 } from '../core/store.js';
 import { CALL_PURPOSES } from '../core/callPurpose.js';
@@ -346,6 +347,55 @@ function buildIntro(rows, months) {
   return { managers, total };
 }
 
+function buildSeries(rows, months) {
+  const byManager = new Map();
+
+  for (const row of rows) {
+    const month = String(row.day).slice(0, 7);
+    if (!byManager.has(row.manager)) byManager.set(row.manager, { days: new Map(), months: new Map() });
+    const acc = byManager.get(row.manager);
+
+    const score = row.avgScore == null ? null : Number(row.avgScore);
+    if (!acc.days.has(month)) acc.days.set(month, []);
+    acc.days.get(month).push({
+      label: String(row.day).slice(8) + '.' + String(row.day).slice(5, 7),
+      sales: row.sales,
+      success: row.success,
+      conversion: row.reachable ? Math.round((row.success / row.reachable) * 100) : null,
+      score,
+    });
+
+    const m = acc.months.get(month) || { sales: 0, success: 0, reachable: 0, scoreSum: 0, scoreN: 0 };
+    m.sales += row.sales;
+    m.success += row.success;
+    m.reachable += row.reachable;
+    if (score != null && row.sales) {
+      m.scoreSum += score * row.sales;
+      m.scoreN += row.sales;
+    }
+    acc.months.set(month, m);
+  }
+
+  const out = {};
+  for (const [name, acc] of byManager) {
+    const all = months
+      .filter((key) => acc.months.has(key))
+      .map((key) => {
+        const m = acc.months.get(key);
+        return {
+          label: monthTitle(key).split(' ')[0].slice(0, 3),
+          sales: m.sales,
+          success: m.success,
+          conversion: m.reachable ? Math.round((m.success / m.reachable) * 100) : null,
+          score: m.scoreN ? Number((m.scoreSum / m.scoreN).toFixed(1)) : null,
+        };
+      });
+    out[name] = { [ALL]: all };
+    for (const key of months) out[name][key] = acc.days.get(key) || [];
+  }
+  return out;
+}
+
 const asBucket = (row) => ({
   calls: row.calls,
   incoming: row.incoming,
@@ -449,7 +499,7 @@ async function buildGlobalReport({
   budgetMs = REPORT_BUDGET_MS,
 } = {}) {
   const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
-  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows, introRows] =
+  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows, introRows, dailyRows] =
     await Promise.all([
       getGlobalTotals(),
       getMonthlyPurposeBreakdown(),
@@ -463,6 +513,7 @@ async function buildGlobalReport({
       getLineManagerBreakdown(),
       getPurposeDirectionSplit(),
       getIntroBreakdown(),
+      getManagerDailyTrend(),
     ]);
 
   const months = [...new Set(purposeRows.map((r) => r.month))].sort();
@@ -515,6 +566,7 @@ async function buildGlobalReport({
     lines: buildLines(lineRows, lineManagerRows, months),
     directions: buildDirections(directionRows),
     intro: buildIntro(introRows, months),
+    series: buildSeries(dailyRows, months),
     managers,
     stages: [...stages.entries()].map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count),
     declines: buildDeclines(blockedCalls, reasonRows, coverage),

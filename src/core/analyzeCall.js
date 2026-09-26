@@ -33,16 +33,6 @@ import { definePrompt } from './prompts.js';
 // rule-based detector that back-fills history, so the two paths can't drift apart.
 import { introRules, verifyIntro } from './managerIntro.js';
 
-const DEFAULT_BEHAVIOUR_RULES = `- Якщо callPurpose НЕ "sales" → поверни items ПОРОЖНІМ. Не оцінюй навички продажу на інформаційному дзвінку.
-- Якщо "sales" → виділи КОНКРЕТНІ поведінки САМЕ МЕНЕДЖЕРА (сильні й слабкі), кожну з ДОСЛІВНОЮ цитатою.
-
-Суворі правила для items (лише для sales-дзвінків):
-- Аналізуй ЛИШЕ репліки менеджера (не клієнта).
-- "quote" = рівно один рядок МЕНЕДЖЕРА, СКОПІЙОВАНИЙ ДОСЛІВНО (той самий текст, без переказу/перекладу/виправлень).
-- Цитата має САМА ПО СОБІ демонструвати цю поведінку. Якщо рядок нейтральний, загальний або лише побічно стосується — НЕ додавай його. Краще 0 поведінок, ніж притягнута за вуха.
-- type: "strength" або "error". label: коротка назва (3-6 слів). stage: найближчий етап продажу зі списку: ${SALES_STAGES.join(' / ')}.
-- Не вигадуй. Не більше 8 поведінок. Для короткого/тривіального дзвінка їх може бути 0.`;
-
 // Split into three editable parts rather than one blob: the owner usually wants to tune ONE of
 // them (what counts as a deal, what counts as an introduction, what counts as a behaviour), and a
 // single giant text would mean re-reading everything to change one line.
@@ -56,7 +46,6 @@ const behaviourRules = definePrompt({
     'Що саме AI виписує з кожного дзвінка-угоди як сильну чи слабку поведінку менеджера. ' +
     'Саме з цих поведінок потім збираються висновки у звіті. ' +
     '⚠️ Правило «цитата має бути справжньою реплікою менеджера» тримає код і не редагується.',
-  def: DEFAULT_BEHAVIOUR_RULES,
 });
 
 // Assembled per call so an edit takes effect without a restart.

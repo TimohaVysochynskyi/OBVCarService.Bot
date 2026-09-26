@@ -176,16 +176,6 @@ function verifyIntro(raw, segments, managerName) {
 // What the per-call model is told. Deliberately phrased around the SPEECH-TO-TEXT damage documented
 // above: the model is the only one of the two paths that can recognise "Авивикар Сервис" as the
 // company, and it will only do that if it is told to expect the mangling.
-const DEFAULT_INTRO_RULES = `⚠️ Рядок "Менеджер: <імʼя>" над транскриптом — це СЛУЖБОВА примітка від системи, а НЕ репліка. Те, що імʼя написане там, НЕ означає, що менеджер його вимовив. Суди ВИКЛЮЧНО за словами в самому транскрипті.
-- intro.name = чи НАЗВАВ менеджер СВОЄ імʼя ("це Роман", "мене звати Андрій", "Володимир, добрий день"). Клієнтове імʼя чи імʼя колеги — НЕ рахується.
-- intro.nameQuote = ДОСЛІВНИЙ рядок менеджера, у якому він назвався. Якщо такого рядка немає — intro.name = false і nameQuote = "".
-- intro.companyQuote = ДОСЛІВНИЙ рядок менеджера, у якому звучить назва сервісу. Немає — intro.company = false і companyQuote = "".
-- Обидві цитати СКОПІЮЙ дослівно з транскрипту. Вигадану цитату код відкине, і відповідь буде зарахована як "не представився".
-- intro.company = чи назвав менеджер НАЗВУ СЕРВІСУ (OBVCarService — у розмові звучить як "ОБВ Кар Сервіс", "OBV Car Service").
-  ⚠️ Розшифровка спотворює цю назву майже завжди. Реальні написання з наших дзвінків: "АБВ Кар Сервіс", "АВВ Кар Сервіс", "ВіВі Кар Сервіс", "Авивикар Сервис", "Адікар Сервіс", "Аудіовікар Сервіс", "ОДВ Карсервис", "Одигикар Сервис", "ЛБВ Карсервіс". Будь-яке таке спотворення, за яким упізнається "…кар сервіс", рахуй ЗА НАЗВУ СЕРВІСУ.
-  ⚠️ АЛЕ якщо назву вимовила ІНША сторона (автовідповідач чужої компанії, клієнт) — це НЕ представлення менеджера.
-- Обидва поля стосуються ПОЧАТКУ розмови — і на вхідному, і на вихідному дзвінку.`;
-
 const introRules = definePrompt({
   key: 'intro',
   group: 'call',
@@ -195,7 +185,6 @@ const introRules = definePrompt({
   about:
     'Як AI вирішує, чи назвав менеджер своє імʼя та назву сервісу на початку розмови. ' +
     '⚠️ Сама перевірка (цитата має бути справжньою реплікою менеджера) забезпечується кодом і не редагується.',
-  def: DEFAULT_INTRO_RULES,
 });
 
-export { detectIntro, verifyIntro, introRules, DEFAULT_INTRO_RULES, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };
+export { detectIntro, verifyIntro, introRules, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };

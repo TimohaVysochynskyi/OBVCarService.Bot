@@ -144,23 +144,6 @@ function donut(purposes, total) {
     </svg>`;
 }
 
-function barChart(series, { max, months, suffix = '', decimals = 0 }) {
-  if (!months.length) return '';
-  const bars = months
-    .map((m) => {
-      const value = series[m.key];
-      const height = value == null || !max ? 0 : Math.max(2, (value / max) * 100);
-      const label = value == null ? '—' : value.toFixed(decimals) + suffix;
-      return `<div class="flex flex-1 flex-col justify-end text-center" data-month="${esc(m.key)}">
-          <div class="text-[11px] text-muted">${esc(label)}</div>
-          <div class="rounded-t bg-[#c9d6ef]" style="height:${height.toFixed(1)}%"></div>
-          <div class="mt-1 text-[11px] text-muted">${esc(shortMonth(m.title))}</div>
-        </div>`;
-    })
-    .join('');
-  return `<div class="flex h-32 items-end gap-1">${bars}</div>`;
-}
-
 // --- audio evidence --------------------------------------------------------------------------
 
 // A clip is attached only when the quote had a timecode AND the cut succeeded, so the player never
@@ -373,42 +356,48 @@ function introSection(report) {
 
 // --- manager card ----------------------------------------------------------------------------
 
+const SERIES = [
+  { key: 'sales', title: 'Угоди', color: '#3b6fb0', axis: 'left' },
+  { key: 'success', title: 'Записи', color: '#2f7d58', axis: 'left' },
+  { key: 'conversion', title: 'Конверсія', color: '#b5603a', axis: 'right', suffix: '%' },
+  { key: 'score', title: 'Бал', color: '#8c5aa8', axis: 'right' },
+];
+
 function categoryStrip(manager) {
   const total = manager.byMonth[ALL] || {};
   const cells = PURPOSE_ORDER.map(
-    (p) => `<div class="relative rounded-xl border border-line border-l-4 p-2.5 text-center" style="border-left-color:${PURPOSE_COLORS[p]}">
-        <div class="flex justify-end">${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}</div>
-        <span class="block text-[15px]">${PURPOSE_LABELS[p].icon}</span>
-        <span class="block text-xl font-bold" data-cat="${p}">${total[p] || 0}</span>
-        <span class="block text-xs text-muted">${esc(PURPOSE_LABELS[p].plural)}</span>
+    (p) => `<div class="rounded-xl border border-line p-3">
+        <div class="flex items-start justify-between gap-2">
+          <span class="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted">
+            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style="background:${PURPOSE_COLORS[p]}"></span>${esc(PURPOSE_LABELS[p].plural)}
+          </span>
+          ${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}
+        </div>
+        <div class="mt-2 text-2xl font-bold tabular-nums" data-cat="${p}">${total[p] || 0}</div>
+        <div class="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
+          <div class="h-full rounded-full" style="background:${PURPOSE_COLORS[p]};width:0%" data-cat-bar="${p}"></div>
+        </div>
+        <div class="mt-1 text-xs tabular-nums text-muted" data-cat-share="${p}"></div>
       </div>`
   ).join('');
   return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">${cells}</div>`;
 }
 
-function managerTable(manager, months) {
-  const head = months
-    .map(
-      (m) =>
-        `<th class="px-1 py-2 text-right font-semibold" data-month="${esc(m.key)}"><span class="hidden sm:inline">${esc(m.title.split(' ')[0])}</span><span class="sm:hidden">${esc(shortMonth(m.title))}</span></th>`
-    )
-    .join('');
-  const row = (label, pick) =>
-    `<tr class="border-b border-line">
-      <th scope="row" class="px-1 py-2 text-left font-normal text-muted">${esc(label)}</th>
-      ${months.map((m) => `<td class="px-1 py-2 text-right tabular-nums" data-month="${esc(m.key)}">${esc(pick(manager.byMonth[m.key] || {}))}</td>`).join('')}
-      <td class="px-1 py-2 text-right font-bold tabular-nums">${esc(pick(manager.byMonth[ALL] || {}))}</td>
-    </tr>`;
+function trendBlock(manager) {
+  const legend = SERIES.map(
+    (sr) => `<button type="button" class="flex items-center gap-1.5 rounded-lg px-2 py-1 text-sm cursor-pointer transition hover:bg-[#f2f5f9] aria-selected:bg-[#eef2f7]" data-series="${sr.key}" aria-selected="true">
+        <span class="h-2.5 w-2.5 shrink-0 rounded-full" style="background:${sr.color}"></span>
+        <span class="text-muted">${esc(sr.title)}</span>
+        <b class="tabular-nums" data-series-val="${sr.key}"></b>
+      </button>`
+  ).join('');
 
-  return `<table class="w-full border-collapse text-sm">
-      <thead class="text-muted"><tr class="border-b border-line"><th></th>${head}<th class="px-1 py-2 text-right font-semibold">Разом</th></tr></thead>
-      <tbody>
-        ${row('Угод', (b) => b.sales ?? 0)}
-        ${row('Записів', (b) => b.success ?? 0)}
-        ${row('Конверсія', (b) => (b.conversion == null ? '—' : b.conversion + '%'))}
-        ${row('Бал', (b) => (b.avgScore == null ? '—' : b.avgScore))}
-      </tbody>
-    </table>`;
+  return `<h3 class="${H3}">Динаміка</h3>
+    <div class="rounded-xl border border-line p-3">
+      <div class="mb-1 flex flex-wrap items-center gap-1 no-print">${legend}</div>
+      <div class="text-xs text-muted" data-trend-note></div>
+      <svg viewBox="0 0 680 260" class="mt-1 w-full" role="img" data-trend="${esc(manager.name)}"></svg>
+    </div>`;
 }
 
 function findingBlock(finding, kind) {
@@ -453,19 +442,11 @@ function partialNote(manager) {
 }
 
 function managerCard(manager, months) {
-  const convSeries = Object.fromEntries(months.map((m) => [m.key, manager.byMonth[m.key]?.conversion ?? null]));
-  const scoreSeries = Object.fromEntries(months.map((m) => [m.key, manager.byMonth[m.key]?.avgScore ?? null]));
-
   return `<section class="${CARD}" data-manager-card="${esc(manager.name)}">
       <h2 class="${H2}">${esc(manager.display)}</h2>
       ${tabStrip(withAllLast(months), 'data-month-tab data-month', ALL)}
       ${categoryStrip(manager)}
-      <h3 class="${H3}">Динаміка по угодах</h3>
-      ${managerTable(manager, months)}
-      <div class="mt-4 grid gap-4 sm:grid-cols-2">
-        <figure class="m-0"><figcaption class="mb-1.5 text-sm text-muted">Конверсія, %</figcaption>${barChart(convSeries, { max: 100, months, suffix: '%' })}</figure>
-        <figure class="m-0"><figcaption class="mb-1.5 text-sm text-muted">Середній бал</figcaption>${barChart(scoreSeries, { max: 10, months, decimals: 1 })}</figure>
-      </div>
+      ${trendBlock(manager)}
       ${partialNote(manager)}
       <div class="mt-5 grid gap-4 sm:grid-cols-2">
         ${findingColumn('Сильні сторони', manager.strengths, 'plus', 'Стійких сильних патернів за період не набралось.')}
@@ -719,6 +700,7 @@ function renderGlobalReport(report) {
         .map((l) => [l.number, Object.fromEntries(l.managers.map((m) => [m.name, m.byMonth]))])
     ),
     intro: Object.fromEntries((report.intro?.managers || []).map((m) => [m.name, m.byMonth])),
+    series: report.series || {},
   };
 
   return `<!doctype html>

@@ -62,18 +62,169 @@
   }
 
   // --- month switch inside one manager card --------------------------------------------------
+
+  var TREND_SERIES = [
+    { key: 'sales', title: 'Угоди', color: '#3b6fb0', axis: 'left' },
+    { key: 'success', title: 'Записи', color: '#2f7d58', axis: 'left' },
+    { key: 'conversion', title: 'Конверсія', color: '#b5603a', axis: 'right', suffix: '%' },
+    { key: 'score', title: 'Бал', color: '#8c5aa8', axis: 'right', scale: 10, decimals: 1 }
+  ];
+
+  var TW = 680, TH = 260, PL = 44, PR = 44, PT = 14, PB = 30;
+  var PLOT_W = TW - PL - PR, PLOT_H = TH - PT - PB;
+
+  function niceMax(v) {
+    if (!v || v <= 0) return 4;
+    var step = Math.pow(10, Math.floor(Math.log(v) / Math.LN10));
+    var n = Math.ceil(v / step) * step;
+    if (n / v > 2) n = (Math.ceil((v * 2) / step) * step) / 2;
+    return Math.max(4, n);
+  }
+
+  function fmtVal(sr, v) {
+    if (v == null) return '—';
+    return (sr.decimals ? v.toFixed(sr.decimals).replace('.', ',') : String(v)) + (sr.suffix || '');
+  }
+
+  function trendState(card) {
+    if (!card.__trend) card.__trend = { hidden: {}, points: [], hover: null, note: '' };
+    return card.__trend;
+  }
+
+  function drawTrend(card) {
+    var svg = card.querySelector('[data-trend]');
+    if (!svg) return;
+    var st = trendState(card);
+    var pts = st.points;
+    var shown = TREND_SERIES.filter(function (sr) { return !st.hidden[sr.key]; });
+
+    if (!pts.length) {
+      svg.innerHTML = '<text x="' + TW / 2 + '" y="' + TH / 2 + '" text-anchor="middle" font-size="13" fill="#667085">За цей період даних немає</text>';
+      each(card.querySelectorAll('[data-series-val]'), function (el) { el.textContent = '—'; });
+      var empty = card.querySelector('[data-trend-note]');
+      if (empty) empty.textContent = st.note;
+      return;
+    }
+
+    var maxLeft = 0;
+    for (var i = 0; i < pts.length; i += 1) {
+      for (var q = 0; q < shown.length; q += 1) {
+        if (shown[q].axis !== 'left') continue;
+        var lv = pts[i][shown[q].key];
+        if (lv != null && lv > maxLeft) maxLeft = lv;
+      }
+    }
+    maxLeft = niceMax(maxLeft);
+
+    var x = function (n) { return pts.length < 2 ? PL + PLOT_W / 2 : PL + (n * PLOT_W) / (pts.length - 1); };
+    var yL = function (v) { return PT + PLOT_H - (v / maxLeft) * PLOT_H; };
+    var yR = function (v) { return PT + PLOT_H - (v / 100) * PLOT_H; };
+
+    var out = '';
+    for (var t = 0; t <= 4; t += 1) {
+      var frac = t / 4;
+      var gy = PT + PLOT_H - frac * PLOT_H;
+      out += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (PL + PLOT_W) + '" y2="' + gy + '" stroke="#e7ebf0" stroke-width="1"/>';
+      out += '<text x="' + (PL - 8) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + Math.round(maxLeft * frac) + '</text>';
+      out += '<text x="' + (PL + PLOT_W + 8) + '" y="' + (gy + 4) + '" font-size="11" fill="#667085">' + Math.round(100 * frac) + '%</text>';
+    }
+
+    var step = Math.max(1, Math.ceil(pts.length / 12));
+    for (var k = 0; k < pts.length; k += 1) {
+      if (k % step !== 0 && k !== pts.length - 1) continue;
+      out += '<text x="' + x(k).toFixed(1) + '" y="' + (TH - 10) + '" text-anchor="middle" font-size="11" fill="#667085">' + pts[k].label + '</text>';
+    }
+
+    for (var sIdx = 0; sIdx < shown.length; sIdx += 1) {
+      var sr = shown[sIdx];
+      var d = '';
+      var open = false;
+      for (var a = 0; a < pts.length; a += 1) {
+        var raw = pts[a][sr.key];
+        if (raw == null) { open = false; continue; }
+        var py = sr.axis === 'left' ? yL(raw) : yR(raw * (sr.scale || 1));
+        d += (open ? 'L' : 'M') + x(a).toFixed(1) + ' ' + py.toFixed(1) + ' ';
+        open = true;
+      }
+      if (d) out += '<path d="' + d.replace(/\s+$/, '') + '" fill="none" stroke="' + sr.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      if (pts.length <= 14) {
+        for (var b = 0; b < pts.length; b += 1) {
+          var rv = pts[b][sr.key];
+          if (rv == null) continue;
+          var cy = sr.axis === 'left' ? yL(rv) : yR(rv * (sr.scale || 1));
+          out += '<circle cx="' + x(b).toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="3" fill="#ffffff" stroke="' + sr.color + '" stroke-width="2"/>';
+        }
+      }
+    }
+
+    var at = st.hover == null ? pts.length - 1 : st.hover;
+    out += '<line x1="' + x(at).toFixed(1) + '" y1="' + PT + '" x2="' + x(at).toFixed(1) + '" y2="' + (PT + PLOT_H) + '" stroke="#98a2b3" stroke-width="1" stroke-dasharray="3 3"/>';
+
+    svg.innerHTML = out;
+
+    each(card.querySelectorAll('[data-series-val]'), function (el) {
+      var found = TREND_SERIES.filter(function (z) { return z.key === el.dataset.seriesVal; })[0];
+      el.textContent = fmtVal(found, pts[at][found.key]);
+    });
+    var note = card.querySelector('[data-trend-note]');
+    if (note) note.textContent = st.note + ' · ' + pts[at].label;
+  }
+
+  function initTrend(card) {
+    var svg = card.querySelector('[data-trend]');
+    if (!svg) return;
+    var st = trendState(card);
+
+    each(card.querySelectorAll('[data-series]'), function (btn) {
+      btn.addEventListener('click', function () {
+        st.hidden[btn.dataset.series] = !st.hidden[btn.dataset.series];
+        btn.setAttribute('aria-selected', st.hidden[btn.dataset.series] ? 'false' : 'true');
+        drawTrend(card);
+      });
+    });
+
+    svg.addEventListener('mousemove', function (event) {
+      if (!st.points.length) return;
+      var box = svg.getBoundingClientRect();
+      var rel = ((event.clientX - box.left) / box.width) * TW;
+      var idx = st.points.length < 2 ? 0 : Math.round(((rel - PL) / PLOT_W) * (st.points.length - 1));
+      idx = Math.max(0, Math.min(st.points.length - 1, idx));
+      if (idx === st.hover) return;
+      st.hover = idx;
+      drawTrend(card);
+    });
+    svg.addEventListener('mouseleave', function () {
+      st.hover = null;
+      drawTrend(card);
+    });
+  }
+
   function applyMonth(card, month) {
     var buckets = DATA.managers[card.dataset.managerCard] || {};
     var bucket = buckets[month] || {};
 
+    var totalCalls = 0;
+    each(card.querySelectorAll('[data-cat]'), function (el) {
+      totalCalls += bucket[el.dataset.cat] || 0;
+    });
     each(card.querySelectorAll('[data-cat]'), function (el) {
       el.textContent = bucket[el.dataset.cat] || 0;
     });
-    each(card.querySelectorAll('[data-month]'), function (el) {
-      if (el.hasAttribute('data-month-tab')) return;
-      var on = month !== ALL && el.dataset.month === month;
-      el.classList.toggle('bg-blue-50', on);
+    each(card.querySelectorAll('[data-cat-bar]'), function (el) {
+      var part = bucket[el.dataset.catBar] || 0;
+      el.style.width = (totalCalls ? Math.round((part / totalCalls) * 100) : 0) + '%';
     });
+    each(card.querySelectorAll('[data-cat-share]'), function (el) {
+      var part = bucket[el.dataset.catShare] || 0;
+      el.textContent = totalCalls ? Math.round((part / totalCalls) * 100) + '% від усіх' : '';
+    });
+
+    var st = trendState(card);
+    st.points = ((DATA.series || {})[card.dataset.managerCard] || {})[month] || [];
+    st.hover = null;
+    st.note = month === ALL ? 'по місяцях' : 'по днях';
+    drawTrend(card);
+
     select(card.querySelectorAll('[data-month-tab]'), month, 'month');
   }
 
@@ -84,6 +235,7 @@
           applyMonth(card, tab.dataset.month);
         });
       });
+      initTrend(card);
       applyMonth(card, ALL);
     });
   }

@@ -1,4 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { getState, setState, deleteState } from './store.js';
+
+const DEFAULTS = JSON.parse(readFileSync(new URL('./prompts.default.json', import.meta.url), 'utf8'));
+
+function defaultText(key) {
+  const raw = DEFAULTS[key];
+  if (raw == null) throw new Error(`У prompts.default.json немає промпта «${key}»`);
+  return Array.isArray(raw) ? raw.join('\n') : String(raw);
+}
 
 // Every instruction the project gives an AI model, in one place — so the owner can edit all of them
 // from the bot (/prompt) instead of asking a developer to change code.
@@ -91,6 +100,7 @@ function definePrompt(spec) {
     // orphaned by the move to this registry.
     storeKey: spec.storeKey || `prompt_${spec.key}`,
     ...spec,
+    def: defaultText(spec.key),
   };
   REGISTRY.set(entry.key, entry);
   return () => getPrompt(entry.key);
