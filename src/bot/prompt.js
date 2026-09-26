@@ -15,6 +15,21 @@ import { sendLong, showScreen } from './ui.js';
 
 const MENU = '« Назад до меню';
 
+function rememberTemp(ctx, ids) {
+  const list = Array.isArray(ids) ? ids : [ids];
+  const keep = list.filter(Boolean);
+  if (!keep.length) return;
+  ctx.session.tempMsgs = (ctx.session.tempMsgs || []).concat(keep);
+}
+
+async function dropTemp(ctx) {
+  const ids = ctx.session.tempMsgs || [];
+  ctx.session.tempMsgs = [];
+  for (const id of ids) {
+    await ctx.api.deleteMessage(ctx.chat.id, id).catch(() => {});
+  }
+}
+
 
 const money = (usd) => (usd < 0.01 ? 'менше цента' : `~$${usd.toFixed(2)}`);
 const plural = (n, one, few, many) => {
@@ -79,6 +94,7 @@ async function detailScreen(key) {
 
 async function openPromptMenu(ctx) {
   ctx.session.awaiting = null;
+  await dropTemp(ctx);
   const { text, kb } = hubScreen();
   await showScreen(ctx, text, kb);
 }
@@ -99,7 +115,9 @@ async function savePromptText(ctx, key, text) {
   ctx.session.pendingPrompt = { key, text: clean };
   const preview = clean.length > 600 ? `${clean.slice(0, 600)}…` : clean;
   const kb = new InlineKeyboard().text('✅ Так, зберегти', `prompt:sv:${key}`).row().text('✖️ Скасувати', `prompt:o:${key}`);
-  await ctx.reply(`Новий текст для «${e.button}» (${clean.length} символів):\n\n${preview}`);
+  rememberTemp(ctx, ctx.message?.message_id);
+  const shown = await ctx.reply(`Новий текст для «${e.button}» (${clean.length} символів):\n\n${preview}`);
+  rememberTemp(ctx, shown?.message_id);
   await showScreen(ctx, '❓ Дійсно замінити цю інструкцію?', kb);
 }
 
@@ -229,6 +247,12 @@ function registerPrompt(bot) {
     if (built) await showScreen(ctx, built.text, built.kb);
   };
 
+  bot.use(async (ctx, next) => {
+    const cq = ctx.callbackQuery?.data;
+    if (cq && cq.startsWith('prompt')) await dropTemp(ctx);
+    await next();
+  });
+
   bot.callbackQuery('prompt', async (ctx) => {
     ctx.session.awaiting = null;
     await ctx.answerCallbackQuery();
@@ -251,7 +275,8 @@ function registerPrompt(bot) {
     const key = ctx.match[1];
     const e = await promptInfo(key);
     if (!e) return;
-    await sendLong(ctx.api, ctx.chat.id, `Поточний текст (${e.isCustom ? 'власний' : 'стандартний'}):\n\n${e.value}`);
+    const ids = await sendLong(ctx.api, ctx.chat.id, `Поточний текст (${e.isCustom ? 'власний' : 'стандартний'}):\n\n${e.value}`);
+    rememberTemp(ctx, ids);
     await screen(ctx, await detailScreen(key));
   });
 

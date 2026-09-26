@@ -63,8 +63,8 @@
     { key: 'score', title: 'Бал', color: '#8c5aa8', axis: 'right', scale: 10, decimals: 1 }
   ];
 
-  var TW = 680, TH = 260, PL = 44, PR = 44, PT = 14, PB = 30;
-  var PLOT_W = TW - PL - PR, PLOT_H = TH - PT - PB;
+  var TH = 240, PL = 40, PR = 40, PT = 16, PB = 30;
+  var AXIS_SIZE = 12, AXIS_FILL = '#667085', GRID_STROKE = '#e7ebf0';
 
   function niceMax(v) {
     if (!v || v <= 0) return 4;
@@ -84,6 +84,10 @@
     return card.__trend;
   }
 
+  function axisText(x, y, value, anchor) {
+    return '<text x="' + x + '" y="' + y + '" text-anchor="' + anchor + '" font-size="' + AXIS_SIZE + '" fill="' + AXIS_FILL + '">' + value + '</text>';
+  }
+
   function drawTrend(card) {
     var svg = card.querySelector('[data-trend]');
     if (!svg) return;
@@ -91,8 +95,14 @@
     var pts = st.points;
     var shown = TREND_SERIES.filter(function (sr) { return !st.hidden[sr.key]; });
 
+    var TW = Math.max(320, Math.round(svg.getBoundingClientRect().width || 680));
+    var PLOT_W = TW - PL - PR;
+    var PLOT_H = TH - PT - PB;
+    svg.setAttribute('viewBox', '0 0 ' + TW + ' ' + TH);
+    svg.setAttribute('height', TH);
+
     if (!pts.length) {
-      svg.innerHTML = '<text x="' + TW / 2 + '" y="' + TH / 2 + '" text-anchor="middle" font-size="13" fill="#667085">За цей період даних немає</text>';
+      svg.innerHTML = axisText(TW / 2, TH / 2, 'За цей період даних немає', 'middle');
       each(card.querySelectorAll('[data-series-val]'), function (el) { el.textContent = '—'; });
       var empty = card.querySelector('[data-trend-note]');
       if (empty) empty.textContent = st.note;
@@ -117,15 +127,15 @@
     for (var t = 0; t <= 4; t += 1) {
       var frac = t / 4;
       var gy = PT + PLOT_H - frac * PLOT_H;
-      out += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (PL + PLOT_W) + '" y2="' + gy + '" stroke="#e7ebf0" stroke-width="1"/>';
-      out += '<text x="' + (PL - 8) + '" y="' + (gy + 4) + '" text-anchor="end" font-size="11" fill="#667085">' + Math.round(maxLeft * frac) + '</text>';
-      out += '<text x="' + (PL + PLOT_W + 8) + '" y="' + (gy + 4) + '" font-size="11" fill="#667085">' + Math.round(100 * frac) + '%</text>';
+      out += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (PL + PLOT_W) + '" y2="' + gy + '" stroke="' + GRID_STROKE + '" stroke-width="1"/>';
+      out += axisText(PL - 8, gy + 4, Math.round(maxLeft * frac), 'end');
+      out += axisText(PL + PLOT_W + 8, gy + 4, Math.round(100 * frac) + '%', 'start');
     }
 
     var step = Math.max(1, Math.ceil(pts.length / 12));
     for (var k = 0; k < pts.length; k += 1) {
       if (k % step !== 0 && k !== pts.length - 1) continue;
-      out += '<text x="' + x(k).toFixed(1) + '" y="' + (TH - 10) + '" text-anchor="middle" font-size="11" fill="#667085">' + pts[k].label + '</text>';
+      out += axisText(x(k).toFixed(1), TH - 9, pts[k].label, 'middle');
     }
 
     for (var sIdx = 0; sIdx < shown.length; sIdx += 1) {
@@ -179,8 +189,9 @@
     svg.addEventListener('mousemove', function (event) {
       if (!st.points.length) return;
       var box = svg.getBoundingClientRect();
-      var rel = ((event.clientX - box.left) / box.width) * TW;
-      var idx = st.points.length < 2 ? 0 : Math.round(((rel - PL) / PLOT_W) * (st.points.length - 1));
+      var rel = event.clientX - box.left;
+      var plotW = Math.max(1, box.width - PL - PR);
+      var idx = st.points.length < 2 ? 0 : Math.round(((rel - PL) / plotW) * (st.points.length - 1));
       idx = Math.max(0, Math.min(st.points.length - 1, idx));
       if (idx === st.hover) return;
       st.hover = idx;
@@ -203,9 +214,11 @@
     each(card.querySelectorAll('[data-cat]'), function (el) {
       el.textContent = bucket[el.dataset.cat] || 0;
     });
-    each(card.querySelectorAll('[data-cat-bar]'), function (el) {
-      var part = bucket[el.dataset.catBar] || 0;
-      el.style.width = (totalCalls ? Math.round((part / totalCalls) * 100) : 0) + '%';
+    each(card.querySelectorAll('[data-cat-seg]'), function (el) {
+      var part = bucket[el.dataset.catSeg] || 0;
+      var share = totalCalls ? (part / totalCalls) * 100 : 0;
+      el.style.width = share.toFixed(2) + '%';
+      el.style.minWidth = part && share < 1 ? '3px' : '0';
     });
     each(card.querySelectorAll('[data-cat-share]'), function (el) {
       var part = bucket[el.dataset.catShare] || 0;
@@ -528,6 +541,14 @@
     initDeclineTabs();
     initTips();
     initClips();
+
+    var resizeAt = null;
+    window.addEventListener('resize', function () {
+      if (resizeAt) clearTimeout(resizeAt);
+      resizeAt = setTimeout(function () {
+        each(document.querySelectorAll('[data-manager-card]'), drawTrend);
+      }, 150);
+    });
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

@@ -328,22 +328,24 @@ const SERIES = [
 
 function categoryStrip(manager) {
   const total = manager.byMonth[ALL] || {};
-  const cells = PURPOSE_ORDER.map(
-    (p) => `<div class="rounded-xl border border-line p-3">
-        <div class="flex items-start justify-between gap-2">
-          <span class="flex items-center gap-1.5 text-xs uppercase tracking-wide text-muted">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" style="background:${PURPOSE_COLORS[p]}"></span>${esc(PURPOSE_LABELS[p].plural)}
-          </span>
-          ${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}
+  const segments = PURPOSE_ORDER.map(
+    (p) => `<div class="h-full" style="background:${PURPOSE_COLORS[p]};width:0%" data-cat-seg="${p}"></div>`
+  ).join('');
+  const legend = PURPOSE_ORDER.map(
+    (p) => `<div class="flex items-start gap-2">
+        <span class="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style="background:${PURPOSE_COLORS[p]}"></span>
+        <div class="min-w-0 flex-1">
+          <div class="truncate text-xs uppercase tracking-wide text-muted">${esc(PURPOSE_LABELS[p].plural)}</div>
+          <div class="text-sm"><b class="tabular-nums" data-cat="${p}">${total[p] || 0}</b> <span class="tabular-nums text-muted" data-cat-share="${p}"></span></div>
         </div>
-        <div class="mt-2 text-2xl font-bold tabular-nums" data-cat="${p}">${total[p] || 0}</div>
-        <div class="mt-2 h-1 w-full overflow-hidden rounded-full bg-line">
-          <div class="h-full rounded-full" style="background:${PURPOSE_COLORS[p]};width:0%" data-cat-bar="${p}"></div>
-        </div>
-        <div class="mt-1 text-xs tabular-nums text-muted" data-cat-share="${p}"></div>
+        ${tip(PURPOSE_LABELS[p].plural, PURPOSE_LABELS[p].about)}
       </div>`
   ).join('');
-  return `<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">${cells}</div>`;
+
+  return `<div class="rounded-xl border border-line p-3">
+      <div class="flex h-3 w-full overflow-hidden rounded-full bg-track">${segments}</div>
+      <div class="mt-3 grid grid-cols-2 gap-x-5 gap-y-3 sm:grid-cols-4">${legend}</div>
+    </div>`;
 }
 
 function trendBlock(manager) {
@@ -357,9 +359,9 @@ function trendBlock(manager) {
 
   return `<h3 class="${H3}">Динаміка</h3>
     <div class="rounded-xl border border-line p-3">
-      <div class="mb-1 flex flex-wrap items-center gap-1 no-print">${legend}</div>
-      <div class="text-xs text-muted" data-trend-note></div>
-      <svg viewBox="0 0 680 260" class="mt-1 w-full" role="img" data-trend="${esc(manager.name)}"></svg>
+      <div class="flex flex-wrap items-center gap-1 no-print">${legend}</div>
+      <div class="mt-1 text-xs text-muted" data-trend-note></div>
+      <svg class="mt-2 block w-full" role="img" data-trend="${esc(manager.name)}"></svg>
     </div>`;
 }
 
@@ -453,7 +455,7 @@ function lineChart(managers, months, key, { max, suffix = '', title }) {
   const px = (i) => (n === 1 ? L + iw / 2 : L + (i / (n - 1)) * iw);
   const py = (v) => T + ih - (Math.min(Math.max(v, 0), max) / max) * ih;
 
-  const grid = [0, max / 2, max]
+  const grid = [0, max / 4, max / 2, (max * 3) / 4, max]
     .map(
       (t) =>
         `<line x1="${L}" y1="${py(t).toFixed(1)}" x2="${W - R}" y2="${py(t).toFixed(1)}" class="chart-grid"/>` +
