@@ -44,6 +44,5 @@ const purposeRules = definePrompt({
 
 const isSales = (purpose) => purpose === 'sales' || purpose == null;
 
-const purposeLabel = (purpose) => PURPOSE_LABELS[purpose] || null;
 
-export { CALL_PURPOSES, NON_SALES_PURPOSES, PURPOSE_LABELS, purposeRules, isSales, purposeLabel };
+export { CALL_PURPOSES, NON_SALES_PURPOSES, PURPOSE_LABELS, purposeRules, isSales };

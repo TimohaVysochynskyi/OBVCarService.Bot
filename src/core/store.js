@@ -1076,19 +1076,6 @@ async function getCallByGeneralId(generalCallId) {
   return rows[0] || null;
 }
 
-async function getCallsWithTranscriptsInRange(start, end) {
-  const { rows } = await pool.query(
-    `SELECT manager_name AS "managerName", internal_number AS "internalNumber", transcript,
-            start_time AS "startTime", is_success AS "isSuccess",
-            weakest_stage AS "weakestStage", communication_score AS "communicationScore"
-     FROM calls
-     WHERE start_time >= $1 AND start_time < $2 AND transcript IS NOT NULL AND transcript <> ''
-     ORDER BY manager_name, start_time`,
-    [start, end]
-  );
-  return rows;
-}
-
 async function getActiveOperatorsInRange(start, end) {
   const { rows } = await pool.query(
     `SELECT manager_name AS name, COUNT(*)::int AS n FROM calls
@@ -1509,30 +1496,6 @@ async function deleteState(key) {
   await pool.query('DELETE FROM app_state WHERE key = $1', [key]);
 }
 
-async function getStoredAnalyzePrompt() {
-  return getState('analyze_prompt');
-}
-
-async function setStoredAnalyzePrompt(text) {
-  await setState('analyze_prompt', text);
-}
-
-async function clearStoredAnalyzePrompt() {
-  await deleteState('analyze_prompt');
-}
-
-async function getStoredScoreRubric() {
-  return getState('score_rubric');
-}
-
-async function setStoredScoreRubric(text) {
-  await setState('score_rubric', text);
-}
-
-async function clearStoredScoreRubric() {
-  await deleteState('score_rubric');
-}
-
 async function getRecipients(kind) {
   const raw = await getState(`${kind}_recipients`);
   if (!raw) return [];
@@ -1567,23 +1530,6 @@ async function getCheckpoint() {
 
 async function setCheckpoint(date) {
   await setState('last_polled_until', date.toISOString());
-}
-
-async function getReportSlot() {
-  return getState('last_report_slot');
-}
-
-async function setReportSlot(slotKey) {
-  await setState('last_report_slot', slotKey);
-}
-
-async function getReportUntil() {
-  const value = await getState('last_report_until');
-  return value ? new Date(value) : null;
-}
-
-async function setReportUntil(date) {
-  await setState('last_report_until', date.toISOString());
 }
 
 const DEFAULT_REPORT_TIMES = ['13:00', '19:30'];
@@ -1711,7 +1657,6 @@ export {
   listOperatorCalls,
   getOperatorPurposeCounts,
   getCallByGeneralId,
-  getCallsWithTranscriptsInRange,
   getActiveOperatorsInRange,
   getNumericManagerCalls,
   updateManagerName,
@@ -1752,10 +1697,6 @@ export {
   getPendingCalls,
   getCheckpoint,
   setCheckpoint,
-  getReportSlot,
-  setReportSlot,
-  getReportUntil,
-  setReportUntil,
   getReportTimes,
   addReportTime,
   removeReportTime,
@@ -1777,12 +1718,6 @@ export {
   getState,
   setState,
   deleteState,
-  getStoredAnalyzePrompt,
-  setStoredAnalyzePrompt,
-  clearStoredAnalyzePrompt,
-  getStoredScoreRubric,
-  setStoredScoreRubric,
-  clearStoredScoreRubric,
   getRecipients,
   addRecipient,
   removeRecipient,

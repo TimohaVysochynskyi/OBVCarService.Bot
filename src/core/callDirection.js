@@ -1,4 +1,3 @@
-const DIRECTIONS = ['in', 'out'];
 
 const DIRECTION_LABELS = {
   in: { icon: '📥', title: 'Вхідний', about: 'Клієнт зателефонував нам' },
@@ -12,6 +11,5 @@ function directionOf(callType) {
   return BINOTEL_CALL_TYPE[Number(callType)] ?? null;
 }
 
-const directionLabel = (direction) => DIRECTION_LABELS[direction]?.title || null;
 
-export { DIRECTIONS, DIRECTION_LABELS, directionOf, directionLabel };
+export { DIRECTION_LABELS, directionOf };

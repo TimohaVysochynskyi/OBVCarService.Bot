@@ -57,7 +57,6 @@ const LINE_KINDS = {
   },
 };
 
-const UNKNOWN_LINE = 'unknown';
 
 function lineInfo(ext) {
   const number = String(ext ?? '').trim();
@@ -73,7 +72,6 @@ export {
   EXCLUDED_EXTENSIONS,
   LINE_KINDS,
   LINE_NUMBERS,
-  UNKNOWN_LINE,
   lineInfo,
   parsePersonalOperators,
 };

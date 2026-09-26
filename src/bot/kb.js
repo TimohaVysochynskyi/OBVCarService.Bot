@@ -499,10 +499,6 @@ async function ingestPages(filename, pages, uploadedBy, fileId, mime, audience =
   return { docId, chunkCount: chunks.length };
 }
 
-async function ingestText(filename, text, uploadedBy, fileId, mime, audience = 'mechanic') {
-  return ingestPages(filename, [{ page: null, text }], uploadedBy, fileId, mime, audience);
-}
-
 async function askAudienceForUpload(ctx) {
   const doc = ctx.message.document;
   if (!doc) return;
@@ -739,7 +735,6 @@ export {
   promptQuestion,
   openFiles,
   openKbDocById,
-  ingestText,
   ingestPages,
   extractText,
   extractPages,
