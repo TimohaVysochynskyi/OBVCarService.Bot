@@ -1,12 +1,7 @@
 import 'dotenv/config';
-import {
-  migrate,
-  getCallsMissingBlocker,
-  setCallBlocker,
-  getBlockerStats,
-  resetAllBlockers,
-  clearAllReportSegments,
-} from '../core/store.js';
+import { getCallsMissingBlocker, resetAllBlockers, setCallBlocker } from '../features/analysis/repo.js';
+import { clearAllReportSegments, getBlockerStats } from '../features/reporting/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';
 import { displayName } from '../bot/operators.js';
 import { config } from '../shared/config.js';

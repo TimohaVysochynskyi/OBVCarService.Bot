@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
 
-const query = readSrc('core/store.js').match(/async function getPendingCalls\(\)[\s\S]*?\n\}/)[0];
+const query = readSrc('features/ingest/repo.js').match(/async function getPendingCalls\(\)[\s\S]*?\n\}/)[0];
 
 test('getPendingCalls вибирає всі 9 полів, включно з lastError', () => {
   for (const f of ['generalCallId', 'internalNumber', 'managerName', 'startTime', 'durationSec',

@@ -34,6 +34,15 @@ function orphanClasses(html, css, appJs = '') {
   return { used, orphans: [...used].filter((c) => !css.includes(escapeClass(c))) };
 }
 
+const REPOS = [
+  'platform/db/pool.js', 'platform/db/state.js', 'platform/db/filters.js',
+  'features/ingest/repo.js', 'features/analysis/repo.js', 'features/operators/repo.js',
+  'features/reporting/repo.js', 'features/archive/repo.js', 'features/access/repo.js',
+  'features/ops/repo.js', 'features/knowledge-base/repo.js',
+];
+
+const allRepos = () => REPOS.map((f) => fs.readFileSync(SRC + f, 'utf8')).join('\n');
+
 const MIGRATIONS = `${SRC}platform/db/migrations/`;
 
 function migrationsSql() {
@@ -46,4 +55,4 @@ function migrationsSql() {
 
 const bytes = (s) => Buffer.byteLength(s, 'utf8');
 
-export { ROOT, SRC, MIGRATIONS, readRepo, readSrc, readJson, migrationsSql, sliceFunction, escapeClass, classesIn, orphanClasses, bytes };
+export { ROOT, SRC, MIGRATIONS, REPOS, allRepos, readRepo, readSrc, readJson, migrationsSql, sliceFunction, escapeClass, classesIn, orphanClasses, bytes };

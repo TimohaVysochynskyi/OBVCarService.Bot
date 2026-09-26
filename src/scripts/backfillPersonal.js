@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, getNonSalesCalls, setCallPurpose } from '../core/store.js';
+import { getNonSalesCalls, setCallPurpose } from '../features/analysis/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { classifyNonSalesPurpose } from '../core/classifyPersonal.js';
 import { displayName } from '../bot/operators.js';
 import { config } from '../shared/config.js';

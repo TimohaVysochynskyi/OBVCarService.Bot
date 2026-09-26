@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { getCallsMissingSegments, updateCallFullAnalysis } from '../core/store.js';
+import { getCallsMissingSegments, updateCallFullAnalysis } from '../features/analysis/repo.js';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';

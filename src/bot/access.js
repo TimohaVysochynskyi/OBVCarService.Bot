@@ -1,4 +1,4 @@
-import { getBotUser, seedDirector } from '../core/store.js';
+import { getBotUser, seedDirector } from '../features/access/repo.js';
 import { config } from '../shared/config.js';
 
 const ROLES = {

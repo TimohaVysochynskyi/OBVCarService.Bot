@@ -1,5 +1,7 @@
 import 'dotenv/config';
-import { migrate, getUnexplainedDeclines, setClientDeclineReason, getDeclineReasonCounts } from '../core/store.js';
+import { getUnexplainedDeclines, setClientDeclineReason } from '../features/analysis/repo.js';
+import { getDeclineReasonCounts } from '../features/reporting/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { classifyClientDecline } from '../core/clientDecline.js';
 import { reasonLabel } from '../core/declineReasons.js';
 import { config } from '../shared/config.js';

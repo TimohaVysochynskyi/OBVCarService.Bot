@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { getState, setState, deleteState } from './store.js';
+import { deleteState, getState, setState } from '../platform/db/state.js';
 
 const DEFAULTS = JSON.parse(readFileSync(new URL('./prompts.default.json', import.meta.url), 'utf8'));
 

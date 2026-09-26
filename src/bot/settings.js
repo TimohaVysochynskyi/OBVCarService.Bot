@@ -1,12 +1,6 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
-import {
-  getRecipients,
-  addRecipient,
-  removeRecipient,
-  getReportTimes,
-  addReportTime,
-  removeReportTime,
-} from '../core/store.js';
+import { addRecipient, getRecipients, removeRecipient } from '../features/ops/repo.js';
+import { addReportTime, getReportTimes, removeReportTime } from '../features/reporting/repo.js';
 import { formatPhone } from './operators.js';
 import { showScreen } from './ui.js';
 

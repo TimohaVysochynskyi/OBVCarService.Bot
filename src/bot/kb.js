@@ -6,16 +6,16 @@ import { withRetry } from '../core/retry.js';
 import { appError, parseModelJson } from '../core/errors.js';
 import { reportToUser } from './errorReply.js';
 import {
-  insertKbDoc,
+  countKbChunks,
+  deleteKbDoc,
+  getKbDoc,
   insertKbChunks,
+  insertKbDoc,
+  listKbDocs,
   searchKbChunks,
   searchKbChunksLexical,
-  listKbDocs,
-  countKbChunks,
-  getKbDoc,
   setKbDocAudience,
-  deleteKbDoc,
-} from '../core/store.js';
+} from '../features/knowledge-base/repo.js';
 import { ROLES } from './access.js';
 import { withProgress, showScreen } from './ui.js';
 import { sendDocExcerpt, downloadOriginal } from './kbClip.js';

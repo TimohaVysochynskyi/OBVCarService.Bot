@@ -1,12 +1,12 @@
 import { InlineKeyboard, InputFile } from "grammy";
 import { appError } from "../core/errors.js";
 import {
-  getOperators,
   countOperatorCalls,
-  listOperatorCalls,
-  getOperatorPurposeCounts,
   getCallByGeneralId,
-} from "../core/store.js";
+  getOperatorPurposeCounts,
+  listOperatorCalls,
+} from '../features/archive/repo.js';
+import { getOperators } from '../features/operators/repo.js';
 import { getRecordingForCall } from "../core/audioStore.js";
 import { operatorListKeyboard, operatorLabel } from "./keyboards.js";
 import { displayName, formatPhone } from "./operators.js";

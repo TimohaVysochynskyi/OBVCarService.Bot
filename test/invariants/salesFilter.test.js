@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc } from '../helpers/repo.js';
+import { readSrc, allRepos } from '../helpers/repo.js';
 
-const store = readSrc('core/store.js');
+const store = allRepos();
+const filters = readSrc('platform/db/filters.js');
 const successCounts = [...store.matchAll(/FILTER \(WHERE is_success([^)]*)\)/g)];
 
 test('голого FILTER (WHERE is_success) у store немає', () => {
@@ -18,7 +19,7 @@ test('кожен підрахунок записів обмежений тим �
 
 test('SALES_FILTER оголошений один раз і саме як умова, а не як перелік винятків', () => {
   assert.equal((store.match(/const SALES_FILTER =/g) || []).length, 1);
-  assert.match(store, /const SALES_FILTER = `\(call_purpose = 'sales' OR call_purpose IS NULL\)`/);
+  assert.match(filters, /const SALES_FILTER = `\(call_purpose = 'sales' OR call_purpose IS NULL\)`/);
 });
 
 test('reachableCount навмисно лишає OR is_success', () => {

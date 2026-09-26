@@ -141,18 +141,30 @@ test/          дзеркалить src/, запускається node --test
 
 68 КБ — це не «великий файл», це відсутність межі між інжестом і звітністю.
 
-- [ ] `platform/db/pool.js` — пул + `pool.on('error')` (⚠️ слухач мусить лишитись **безумовним**, інакше Node вбиває процес на помилці простійного клієнта)
-- [ ] `features/ingest/repo.js` — `saveCall`, `callExists`, `pending_calls`, чекпоінт
-- [ ] `features/reporting/repo.js` — статистика, тренди, `report_segments`, `getLineBreakdown`
-- [ ] `features/archive/repo.js` — списки й деталі дзвінків
-- [ ] `features/knowledge-base/repo.js` — `kb_docs`, `kb_chunks`, обидва пошуки
-- [ ] `features/access/repo.js` — `bot_users`
-- [ ] `features/prompts/repo.js` — `app_state` під промпти + вибірки для перерахунку
-- [ ] `features/ops/repo.js` — `error_log`, heartbeat, стани алертів, отримувачі
-- [ ] `SALES_FILTER` і подібні спільні фрагменти SQL — в одне місце, яке імпортують усі
-- [ ] `getState/setState/deleteState` — у `platform/db`, бо ними користуються всі слайси
+- [x] `platform/db/pool.js` — пул + `pool.on('error')` (⚠️ слухач мусить лишитись **безумовним**, інакше Node вбиває процес на помилці простійного клієнта)
+- [x] `features/ingest/repo.js` — `saveCall`, `callExists`, `pending_calls`, чекпоінт
+- [x] `features/reporting/repo.js` — статистика, тренди, `report_segments`, `getLineBreakdown`
+- [x] `features/archive/repo.js` — списки й деталі дзвінків
+- [x] `features/knowledge-base/repo.js` — `kb_docs`, `kb_chunks`, обидва пошуки
+- [x] `features/access/repo.js` — `bot_users`
+- [x] вибірки для перерахунку + записи результатів аналізу
+- [x] `features/ops/repo.js` — `error_log`, heartbeat, стани алертів, отримувачі
+- [x] `SALES_FILTER` і подібні спільні фрагменти SQL — в одне місце, яке імпортують усі
+- [x] `getState/setState/deleteState` — у `platform/db`, бо ними користуються всі слайси
 
-**Перевірка:** `npm test` зелений; кількість SQL-запитів і їхній текст не змінились (порівняти `grep -c "pool.query"` до/після і дифом переглянути кожен перенесений запит).
+**Перевірка:** `npm test` зелений; кількість SQL-запитів і їхній текст не змінились.
+
+**Зроблено 26.09.2026.** 1510 рядків `core/store.js` розкладені на 11 файлів (найбільший — `reporting/repo.js`, 408 рядків); `core/store.js` видалено, 40 файлів отримали нові імпорти.
+
+**Запити не змінились — це звірено машинно:** скрипт витяг усі 117 аргументів `.query(` зі старого файлу з git і з нових, нормалізував пробіли й порівняв. **117 було — 117 стало, кожен збігається дослівно**; усі 9 спільних фрагментів SQL (`SALES_FILTER`, `BLOCKER_COLUMNS_SQL`, `BOT_USER_COLS`, `SEGMENT_COLS`…) теж ідентичні.
+
+⚠️ **Два відступи від початкового плану, обидва свідомі:**
+1. **`features/prompts/repo.js` названо `features/analysis/repo.js`.** Ті самі вибірки й записи обслуговують не лише перерахунок із `/prompt`, а й усі `backfill:*` і `rescore:*`; назва за екраном бота описувала б їх неправдиво.
+2. **Додано `features/operators/repo.js`**, якого в плані не було. Ростер і перейменування операторів потрібні одночасно інжесту, боту й скриптам; якби вони лежали в `reporting`, інжест мусив би імпортувати репозиторій чужого слайсу — те, що заборонено тестом.
+
+⚠️ **Перехідний стан:** `core/alerts.js`, `core/telegram.js`, `core/errorLog.js`, `core/liveness.js`, `core/audioStore.js` тепер імпортують `features/*/repo.js` — напрямок «ядро → слайс», зворотний до цільового. Ці модулі самі належать слайсам і переїдуть у кроці 5.
+
+**Нові інваріанти** (`test/invariants/dataAccess.test.js` + доповнення до `importGraph`): SQL лише в репозиторіях, сирий `pool` лише в них, слайс не лізе в чужий слайс, спільний SQL оголошений один раз, у графі імпортів немає циклів, і **кожен іменований імпорт справді експортується з того модуля** — саме це закриває ризик переїзду для `scripts/`, які жоден тест не виконує.
 **Ризик:** середній. Механічна робота, але велика — робити під тестами, одним комітом, без правок SQL.
 
 ---

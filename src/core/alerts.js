@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { getAlertState, setAlertState, clearAlertState, clearAlertStates } from './store.js';
+import { clearAlertState, clearAlertStates, getAlertState, setAlertState } from '../features/ops/repo.js';
 import { sendAlert } from './telegram.js';
 import { UI } from './errorTexts.js';
 

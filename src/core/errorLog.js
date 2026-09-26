@@ -1,4 +1,4 @@
-import { insertErrorLog, getErrorLogByIncident } from './store.js';
+import { getErrorLogByIncident, insertErrorLog } from '../features/ops/repo.js';
 import { appError, describeError } from './errors.js';
 
 

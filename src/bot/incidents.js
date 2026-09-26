@@ -1,5 +1,5 @@
 import { InlineKeyboard } from 'grammy';
-import { listErrorLog, summarizeErrorLog, getErrorLogByIncident } from '../core/store.js';
+import { getErrorLogByIncident, listErrorLog, summarizeErrorLog } from '../features/ops/repo.js';
 import { LOG } from '../core/errorTexts.js';
 import { showScreen, sendLong } from './ui.js';
 import { formatKyiv } from './time.js';

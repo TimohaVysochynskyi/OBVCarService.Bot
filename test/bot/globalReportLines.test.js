@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc, orphanClasses } from '../helpers/repo.js';
+import { readSrc, orphanClasses, allRepos } from '../helpers/repo.js';
 import { renderGlobalReport } from '../../src/bot/globalReportHtml.js';
 import { lineInfo, LINE_KINDS } from '../../src/core/phoneLines.js';
 import { buildLines } from '../../src/bot/globalReportData.js';
@@ -205,7 +205,7 @@ test('рядки розкладу сумуються рівно в підсум�
 });
 
 test('записи скрізь рахуються тим самим фільтром, що й угоди', () => {
-  assert.ok(!/FILTER \(WHERE is_success\)/.test(readSrc('core/store.js')),
+  assert.ok(!/FILTER \(WHERE is_success\)/.test(allRepos()),
     'десь лишився голий is_success — записів вийде більше, ніж угод');
 });
 

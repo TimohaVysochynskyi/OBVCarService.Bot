@@ -1,9 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc } from '../helpers/repo.js';
+import { readSrc, allRepos } from '../helpers/repo.js';
 import { CALL_PURPOSES, NON_SALES_PURPOSES, PURPOSE_LABELS, isSales } from '../../src/core/callPurpose.js';
 
-const store = readSrc('core/store.js');
+const filters = readSrc('platform/db/filters.js');
+const repos = allRepos();
 
 test('чотири категорії', () => {
   assert.deepEqual(CALL_PURPOSES, ['sales', 'info', 'other', 'personal']);
@@ -35,15 +36,15 @@ test('особистий не угода', () => {
 });
 
 test('SALES_FILTER виключає особисті', () => {
-  assert.match(store, /const SALES_FILTER = `\(call_purpose = 'sales' OR call_purpose IS NULL\)`/);
+  assert.match(filters, /const SALES_FILTER = `\(call_purpose = 'sales' OR call_purpose IS NULL\)`/);
 });
 
 test('обидва infoCount рахують особисті', () => {
-  assert.equal((store.match(/call_purpose IN \('info','other','personal'\)/g) || []).length, 2);
+  assert.equal((repos.match(/call_purpose IN \('info','other','personal'\)/g) || []).length, 2);
 });
 
-test('старої двійки в store не лишилось', () => {
-  assert.ok(!/IN \('info','other'\)/.test(store));
+test('старої двійки в запитах не лишилось', () => {
+  assert.ok(!/IN \('info','other'\)/.test(repos));
 });
 
 test('гейти в analyze/segments/archive читають спільний список', () => {

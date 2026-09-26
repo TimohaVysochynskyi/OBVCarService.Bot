@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrate } from '../core/store.js';
+import { migrate } from '../platform/db/pool.js';
 import { buildGlobalReport, ALL } from '../bot/globalReportData.js';
 
 async function main() {

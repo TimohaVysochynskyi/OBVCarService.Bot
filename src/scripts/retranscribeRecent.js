@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { getOperators, getRecentCallsForOperator, updateCallTranscript } from '../core/store.js';
+import { getRecentCallsForOperator, updateCallTranscript } from '../features/analysis/repo.js';
+import { getOperators } from '../features/operators/repo.js';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeAudio } from '../core/transcribe.js';
 import { displayName, hasAlias } from '../bot/operators.js';

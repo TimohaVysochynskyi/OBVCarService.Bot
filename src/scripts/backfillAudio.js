@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, getCallsMissingAudio, setCallAudio, getAudioArchiveStats } from '../core/store.js';
+import { getAudioArchiveStats, getCallsMissingAudio, setCallAudio } from '../features/ingest/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { fetchRecording, saveRecording, readStoredRecording, storageRoot, freeSpaceMb } from '../core/audioStore.js';
 import { config } from '../shared/config.js';
 

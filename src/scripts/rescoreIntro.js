@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, getRecentCallsForIntro, updateCallIntro } from '../core/store.js';
+import { getRecentCallsForIntro, updateCallIntro } from '../features/analysis/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { analyzeCallBehaviors } from '../core/analyzeCall.js';
 import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
 import { config } from '../shared/config.js';

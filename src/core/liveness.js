@@ -1,4 +1,4 @@
-import { getHeartbeat, setHeartbeat } from './store.js';
+import { getHeartbeat, setHeartbeat } from '../features/ops/repo.js';
 import { alertOnce, humanDuration, kyivTime } from './alerts.js';
 import { NOTICES } from './errorTexts.js';
 import { config } from '../shared/config.js';

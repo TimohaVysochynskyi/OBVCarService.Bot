@@ -1,15 +1,15 @@
 import { InlineKeyboard } from 'grammy';
+import { getActiveOperatorsInRange } from '../features/operators/repo.js';
+import { getRecipients } from '../features/ops/repo.js';
 import {
-  getOperatorStats,
-  getCallsForReport,
-  getActiveOperatorsInRange,
-  getRecipients,
-  getReportTimes,
-  getDeliveredSlots,
-  markSlotDelivered,
   deleteOldManualTails,
   getBlockedCalls,
-} from '../core/store.js';
+  getCallsForReport,
+  getDeliveredSlots,
+  getOperatorStats,
+  getReportTimes,
+  markSlotDelivered,
+} from '../features/reporting/repo.js';
 import { reduceFindings, mergeFindings, MAX_PHRASES, MIN_EVIDENCE } from './analyze.js';
 import { assembleReport, collectRangeFindings } from './segments.js';
 import { prepareClips, clipKey, sendClip } from './audioClip.js';

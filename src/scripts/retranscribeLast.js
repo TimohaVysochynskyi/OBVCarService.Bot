@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { getRecentCalls, updateCallAnalysis } from '../core/store.js';
+import { getRecentCalls, updateCallAnalysis } from '../features/analysis/repo.js';
 import { getRecordingForCall } from '../core/audioStore.js';
 import { transcribeDiarized } from '../core/elevenlabs.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';

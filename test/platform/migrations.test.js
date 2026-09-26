@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { ROOT, readRepo, readSrc } from '../helpers/repo.js';
+import { ROOT, REPOS, readRepo, readSrc } from '../helpers/repo.js';
 import { runMigrations, listMigrations, MIGRATIONS_DIR } from '../../src/platform/db/runMigrations.js';
 
 const files = await listMigrations();
@@ -76,8 +76,8 @@ test('таблиці бази знань навмисно поза цими мі
   for (const table of KB_TABLES) {
     assert.ok(!new RegExp(`CREATE TABLE IF NOT EXISTS ${table}`).test(ALL_SQL), `${table} потрапила у звичайні міграції`);
   }
-  assert.match(readSrc('core/store.js'), /async function migrateKb\(\)/);
-  assert.match(readSrc('core/store.js'), /CREATE EXTENSION IF NOT EXISTS vector/);
+  assert.match(readSrc('features/knowledge-base/repo.js'), /async function migrateKb\(\)/);
+  assert.match(readSrc('features/knowledge-base/repo.js'), /CREATE EXTENSION IF NOT EXISTS vector/);
 });
 
 test('легасі-прибирання пережили переїзд', () => {
@@ -123,10 +123,12 @@ test('кожна міграція ідемпотентна — її можна �
   assert.deepEqual(unsafe, [], `неідемпотентні команди: ${unsafe.join(' | ')}`);
 });
 
-test('store.js більше не тримає схему — лише кличе раннер', () => {
-  const store = readSrc('core/store.js');
-  assert.match(store, /async function migrate\(\) \{\s*\n\s*await runMigrations\(pool\);\s*\n\}/);
-  assert.ok(!/CREATE TABLE IF NOT EXISTS calls \(/.test(store), 'схема лишилась у store.js');
+test('код не тримає схему — лише кличе раннер', () => {
+  const poolJs = readSrc('platform/db/pool.js');
+  assert.match(poolJs, /async function migrate\(\) \{\s*\n\s*await runMigrations\(pool\);\s*\n\}/);
+  for (const file of REPOS) {
+    assert.ok(!/CREATE TABLE IF NOT EXISTS calls \(/.test(readSrc(file)), `схема лишилась у ${file}`);
+  }
 });
 
 test('раннер створює реєстр, застосовує все нове і записує назви', async () => {

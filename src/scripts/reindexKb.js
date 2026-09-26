@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrateKb, getKbDocsWithFile, replaceKbDocChunks } from '../core/store.js';
+import { getKbDocsWithFile, migrateKb, replaceKbDocChunks } from '../features/knowledge-base/repo.js';
 import { extractPages, chunkDocument, embedTexts, embedInput } from '../bot/kb.js';
 import { downloadOriginal } from '../bot/kbClip.js';
 

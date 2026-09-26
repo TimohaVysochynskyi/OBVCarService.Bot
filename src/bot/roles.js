@@ -1,13 +1,13 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
 import {
-  getBotUsersByRole,
-  getBotUserById,
-  upsertBotUserByTelegram,
   addPendingBotUser,
-  setBotUserOperator,
   deleteBotUser,
-  getOperators,
-} from '../core/store.js';
+  getBotUserById,
+  getBotUsersByRole,
+  setBotUserOperator,
+  upsertBotUserByTelegram,
+} from '../features/access/repo.js';
+import { getOperators } from '../features/operators/repo.js';
 import { ROLES, ROLE_LABELS, invalidateRole } from './access.js';
 import { operatorLabels } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';

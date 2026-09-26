@@ -1,16 +1,15 @@
 import {
   countCallsWithText,
-  getCallsForReprocess,
   getCallHeadsForReprocess,
-  updateCallMap,
-  updateCallClassification,
-  setCallPurpose,
+  getCallsForReprocess,
   setCallBlocker,
+  setCallPurpose,
   setClientDeclineReason,
-  updateManagerName,
-  getOperatorRoster,
-  clearAllReportSegments,
-} from '../core/store.js';
+  updateCallClassification,
+  updateCallMap,
+} from '../features/analysis/repo.js';
+import { getOperatorRoster, updateManagerName } from '../features/operators/repo.js';
+import { clearAllReportSegments } from '../features/reporting/repo.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { classifyCall } from '../core/classifyCall.js';
 import { detectDealBlocker, NO_BLOCKER } from '../core/dealBlocker.js';

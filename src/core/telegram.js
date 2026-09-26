@@ -1,6 +1,6 @@
 import { withRetry } from './retry.js';
 import { fetchOk } from './http.js';
-import { getRecipients } from './store.js';
+import { getRecipients } from '../features/ops/repo.js';
 import { config } from '../shared/config.js';
 
 const TELEGRAM_MAX_LENGTH = 4096;

@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, updateDirectionIfMissing, getDirectionStats, getEarliestCallTime } from '../core/store.js';
+import { getDirectionStats, getEarliestCallTime, updateDirectionIfMissing } from '../features/ingest/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 import { DIRECTION_LABELS } from '../core/callDirection.js';
 import { config } from '../shared/config.js';

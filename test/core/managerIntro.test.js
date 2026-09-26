@@ -7,7 +7,9 @@ import { detectIntro, nameStems } from '../../src/core/managerIntro.js';
 
 const css = readSrc('bot/site/app.css');
 const appJs = readSrc('bot/site/app.js');
-const storeJs = readSrc('core/store.js');
+const introQuery = readSrc('features/reporting/repo.js');
+const introBackfill = readSrc('features/analysis/repo.js');
+const filters = readSrc('platform/db/filters.js');
 const reportJs = readSrc('bot/report.js');
 const analyzeJs = readSrc('core/analyzeCall.js');
 const backfillJs = readSrc('scripts/backfillIntro.js');
@@ -178,15 +180,15 @@ test('місяць без дзвінків підписаний словами, 
 });
 
 test('обидва запити представлення обмежені персональними номерами', () => {
-  assert.ok(/internal_number = ANY\(\$1\)/.test(storeJs) && /internal_number = ANY\(\$4\)/.test(storeJs));
+  assert.ok(/internal_number = ANY\(\$1\)/.test(introQuery) && /internal_number = ANY\(\$4\)/.test(introQuery));
 });
 
 test('список номерів береться з тієї ж мапи, якою інжест атрибутує дзвінки', () => {
-  assert.ok(storeJs.includes('const PERSONAL_EXTENSIONS = Object.keys(PERSONAL_OPERATORS);'));
+  assert.ok(filters.includes('const PERSONAL_EXTENSIONS = Object.keys(PERSONAL_OPERATORS);'));
 });
 
 test('беклог відбирає саме NULL — перевірені рядки не переглядаються повторно', () => {
-  assert.ok(/intro_name IS NULL/.test(storeJs));
+  assert.ok(/intro_name IS NULL/.test(introBackfill));
 });
 
 const headerSrc = sliceFunction(reportJs, 'function headerText(report) {');

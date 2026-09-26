@@ -87,3 +87,40 @@ test('обидва процеси pm2 стартують із наявних ф�
   assert.deepEqual(scripts, ['src/bot/index.js', 'src/jobs/index.js']);
   for (const s of scripts) assert.ok(files.includes(s), `pm2 вказує на неіснуючий ${s}`);
 });
+
+test('кожен іменований імпорт справді експортується з того модуля', () => {
+  const exportsOf = (rel) => {
+    const src = readRepo(rel);
+    const names = new Set();
+    for (const m of src.matchAll(/export\s*\{([^}]+)\}/g)) {
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/).pop().trim();
+        if (name) names.add(name);
+      }
+    }
+    for (const m of src.matchAll(/export\s+(?:async\s+)?(?:function|const|class|let)\s+([A-Za-z_$][\w$]*)/g)) {
+      names.add(m[1]);
+    }
+    if (/export\s+default/.test(src)) names.add('default');
+    return names;
+  };
+
+  const broken = [];
+  for (const rel of files) {
+    if (!rel.startsWith('src/')) continue;
+    const src = readRepo(rel);
+    for (const m of src.matchAll(/import\s*\{([^}]+)\}\s*from\s*['"](\.[^'"]+)['"]/g)) {
+      const target = path.relative(ROOT, path.resolve(path.dirname(path.join(ROOT, rel)), m[2])).replace(/\\/g, '/');
+      if (!files.includes(target)) {
+        broken.push(`${rel}: немає модуля ${m[2]}`);
+        continue;
+      }
+      const exported = exportsOf(target);
+      for (const part of m[1].split(',')) {
+        const name = part.trim().split(/\s+as\s+/)[0].trim();
+        if (name && !exported.has(name)) broken.push(`${rel}: ${target} не експортує ${name}`);
+      }
+    }
+  }
+  assert.deepEqual(broken, [], `биті імпорти: ${broken.join(' | ')}`);
+});

@@ -1,4 +1,4 @@
-import { onPoolError } from './store.js';
+import { onPoolError } from '../platform/db/pool.js';
 import { describeError } from './errors.js';
 import { recordError } from './errorLog.js';
 import { sendAlert } from './telegram.js';

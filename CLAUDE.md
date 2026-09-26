@@ -73,23 +73,46 @@ npm run kb:reindex                         # переіндексувати ба
 
 ```
 src/
-  shared/ фундамент без залежностей: config.js (ЄДИНЕ читання process.env)
-  platform/db/ міграції схеми: migrations/*.sql + runMigrations.js
-  core/   спільне ядро (jobs/ і bot/ обидва залежать від нього)
-  jobs/   інжест: index.js (entrypoint) + pollNewCalls + processCalls + alerts
-  bot/    Telegram-бот
-  scripts/ одноразові інструменти (кожен = один npm-скрипт)
-test/     дзеркалить src/ + invariants/ (правила, спільні для всього репо)
-tailwind/ джерело стилів звіту; збирається в src/bot/site/app.css
+  shared/    фундамент без залежностей: config.js (ЄДИНЕ читання process.env)
+  platform/db/ пул, міграції (migrations/*.sql + runMigrations.js),
+               спільні шматки SQL (filters.js), app_state (state.js)
+  features/  по одному repo.js на слайс — ЄДИНИЙ шлях до бази:
+             ingest · analysis · operators · reporting · archive ·
+             access · ops · knowledge-base
+  core/      доменні правила й адаптери, спільні для обох процесів
+  jobs/      інжест: index.js (entrypoint) + pollNewCalls + processCalls + alerts
+  bot/       Telegram-бот
+  scripts/   одноразові інструменти (кожен = один npm-скрипт)
+test/        дзеркалить src/ + invariants/ (правила, спільні для всього репо)
+tailwind/    джерело стилів звіту; збирається в src/bot/site/app.css
 ```
 
-**`src/core/`** — `store` (весь SQL), `binotel`, `audioStore` (локальний архів записів), `transcribe` + `elevenlabs` + `audioMeta`, `classifyCall`, `analyzeCall` (per-call MAP), `callPurpose` (таксономія категорій), `callDirection`, `stages` (4 етапи воронки), `classifyPersonal`, `dealBlocker`, `declineReasons`, `clientDecline`, `dialogueMetrics`, `managerIntro`, `quoteMatch`, `identifyManager`, `phoneLines` (ЄДИНЕ джерело про внутрішні номери), `prompts` + `prompts.default.json` (реєстр промптів), `telegram`, `retry`, `http` (ЄДИНА точка мережі), `ffmpeg` (ЄДИНА політика ffmpeg), `errors` + `errorTexts` + `errorLog`, `alerts`, `liveness`, `processTraps`.
+**`src/core/`** — `binotel`, `audioStore` (локальний архів записів), `transcribe` + `elevenlabs` + `audioMeta`, `classifyCall`, `analyzeCall` (per-call MAP), `callPurpose` (таксономія категорій), `callDirection`, `stages` (4 етапи воронки), `classifyPersonal`, `dealBlocker`, `declineReasons`, `clientDecline`, `dialogueMetrics`, `managerIntro`, `quoteMatch`, `identifyManager`, `phoneLines` (ЄДИНЕ джерело про внутрішні номери), `prompts` + `prompts.default.json` (реєстр промптів), `telegram`, `retry`, `http` (ЄДИНА точка мережі), `ffmpeg` (ЄДИНА політика ffmpeg), `errors` + `errorTexts` + `errorLog`, `alerts`, `liveness`, `processTraps`.
 
 **`src/bot/`** — `index` (bootstrap), `access` + `roles` (ролі), `keyboards`, `ui` (активний екран, довгі повідомлення, прогрес), `stats` + `dynamics`, `archive` + `dialogue`, `report` + `segments` + `analyze` + `audioClip`, `kb` + `kbClip`, `prompt` + `promptRegistry` + `reprocess`, `globalReport` + `globalReportData` + `globalReportHtml` + `globalReportAudio` + `globalReportBundle`, `site/` (статика бандла: `app.css` — зібраний Tailwind, `app.js` — поведінка сторінки), `health`, `incidents`, `settings`, `errorReply`, `operators`, `time`.
 
 **`src/shared/`** — `config.js`: єдиний модуль, що читає `process.env`. Нічого не імпортує (фундамент), віддає **заморожений** об'єкт, згрупований за призначенням: `config.db`, `config.telegram`, `config.binotel`, `config.openai`, `config.elevenlabs`, `config.call`, `config.lines`, `config.poll`, `config.audio`, `config.report`, `config.http`, `config.liveness`, `config.backfill`.
 
-Коли нижче написано просто `store.js`, `processCalls.js` — шукати за цією мапою.
+**`src/features/*/repo.js`** — увесь SQL проєкту, розкладений за слайсами. Був один `core/store.js` на 68 КБ і ~120 експортів, де зміна запиту для звіту могла зламати інжест:
+
+| репозиторій | що всередині | найбільші споживачі |
+|---|---|---|
+| `ingest/repo.js` | `saveCall`, `callExists`, черга `pending_calls`, чекпоінт, локальне аудіо, напрямок і номер клієнта | `jobs/processCalls.js`, `core/audioStore.js` |
+| `analysis/repo.js` | вибірки для перерахунку й усі записи результатів аналізу (MAP, бал, представлення, блокери, причини відмов) | `bot/reprocess.js`, `backfill:*`, `rescore:*` |
+| `operators/repo.js` | хто говорив: ростер, список операторів, перейменування й перепризначення | інжест, бот, `normalize:operators` |
+| `reporting/repo.js` | статистика, тренди, кеш `report_segments`, усі зрізи «Звіту за весь період», розклад звітів | `bot/report.js`, `bot/segments.js`, `bot/globalReportData.js` |
+| `archive/repo.js` | списки дзвінків по категоріях і екран одного дзвінка | `bot/archive.js` |
+| `access/repo.js` | `bot_users` — ролі й доступ | `bot/access.js`, `bot/roles.js` |
+| `ops/repo.js` | журнал інцидентів, heartbeat, стани алертів, списки отримувачів | `core/errorLog.js`, `core/alerts.js`, `core/telegram.js`, `core/liveness.js` |
+| `knowledge-base/repo.js` | `kb_docs`/`kb_chunks`, обидва пошуки, `migrateKb()` | `bot/kb.js`, `kb:reindex` |
+
+**`src/platform/db/`** — `pool.js` (пул, `migrate()`, `pingDb`, ⚠️ **безумовний** `pool.on('error')`), `state.js` (`getState`/`setState`/`deleteState` над `app_state`), `filters.js` (спільні шматки SQL: `SALES_FILTER`, `BLOCKED_FILTER`, `NOT_BLOCKED_FILTER`, `BLOCKER_COLUMNS_SQL`, `HAS_TEXT`, `KYIV_MONTH`, `IS_PERSON`, `PERSONAL_EXTENSIONS`), `runMigrations.js` + `migrations/`.
+
+⚠️ **Правила межі, які тримають тести** (`test/invariants/dataAccess.test.js`): `.query(` існує ЛИШЕ в `platform/db/` і в `features/*/repo.js`; сирий `pool` імпортують лише вони; репозиторій одного слайсу не імпортує репозиторій іншого; спільний фрагмент SQL оголошений рівно один раз; у графі імпортів немає циклів.
+
+⚠️ **Перехідний стан, який прибере крок 5:** `core/alerts.js`, `core/telegram.js`, `core/errorLog.js`, `core/liveness.js` і `core/audioStore.js` імпортують `features/*/repo.js` — це напрямок «ядро → слайс», зворотний до цільового. Так вийшло тому, що самі ці модулі належать слайсам (`ops`, `ingest`) і переїдуть туди разом із деревом.
+
+Коли нижче написано просто `processCalls.js`, `report.js` — шукати за цією мапою.
 
 ## Конфіг (`shared/config.js`)
 
@@ -135,7 +158,7 @@ tailwind/ джерело стилів звіту; збирається в src/bo
 |---|---|---|
 | імпорт модуля | функція чиста | `detectIntro`, `directionOf`, `verifyIntro`, `renderGlobalReport` на фікстурі |
 | вирізання функції з тексту модуля (`new Function`) | функція не експортується і тягне за собою БД | `headerText`, `chunkPauseMs`, `checkpointOverlapMs`, `inputHash`, `withoutName`, `retryAfterMs` |
-| асерція по тексту файлу | гарантія структурна: порядок кроків, відсутність `catch`, наявність фільтра в SQL | `store.js`, `processCalls.js`, `prompt.js` |
+| асерція по тексту файлу | гарантія структурна: порядок кроків, відсутність `catch`, наявність фільтра в SQL | `features/*/repo.js`, `processCalls.js`, `prompt.js` |
 
 ⚠️ **Асерція по тексту пінить СУТЬ, а не написання.** Два рази перевірка ламалась від невинної зміни (дописали колонку в `saveCall`; додали другий символ в `import`) — обидві переписані на «напрямок зберігається» і «модуль залежить від `introRules`». Ламається перевірка на переформатуванні — послаблюй до суті, не видаляй.
 
@@ -152,6 +175,9 @@ tailwind/ джерело стилів звіту; збирається в src/bo
 | `errorTextStyle` | у `errorTexts.js` немає заборонених зворотів, знаків оклику й емодзі в середині речення; у кожного коду заповнені всі слоти; слова «продажний» немає у видимих текстах |
 | `envAccess` | `process.env` читається рівно в `shared/config.js`; конфіг нічого не імпортує; обидві точки входу перевіряють обов'язкові змінні до першої дії |
 | `startup` | обидва процеси СПРАВДІ запускаються з порожнім конфігом і виходять із кодом 1 та зрозумілим текстом — єдина перевірка, що виконує реальний `node src/...` |
+| `dataAccess` | межа репозиторіїв: SQL лише в них, сирий `pool` лише в них, слайс не лізе в чужий слайс, спільний SQL оголошений один раз, циклів у графі імпортів немає |
+
+⚠️ **`importGraph` перевіряє, що кожен іменований імпорт справді експортується з того модуля, на який вказує.** Саме ця перевірка закриває головний ризик переїзду `store.js`: 40 файлів отримали нові імпорти, і в `scripts/` немає жодного тесту, який би їх виконав. Статичний обхід ловить і биту назву, і вказівку не на той модуль.
 
 `test/platform/migrations.test.js` тримає схему: кожна колонка, таблиця й індекс **робочої бази** (еталон `test/fixtures/prod-schema.txt`, знятий із VPS) створюється якоюсь міграцією; кожна команда ідемпотентна; легасі-прибирання на місці; раннер перевірений на фейковому пулі (порядок, транзакції, блокування, повторний прогін, відкат при збої). ⚠️ Еталон — це ЛИШЕ схема: колонки, типи, індекси. Даних клієнтів у ньому немає, і тест окремо стежить, щоб не з'явились.
 
@@ -221,7 +247,7 @@ tailwind/ джерело стилів звіту; збирається в src/bo
 **Категорія дзвінка (`core/callPurpose.js`):** `sales` / `info` / `other` / `personal`. Модуль тримає підписи, іконки, пояснення `about` (їх показує звіт) і **текст правил для промпту** (`PURPOSE_RULES`) — `analyzeCall` бере звідти і `enum` схеми, і сам промпт.
 
 - ⚠️ **Розділяє категорії ТЕМА, а не тон.** Заміряно: перший прогін позначив як особисті два РОБОЧІ дзвінки — «буду за десять хвилин» і «вже їду на сервіс». Обидва координація. Тому в промпті окремо перелічені ці патерни, і будь-яка згадка авто/ремонту/деталей робить дзвінок робочим, навіть якщо співрозмовники на «ти».
-- **`SALES_FILTER` у `store.js` — `(call_purpose = 'sales' OR call_purpose IS NULL)`**, а не перелік винятків: інакше кожна нова категорія мовчки потрапляла б у знаменник конверсії.
+- **`SALES_FILTER` у `platform/db/filters.js` — `(call_purpose = 'sales' OR call_purpose IS NULL)`**, а не перелік винятків: інакше кожна нова категорія мовчки потрапляла б у знаменник конверсії.
 - ⚠️ `classifyPersonal` може рухати рядок **лише між трьома непродажними категоріями** (`NON_SALES_PURPOSES`) — ніколи не зробить дзвінок угодою. Інакше перекласифікація тихо змінила б конверсію під уже зданим звітом.
 
 **Етапи воронки (`core/stages.js`):** 4 значення — `виявлення потреби` / `робота із запереченнями` / `допродаж` / `закриття угоди`. Звідси їх бере і `classifyCall` (`weakestStage`), і `analyzeCall` (`item.stage`). **Не редагується з бота свідомо.**
@@ -640,7 +666,7 @@ RAG по завантажених посібниках. Документ (PDF `u
 
 **Взаємний нагляд процесів** (`core/liveness.js`): бот відмічається в `app_state.heartbeat_bot` щохвилини, полер — у `heartbeat_poll` **на початку кожного прогону**; кожен перевіряє СУСІДА. Ловить те, після чого раніше не приходило нічого: вичерпаний `max_restarts`, обірваний `getUpdates` через другий примірник, OOM, знятий cron. ⚠️ **Чому heartbeat полера, а не чекпоінт:** під час аварії Binotel чекпоінт НЕ рухається навмисно, і нагляд по ньому кричав би «збір не запускався». **Відсутність відмітки — не аварія** (так виглядає перший прогін після деплою).
 
-**Пастки рівня процесу** (`core/processTraps.js`): `unhandledRejection`, `uncaughtException`, `pool.on('error')`. ⚠️ **Слухач на пулі існує БЕЗУМОВНО** в `store.js` — без ЖОДНОГО слухача Node вбиває процес на помилці простійного клієнта; сповістити людей він може лише через `onPoolError`, бо прямий імпорт `telegram` у `store` дав би цикл. Після сповіщення процес **виходить навмисно** — стан після `uncaughtException` невідомий. `max_restarts` піднято до 100 + `exp_backoff_restart_delay`: помилка на СТАРТІ спалювала ліміт із 20 за секунди, і pm2 назавжди припиняв піднімати бота.
+**Пастки рівня процесу** (`core/processTraps.js`): `unhandledRejection`, `uncaughtException`, `pool.on('error')`. ⚠️ **Слухач на пулі існує БЕЗУМОВНО** в `platform/db/pool.js` — без ЖОДНОГО слухача Node вбиває процес на помилці простійного клієнта; сповістити людей він може лише через `onPoolError`, бо прямий імпорт `telegram` у `store` дав би цикл. Після сповіщення процес **виходить навмисно** — стан після `uncaughtException` невідомий. `max_restarts` піднято до 100 + `exp_backoff_restart_delay`: помилка на СТАРТІ спалювала ліміт із 20 за секунди, і pm2 назавжди припиняв піднімати бота.
 
 **Таймаути** (`core/http.js`): **усі мережеві виклики** йдуть через `fetchOk`/`fetchRaw` з `AbortSignal.timeout`. Раніше жоден `fetch` не мав обмеження, і зависання апстріму не давало ні помилки, ні відповіді. Значення різні за природою роботи: Binotel/Telegram 30с, OpenAI 120с, ElevenLabs STT 300с. Помилка тегується `provider`/`op`. `ffmpeg` теж під таймаутом — і нарізка, і **кешована проба `-version`** (її зависання зупинило б усі звіти назавжди). ⚠️ Юніт-тест стежить, щоб у `src/` не з'явився сирий `await fetch(` поза `core/http.js` (`test/invariants/network.test.js`).
 
@@ -654,14 +680,14 @@ RAG по завантажених посібниках. Документ (PDF `u
 
 ## Міграції схеми (`platform/db/`)
 
-Схема лежить у **пронумерованих `.sql`-файлах**, а не в коді: `src/platform/db/migrations/0001_calls.sql` … `0009_analyze_prompt_reset.sql`. `store.js: migrate()` — це тепер три рядки, які кличуть раннер.
+Схема лежить у **пронумерованих `.sql`-файлах**, а не в коді: `src/platform/db/migrations/0001_calls.sql` … `0009_analyze_prompt_reset.sql`. `platform/db/pool.js: migrate()` — це три рядки, які кличуть раннер.
 
 **Раннер (`runMigrations.js`):** таблиця `schema_migrations (name, applied_at)`; файли сортуються за назвою; невиконані застосовуються по одному, **кожен у власній транзакції під `pg_advisory_xact_lock`**. Блокування потрібне, бо `migrate()` кличуть обидва процеси і кожен скрипт: без нього два паралельні старти застосували б один файл двічі. Усередині блокування раннер ще раз перевіряє реєстр — класична перевірка після взяття замка.
 
 - **SQL перенесено БЕЗ ЖОДНОЇ ЗМІНИ** (перевірено звіркою байт-у-байт при розкладанні), разом із коментарями, які пояснюють кожну колонку.
 - **Порядок файлів = порядок виконання.** ⚠️ `0005_legacy_cleanup.sql` (дропи) стоїть перед `0006_manager_intro.sql`, і `direction` додається саме в `0005` ПІСЛЯ дропу `call_type` — тест стежить, щоб це не переставили.
 - ⚠️ **Легасі-прибирання тепер виконуються ОДИН раз, а не на кожному старті.** Раніше `DROP COLUMN IF EXISTS call_type` крутився кожні 15 хвилин і слугував пасткою: колонка з такою назвою зникала сама. Тепер такої пастки немає — назва `call_type` заборонена домовленістю й тестом, а не щоквартинним дропом.
-- **`migrateKb()` лишається окремо в `store.js`** і у файли НЕ переїхав: він потребує `CREATE EXTENSION vector` (суперюзер), і його падіння не має класти бота. Таблиці `kb_docs`/`kb_chunks` у `migrations/` навмисно відсутні — тест це перевіряє.
+- **`migrateKb()` лишається окремо в `features/knowledge-base/repo.js`** і у файли НЕ переїхав: він потребує `CREATE EXTENSION vector` (суперюзер), і його падіння не має класти бота. Таблиці `kb_docs`/`kb_chunks` у `migrations/` навмисно відсутні — тест це перевіряє.
 - **Додати зміну схеми** = покласти новий файл із наступним номером. Редагувати вже застосований файл не можна: він не виконається вдруге.
 
 **Перевірено наживо (26.09.2026, VPS, Postgres 18):**

@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { readSrc, migrationsSql } from '../helpers/repo.js';
 import { directionOf, DIRECTION_LABELS } from '../../src/core/callDirection.js';
 
-const store = readSrc('core/store.js');
+const ingest = readSrc('features/ingest/repo.js');
+const archive = readSrc('features/archive/repo.js');
 const schema = migrationsSql();
 const script = readSrc('scripts/backfillDirection.js');
 
@@ -49,27 +50,27 @@ test('нову колонку НЕ названо call_type', () => {
 });
 
 test('saveCall пише напрямок', () => {
-  const save = store.match(/async function saveCall[\s\S]*?\n\}/)[0];
+  const save = ingest.match(/async function saveCall[\s\S]*?\n\}/)[0];
   assert.match(save, /\bdirection\b/);
   assert.match(save, /call\.direction \?\? null/);
 });
 
 test('upsertPending пише напрямок і нумерація параметрів зсунута коректно', () => {
-  const pend = store.match(/async function upsertPending[\s\S]*?\n\}/)[0];
+  const pend = ingest.match(/async function upsertPending[\s\S]*?\n\}/)[0];
   assert.match(pend, /client_name, direction, attempts/);
   assert.match(pend, /last_error = \$9/);
 });
 
 test('черга ретраю ВІДДАЄ напрямок', () => {
-  assert.match(store.match(/async function getPendingCalls[\s\S]*?\n\}/)[0], /direction,/);
+  assert.match(ingest.match(/async function getPendingCalls[\s\S]*?\n\}/)[0], /direction,/);
 });
 
 test('екран дзвінка отримує напрямок', () => {
-  assert.match(store.match(/async function getCallByGeneralId[\s\S]*?\n\}/)[0], /direction/);
+  assert.match(archive.match(/async function getCallByGeneralId[\s\S]*?\n\}/)[0], /direction/);
 });
 
 test('беклог ідемпотентний — пише лише в порожні', () => {
-  assert.match(store, /direction IS NULL AND \$2::text IS NOT NULL/);
+  assert.match(ingest, /direction IS NULL AND \$2::text IS NOT NULL/);
 });
 
 test('інжест мапить напрямок із callType', () => {
@@ -102,7 +103,8 @@ test('і не звертається до OpenAI напряму', () => {
 test('увесь його світ — Binotel, база, словник напрямків і конфіг', () => {
   const imports = [...script.matchAll(/from '([^']+)'/g)].map((m) => m[1]);
   assert.deepEqual(imports.sort(),
-    ['../core/binotel.js', '../core/callDirection.js', '../core/store.js', '../shared/config.js']);
+    ['../core/binotel.js', '../core/callDirection.js', '../features/ingest/repo.js',
+      '../platform/db/pool.js', '../shared/config.js']);
 });
 
 test('бере дані лише з лістингу Binotel', () => {

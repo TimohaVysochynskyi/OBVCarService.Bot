@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrate } from '../core/store.js';
+import { migrate } from '../platform/db/pool.js';
 import { pollNewCalls } from './pollNewCalls.js';
 import { sendAlert } from '../core/telegram.js';
 import { describeError } from '../core/errors.js';

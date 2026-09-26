@@ -1,12 +1,8 @@
 import 'dotenv/config';
 import { Bot, session } from 'grammy';
-import {
-  migrate,
-  migrateKb,
-  activatePendingByPhone,
-  setBotUserPhone,
-  normalizePhone,
-} from '../core/store.js';
+import { activatePendingByPhone, normalizePhone, setBotUserPhone } from '../features/access/repo.js';
+import { migrateKb } from '../features/knowledge-base/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { mainMenu } from './keyboards.js';
 import { registerStats, statsPicker, openMyReport } from './stats.js';
 import { registerArchive, archivePicker } from './archive.js';

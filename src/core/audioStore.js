@@ -3,7 +3,7 @@ import { fetchOk } from './http.js';
 import { dirname, join, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCallRecordUrl } from './binotel.js';
-import { getCallAudio } from './store.js';
+import { getCallAudio } from '../features/ingest/repo.js';
 import { withRetry } from './retry.js';
 import { config } from '../shared/config.js';
 

@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrate } from '../core/store.js';
+import { migrate } from '../platform/db/pool.js';
 import { buildGlobalReport } from '../bot/globalReportData.js';
 import { buildSite, zipSite } from '../bot/globalReportBundle.js';
 

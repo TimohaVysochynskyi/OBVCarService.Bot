@@ -1,5 +1,6 @@
 import { InlineKeyboard, Keyboard } from 'grammy';
-import { getOperators, getOperatorStats, getBucketedTrend } from '../core/store.js';
+import { getOperators } from '../features/operators/repo.js';
+import { getBucketedTrend, getOperatorStats } from '../features/reporting/repo.js';
 import { operatorListKeyboard, periodKeyboard, operatorLabel } from './keyboards.js';
 import { displayName, formatPhone } from './operators.js';
 import { deliverManagerReport } from './report.js';

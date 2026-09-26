@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc, migrationsSql } from '../helpers/repo.js';
+import { readSrc, migrationsSql, allRepos } from '../helpers/repo.js';
 import * as dr from '../../src/core/declineReasons.js';
 import * as db from '../../src/core/dealBlocker.js';
 
 const dbSrc = readSrc('core/dealBlocker.js');
-const store = readSrc('core/store.js');
+const filters = readSrc('platform/db/filters.js');
+const repos = allRepos();
 const schema = migrationsSql();
 const dyn = readSrc('bot/dynamics.js');
 
@@ -83,11 +84,11 @@ test('успішний вихід несе причину', () => {
 });
 
 test('SQL-фільтр знає три бакети', () => {
-  assert.match(store, /BLOCKED_FILTER = `deal_blocker IN \('no_slot','no_parts','out_of_scope'\)`/);
+  assert.match(filters, /BLOCKED_FILTER = `deal_blocker IN \('no_slot','no_parts','out_of_scope'\)`/);
 });
 
 test('зворотний фільтр NULL-безпечний', () => {
-  assert.match(store, /NOT_BLOCKED_FILTER = `\(deal_blocker IS NULL OR deal_blocker NOT IN \('no_slot','no_parts','out_of_scope'\)\)`/);
+  assert.match(filters, /NOT_BLOCKED_FILTER = `\(deal_blocker IS NULL OR deal_blocker NOT IN \('no_slot','no_parts','out_of_scope'\)\)`/);
 });
 
 test('обидві колонки причин створюються', () => {
@@ -96,7 +97,7 @@ test('обидві колонки причин створюються', () => {
 });
 
 test('лічильник «нема деталей» є в агрегаті', () => {
-  assert.match(store, /blockedNoParts/);
+  assert.match(filters, /blockedNoParts/);
 });
 
 test('динаміка не губить деталі в колонці Профіль', () => {

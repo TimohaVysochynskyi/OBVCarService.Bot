@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { migrate } from '../core/store.js';
+import { migrate } from '../platform/db/pool.js';
 import { processCallsForRange } from '../jobs/processCalls.js';
 
 async function main() {

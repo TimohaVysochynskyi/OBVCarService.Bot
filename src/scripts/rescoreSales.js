@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, getSalesCallsWithSegments, updateCallScore } from '../core/store.js';
+import { getSalesCallsWithSegments, updateCallScore } from '../features/analysis/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { classifyCall } from '../core/classifyCall.js';
 
 

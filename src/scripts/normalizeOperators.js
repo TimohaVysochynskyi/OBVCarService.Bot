@@ -1,5 +1,11 @@
 import 'dotenv/config';
-import { migrate, reassignCallsByExtension, renameManagerEverywhere, deleteCallsByExtension, clearAllReportSegments } from '../core/store.js';
+import {
+  deleteCallsByExtension,
+  reassignCallsByExtension,
+  renameManagerEverywhere,
+} from '../features/operators/repo.js';
+import { clearAllReportSegments } from '../features/reporting/repo.js';
+import { migrate } from '../platform/db/pool.js';
 
 const PERSONAL_OPERATORS = { '903': 'Роман', '904': 'Андрій', '905': 'Володимир' };
 const RENAMES = [

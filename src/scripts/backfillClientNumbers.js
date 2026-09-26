@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { migrate, updateClientInfoIfMissing, getEarliestCallTime } from '../core/store.js';
+import { getEarliestCallTime, updateClientInfoIfMissing } from '../features/ingest/repo.js';
+import { migrate } from '../platform/db/pool.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;

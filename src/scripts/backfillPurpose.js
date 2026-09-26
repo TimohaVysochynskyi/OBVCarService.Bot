@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { getCallsMissingPurpose, updateCallAnalysis } from '../core/store.js';
+import { getCallsMissingPurpose, updateCallAnalysis } from '../features/analysis/repo.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
 import { displayName } from '../bot/operators.js';
 

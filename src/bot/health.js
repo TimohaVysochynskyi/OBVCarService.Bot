@@ -1,13 +1,9 @@
 import { InlineKeyboard } from 'grammy';
 import { spawn } from 'node:child_process';
-import {
-  pingDb,
-  getHeartbeat,
-  getCheckpoint,
-  listKbDocs,
-  summarizeErrorLog,
-  getAudioArchiveStats,
-} from '../core/store.js';
+import { getAudioArchiveStats, getCheckpoint } from '../features/ingest/repo.js';
+import { listKbDocs } from '../features/knowledge-base/repo.js';
+import { getHeartbeat, summarizeErrorLog } from '../features/ops/repo.js';
+import { pingDb } from '../platform/db/pool.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 import { getElevenLabsBalance, creditsToUsd, minBalanceUsd } from '../core/elevenlabs.js';
 import { freeSpaceMb } from '../core/audioStore.js';
