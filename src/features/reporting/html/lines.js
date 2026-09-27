@@ -95,8 +95,5 @@ function linesSection(report) {
 }
 
 export {
-  LM_ROWS,
-  lineCard,
-  lineManagerTable,
   linesSection,
 };

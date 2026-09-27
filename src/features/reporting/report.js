@@ -403,4 +403,4 @@ function startScheduler(api) {
   }, 30000);
 }
 
-export { buildManagerEvidenceReport, deliverManagerReport, sendManualReport, startScheduler, registerReportActions };
+export { deliverManagerReport, sendManualReport, startScheduler, registerReportActions };

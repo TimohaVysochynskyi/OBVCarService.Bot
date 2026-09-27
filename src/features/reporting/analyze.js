@@ -483,12 +483,8 @@ async function reduceFindings(managerName, calls, stats) {
 
 export {
   mergeFindings,
-  applyMergeGroups,
-  MAX_PERIOD_FINDINGS,
   reduceFindings,
   reduceFindingsConsistent,
-  assembleFindings,
-  corroborate,
   MIN_EVIDENCE,
   MAX_PHRASES,
   getAnalyzePrompt,

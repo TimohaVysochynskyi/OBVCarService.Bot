@@ -116,4 +116,4 @@ async function attachClips(report, { dir = siteDir() } = {}) {
   return stats;
 }
 
-export { attachClips, siteDir, clipName, AUDIO_DIR };
+export { attachClips, siteDir, AUDIO_DIR };

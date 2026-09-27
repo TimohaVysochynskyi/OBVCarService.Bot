@@ -118,12 +118,8 @@ function timecodedDialogue(segments) {
 }
 
 export {
-  detectInterruptions,
-  detectLongPauses,
   dialogueMetrics,
   metricsPromptBlock,
   timecodedDialogue,
-  mmss,
   longPauseSec,
-  CUT_OFF_RE,
 };

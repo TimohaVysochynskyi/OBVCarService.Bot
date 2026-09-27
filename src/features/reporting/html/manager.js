@@ -108,11 +108,5 @@ function managerCard(manager, months) {
 }
 
 export {
-  SERIES,
-  categoryStrip,
-  findingBlock,
-  findingColumn,
   managerCard,
-  partialNote,
-  trendBlock,
 };

@@ -103,7 +103,6 @@ async function seedDirectors() {
 export {
   ROLES,
   ROLE_LABELS,
-  ADMIN_ROLES,
   isAdmin,
   canAccess,
   featureOf,

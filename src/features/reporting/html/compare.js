@@ -75,6 +75,5 @@ function compareSection(report) {
 }
 
 export {
-  CMP_METRICS,
   compareSection,
 };

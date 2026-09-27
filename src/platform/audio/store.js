@@ -144,13 +144,10 @@ async function freeSpaceMb() {
 
 export {
   storageRoot,
-  relPathFor,
-  absolutePath,
   fetchRecording,
   saveRecording,
   storeRecording,
   readStoredRecording,
-  getRecording,
   getRecordingForCall,
   freeSpaceMb,
 };

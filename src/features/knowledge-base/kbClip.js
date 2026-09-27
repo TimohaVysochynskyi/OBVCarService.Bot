@@ -104,4 +104,4 @@ async function sendDocExcerpt(api, chatId, doc, pageStart, pageEnd, { replyToMes
   return true;
 }
 
-export { downloadOriginal, cutPages, sendDocExcerpt, excerptFilename, pagesPhrase };
+export { downloadOriginal, sendDocExcerpt };

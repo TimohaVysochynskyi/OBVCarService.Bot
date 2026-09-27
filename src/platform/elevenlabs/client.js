@@ -250,9 +250,6 @@ async function diarize(audioBlob, managerName, { audioPath } = {}) {
 
 export {
   transcribeDiarized,
-  sttDiarize,
-  buildTurns,
-  heuristicManager,
   getElevenLabsBalance,
   creditsToUsd,
   minBalanceUsd,

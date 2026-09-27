@@ -717,13 +717,9 @@ export {
   promptQuestion,
   openFiles,
   openKbDocById,
-  ingestPages,
-  extractText,
   extractPages,
   chunkDocument,
   embedTexts,
   embedInput,
-  toPrefixTsQuery,
-  answerSources,
   sendAnswerSources,
 };

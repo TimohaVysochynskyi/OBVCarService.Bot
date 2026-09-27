@@ -41,4 +41,4 @@ async function fetchOk(provider, op, url, init = {}, options = {}) {
   return res;
 }
 
-export { fetchOk, fetchRaw, DEFAULT_TIMEOUT_MS };
+export { fetchOk, fetchRaw };

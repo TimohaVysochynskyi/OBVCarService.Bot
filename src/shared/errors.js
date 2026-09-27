@@ -262,18 +262,11 @@ function describeError(
 }
 
 export {
-  AppError,
   appError,
   httpError,
-  incidentId,
   classify,
   describeError,
-  technicalOf,
-  technicalLineOf,
-  isPermanent,
   isHopeless,
-  modelContent,
   parseModelJson,
   reviveError,
-  RULES,
 };

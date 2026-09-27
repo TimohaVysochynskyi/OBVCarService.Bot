@@ -257,10 +257,6 @@ async function getRunningJob() {
   return rows[0] || null;
 }
 
-async function getJob(id) {
-  const { rows } = await pool.query(`SELECT ${JOB_COLS} FROM jobs WHERE id = $1`, [id]);
-  return rows[0] || null;
-}
 
 async function saveJobProgress(id, { cursor, done, skipped, failed }) {
   const { rows } = await pool.query(
@@ -321,7 +317,6 @@ export {
   updateCallScore,
   createJob,
   getRunningJob,
-  getJob,
   saveJobProgress,
   finishJob,
   cancelRunningJob,

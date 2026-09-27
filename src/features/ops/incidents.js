@@ -134,4 +134,4 @@ function registerIncidents(bot) {
   });
 }
 
-export { registerIncidents, openIncidents, copyBlock, incidentScreen };
+export { registerIncidents, openIncidents };

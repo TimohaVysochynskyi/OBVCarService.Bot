@@ -136,4 +136,4 @@ function registerErrorActions(bot) {
   });
 }
 
-export { errorGuard, installBotCatch, registerErrorActions, reportToUser, actionOf };
+export { errorGuard, installBotCatch, registerErrorActions, reportToUser };

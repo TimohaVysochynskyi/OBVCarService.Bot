@@ -100,4 +100,4 @@ async function getCallRecordUrl(generalCallId) {
   return data.url || data.response?.record || data.record;
 }
 
-export { listCallsForPeriod, getCallRecordUrl, extractClientName };
+export { listCallsForPeriod, getCallRecordUrl };

@@ -68,5 +68,4 @@ export {
   LINE_KINDS,
   LINE_NUMBERS,
   lineInfo,
-  parsePersonalOperators,
 };

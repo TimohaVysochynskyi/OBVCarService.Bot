@@ -536,4 +536,4 @@ async function buildGlobalReport({
   };
 }
 
-export { buildGlobalReport, buildLines, buildIntro, monthTitle, ALL, TOP_N };
+export { buildGlobalReport, buildLines, buildIntro, monthTitle, ALL };

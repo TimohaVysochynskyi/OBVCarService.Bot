@@ -68,4 +68,4 @@ async function cutMp3(src, out, from, duration) {
   ]);
 }
 
-export { ffmpegAvailable, runFfmpeg, cutMp3, FFMPEG, FFMPEG_TIMEOUT_MS };
+export { ffmpegAvailable, cutMp3, FFMPEG_TIMEOUT_MS };

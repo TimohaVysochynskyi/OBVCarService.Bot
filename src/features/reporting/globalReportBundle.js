@@ -62,4 +62,4 @@ async function zipSite(dir, zipPath) {
   return zipPath;
 }
 
-export { buildSite, zipSite, ASSETS_DIR, STATIC_DIR };
+export { buildSite, zipSite };

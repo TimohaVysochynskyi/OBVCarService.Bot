@@ -161,4 +161,4 @@ async function get(path, { op, timeoutMs }) {
   return transport(op, path, { headers: {} }, { timeoutMs });
 }
 
-export { post, postForm, get, useTransport, usageReport, usageLine, resetUsage, estimateTokens, waitMsFor, TPM_BY_MODEL, PRICE_PER_MTOK };
+export { post, get, useTransport, usageReport, usageLine, resetUsage, estimateTokens, waitMsFor, TPM_BY_MODEL, PRICE_PER_MTOK };

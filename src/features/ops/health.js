@@ -176,4 +176,4 @@ function registerHealth(bot, kbState) {
   });
 }
 
-export { registerHealth, openHealth, healthReport };
+export { registerHealth, openHealth };

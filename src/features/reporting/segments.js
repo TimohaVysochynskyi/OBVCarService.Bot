@@ -277,11 +277,6 @@ async function collectRangeFindings(
 
 export {
   assembleReport,
-  getOrComputeScheduledSegment,
   collectRangeFindings,
-  enumerateDays,
   analyzeSegment,
-  enumerateSegments,
-  SEGMENT_ANALYSIS_VERSION,
-  PASSES,
 };

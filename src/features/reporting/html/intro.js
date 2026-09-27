@@ -42,7 +42,6 @@ function introSection(report) {
 }
 
 export {
-  INTRO_COLOR,
   introBar,
   introCard,
   introSection,

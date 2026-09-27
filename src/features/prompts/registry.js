@@ -130,7 +130,6 @@ const jobOf = (key) => JOBS[entryOf(key)?.job] || null;
 
 export {
   definePrompt,
-  getPrompt,
   promptInfo,
   savePrompt,
   resetPrompt,
@@ -140,5 +139,4 @@ export {
   entryOf,
   jobOf,
   JOBS,
-  GROUPS,
 };

@@ -110,4 +110,4 @@ const introRules = definePrompt({
     '⚠️ Сама перевірка (цитата має бути справжньою реплікою менеджера) забезпечується кодом і не редагується.',
 });
 
-export { detectIntro, verifyIntro, introRules, COMPANY_PATTERNS, companyMatches, nameStems, normalize, INTRO_TURNS };
+export { detectIntro, verifyIntro, introRules, nameStems, normalize };

@@ -16,4 +16,4 @@ const REPO_ROOT = findRepoRoot(dirname(fileURLToPath(import.meta.url)));
 
 const dataDir = (...parts) => join(REPO_ROOT, 'data', ...parts);
 
-export { REPO_ROOT, dataDir };
+export { dataDir };

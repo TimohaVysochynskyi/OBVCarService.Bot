@@ -272,4 +272,4 @@ function registerRoles(bot) {
   });
 }
 
-export { registerRoles, openRolesMenu, addByPhoneText, MANAGEABLE_ROLES };
+export { registerRoles, openRolesMenu, addByPhoneText };
