@@ -8,7 +8,7 @@ import { registerStats, statsPicker, openMyReport } from '../../features/reporti
 import { registerArchive, archivePicker } from '../../features/archive/archive.js';
 import { registerKnowledgeBase, answerQuestion, sendAnswerSources, promptQuestion, openFiles, openKbDocById } from '../../features/knowledge-base/kb.js';
 import { sendManualReport, startScheduler, registerReportActions } from '../../features/reporting/report.js';
-import { registerPrompt, openPromptMenu, savePromptText } from '../../features/prompts/ui.js';
+import { registerPrompt, openPromptMenu, savePromptText, resumeInterruptedRun } from '../../features/prompts/ui.js';
 import { registerRoles, openRolesMenu, addByPhoneText } from '../../features/access/roles.js';
 import { registerSettings, openSettings, addRecipientByIdText } from '../../features/ops/settings.js';
 import { registerIncidents, openIncidents } from '../../features/ops/incidents.js';
@@ -309,6 +309,8 @@ async function main() {
     .catch((e) => console.error(`[bot] setChatMenuButton failed: ${e.message}`));
 
   startScheduler(bot.api);
+
+  resumeInterruptedRun(bot.api).catch((e) => console.error(`[bot] resume failed: ${e.message}`));
 
   startHeartbeat('bot');
   setInterval(() => {

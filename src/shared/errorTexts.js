@@ -370,6 +370,9 @@ const LOG = {
   period: (days, total) => `За ${days} днів зафіксовано: ${total}`,
   summaryRow: (code, count, lastAt) => `${code} — ${count}, останній ${lastAt}`,
   pickHint: 'Оберіть інцидент, щоб побачити подробиці:',
+  jobsTitle: 'Перерахунки:',
+  jobRow: (kind, status, done, pct, at) =>
+    `${status} · ${kind} — перераховано ${done}, пройдено ${pct}% (${at})`,
   empty: (days) => `🩺 Журнал інцидентів
 
 За останні ${days} днів помилок не зафіксовано.`,

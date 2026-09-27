@@ -1,5 +1,6 @@
 import { InlineKeyboard } from 'grammy';
 import { getErrorLogByIncident, listErrorLog, summarizeErrorLog } from './repo.js';
+import { getRecentJobs } from '../analysis/reprocess.js';
 import { LOG } from '../../shared/errorTexts.js';
 import { showScreen, sendLong } from '../../platform/telegram/ui.js';
 import { formatKyiv } from '../../shared/time.js';
@@ -20,16 +21,33 @@ function buttonTime(at) {
 
 const SOURCE_LABEL = { bot: 'бот', poll: 'збір дзвінків' };
 
+const JOB_STATUS = { running: '▶️ виконується', done: '✅ завершено', cancelled: '⛔️ зупинено', failed: '⚠️ впав' };
+
+function jobLines(jobs) {
+  if (!jobs.length) return [];
+  const lines = [LOG.jobsTitle, ''];
+  for (const job of jobs) {
+    const pct = job.total ? Math.round((job.cursor / job.total) * 100) : 0;
+    lines.push(LOG.jobRow(job.kind, JOB_STATUS[job.status] || job.status, job.done, pct, buttonTime(job.updatedAt)));
+  }
+  lines.push('');
+  return lines;
+}
+
 async function summaryScreen() {
   const since = new Date(Date.now() - SUMMARY_DAYS * 24 * 3600 * 1000);
-  const [summary, recent] = await Promise.all([summarizeErrorLog(since), listErrorLog(RECENT_LIMIT)]);
+  const [summary, recent, jobs] = await Promise.all([
+    summarizeErrorLog(since),
+    listErrorLog(RECENT_LIMIT),
+    getRecentJobs(3).catch(() => []),
+  ]);
 
-  if (!recent.length) {
+  if (!recent.length && !jobs.length) {
     return { text: LOG.empty(SUMMARY_DAYS), kb: new InlineKeyboard().text('« Назад до меню', 'menu') };
   }
 
   const total = summary.reduce((n, row) => n + row.count, 0);
-  const lines = [LOG.title, '', LOG.period(SUMMARY_DAYS, total), ''];
+  const lines = [LOG.title, '', ...jobLines(jobs), LOG.period(SUMMARY_DAYS, total), ''];
   for (const row of summary) lines.push(LOG.summaryRow(row.code, row.count, buttonTime(row.lastAt)));
   lines.push('', LOG.pickHint);
 

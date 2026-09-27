@@ -239,6 +239,61 @@ async function updateCallScore(generalCallId, score) {
   await pool.query('UPDATE calls SET communication_score = $2 WHERE general_call_id = $1', [generalCallId, score]);
 }
 
+const JOB_COLS = `id, kind, status, params, cursor, total, done, skipped, failed, error,
+  chat_id AS "chatId", message_id AS "messageId", created_at AS "createdAt"`;
+
+async function createJob({ kind, params, total, chatId, messageId }) {
+  const { rows } = await pool.query(
+    `INSERT INTO jobs (kind, params, total, chat_id, message_id)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING ${JOB_COLS}`,
+    [kind, jsonParam(params), total, chatId ?? null, messageId ?? null]
+  );
+  return rows[0];
+}
+
+async function getRunningJob() {
+  const { rows } = await pool.query(`SELECT ${JOB_COLS} FROM jobs WHERE status = 'running' LIMIT 1`);
+  return rows[0] || null;
+}
+
+async function getJob(id) {
+  const { rows } = await pool.query(`SELECT ${JOB_COLS} FROM jobs WHERE id = $1`, [id]);
+  return rows[0] || null;
+}
+
+async function saveJobProgress(id, { cursor, done, skipped, failed }) {
+  const { rows } = await pool.query(
+    `UPDATE jobs SET cursor = $2, done = $3, skipped = $4, failed = $5, updated_at = now()
+     WHERE id = $1 AND status = 'running'
+     RETURNING status`,
+    [id, cursor, done, skipped, failed]
+  );
+  return rows[0]?.status === 'running';
+}
+
+async function finishJob(id, { status, error = null }) {
+  await pool.query(
+    `UPDATE jobs SET status = $2, error = $3, updated_at = now() WHERE id = $1 AND status = 'running'`,
+    [id, status, error]
+  );
+}
+
+async function cancelRunningJob() {
+  const { rows } = await pool.query(
+    `UPDATE jobs SET status = 'cancelled', updated_at = now() WHERE status = 'running' RETURNING id`
+  );
+  return rows[0]?.id ?? null;
+}
+
+async function getRecentJobs(limit = 5) {
+  const { rows } = await pool.query(
+    `SELECT ${JOB_COLS}, updated_at AS "updatedAt" FROM jobs ORDER BY created_at DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
 export {
   updateCallAnalysis,
   updateCallFullAnalysis,
@@ -264,4 +319,11 @@ export {
   updateCallTranscript,
   getSalesCallsWithSegments,
   updateCallScore,
+  createJob,
+  getRunningJob,
+  getJob,
+  saveJobProgress,
+  finishJob,
+  cancelRunningJob,
+  getRecentJobs,
 };

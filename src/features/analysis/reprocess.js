@@ -1,7 +1,13 @@
 import {
+  cancelRunningJob,
   countCallsWithText,
+  createJob,
+  finishJob,
   getCallHeadsForReprocess,
   getCallsForReprocess,
+  getRecentJobs,
+  getRunningJob,
+  saveJobProgress,
   setCallBlocker,
   setCallPurpose,
   setClientDeclineReason,
@@ -121,56 +127,119 @@ async function estimate(job, scope) {
 }
 
 
-let current = null;
+const PROGRESS_EVERY = 1;
 
-const isRunning = () => Boolean(current);
-const stop = () => {
-  if (current) current.stopped = true;
-};
+let stopping = false;
 
-async function run({ job, scope, onProgress }) {
-  if (current) throw new Error('Один перерахунок уже виконується');
+const isRunning = async () => Boolean(await getRunningJob());
+
+async function stop() {
+  stopping = true;
+  return cancelRunningJob();
+}
+
+async function startRun({ job, scope, chatId, messageId }) {
   const runner = RUNNERS[job];
   if (!runner) throw new Error(`Невідомий перерахунок: ${job}`);
-
   const total = await countCallsWithText();
   const { offset, limit } = scopeWindow(scope, total);
-  const pause = PAUSE_MS[job] ?? DEFAULT_PAUSE_MS;
+  try {
+    return await createJob({ kind: job, params: { scope, offset, limit }, total: limit, chatId, messageId });
+  } catch (err) {
+    if (/jobs_single_running/.test(err.message)) throw new Error('Один перерахунок уже виконується');
+    throw err;
+  }
+}
 
-  const state = { job, scope, done: 0, skipped: 0, failed: 0, applicable: 0, stopped: false, startedAt: Date.now() };
-  current = state;
+async function runJob(row, { onProgress } = {}) {
+  const runner = RUNNERS[row.kind];
+  if (!runner) {
+    await finishJob(row.id, { status: 'failed', error: `Невідомий перерахунок: ${row.kind}` });
+    return null;
+  }
+
+  const { offset = 0, limit = row.total ?? 0 } = row.params || {};
+  const pause = PAUSE_MS[row.kind] ?? DEFAULT_PAUSE_MS;
+  const state = {
+    job: row.kind,
+    scope: row.params?.scope,
+    done: row.done,
+    skipped: row.skipped,
+    failed: row.failed,
+    cursor: row.cursor,
+    stopped: false,
+    startedAt: new Date(row.createdAt).getTime(),
+    total: limit,
+  };
+  stopping = false;
 
   try {
-    for (let seen = 0; seen < limit && !state.stopped; seen += PAGE) {
-      const calls = await getCallsForReprocess({ limit: Math.min(PAGE, limit - seen), offset: offset + seen });
+    while (state.cursor < limit && !state.stopped) {
+      const take = Math.min(PAGE, limit - state.cursor);
+      const calls = await getCallsForReprocess({ limit: take, offset: offset + state.cursor });
       if (!calls.length) break;
 
       for (const call of calls) {
-        if (state.stopped) break;
-        if (!runner.applies(call)) {
+        if (stopping) {
+          state.stopped = true;
+          break;
+        }
+        if (runner.applies(call)) {
+          try {
+            await runner.run(call);
+            state.done += 1;
+          } catch (err) {
+            state.failed += 1;
+            console.error(`[reprocess:${row.kind}] ${call.generalCallId}: ${err.message}`);
+          }
+        } else {
           state.skipped += 1;
-          continue;
         }
-        state.applicable += 1;
-        try {
-          await runner.run(call);
-          state.done += 1;
-        } catch (err) {
-          state.failed += 1;
-          console.error(`[reprocess:${job}] ${call.generalCallId}: ${err.message}`);
+        state.cursor += 1;
+
+        if (state.cursor % PROGRESS_EVERY === 0) {
+          const alive = await saveJobProgress(row.id, state);
+          if (!alive) {
+            state.stopped = true;
+            break;
+          }
         }
-        if (onProgress) await onProgress({ ...state, total: limit });
-        if (pause) await new Promise((r) => setTimeout(r, pause));
+        if (onProgress) await onProgress({ ...state });
+        if (pause && !state.stopped) await new Promise((r) => setTimeout(r, pause));
       }
     }
-    return { ...state, total: limit };
-  } finally {
-    current = null;
+  } catch (err) {
+    await finishJob(row.id, { status: 'failed', error: err.message });
+    throw err;
   }
+
+  await saveJobProgress(row.id, state);
+  await finishJob(row.id, { status: state.stopped ? 'cancelled' : 'done' });
+  return { ...state, stopped: state.stopped };
+}
+
+async function resumeJob({ onProgress } = {}) {
+  const row = await getRunningJob();
+  if (!row) return null;
+  console.log(`[reprocess] продовжую перерахунок «${row.kind}» з позиції ${row.cursor}/${row.total}`);
+  return runJob(row, { onProgress });
 }
 
 async function invalidateReportCache() {
   await clearAllReportSegments();
 }
 
-export { run, estimate, stop, isRunning, blockCount, BLOCK, RUNNERS, invalidateReportCache };
+export {
+  getRunningJob,
+  getRecentJobs,
+  startRun,
+  runJob,
+  resumeJob,
+  estimate,
+  stop,
+  isRunning,
+  blockCount,
+  BLOCK,
+  RUNNERS,
+  invalidateReportCache,
+};

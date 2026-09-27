@@ -9,7 +9,19 @@ import {
   resetPrompt,
   jobOf,
 } from './catalog.js';
-import { run, estimate, stop, isRunning, blockCount, BLOCK, invalidateReportCache } from '../analysis/reprocess.js';
+import {
+  getRunningJob,
+  startRun as createRun,
+  runJob,
+  resumeJob,
+  estimate,
+  stop,
+  isRunning,
+  blockCount,
+  BLOCK,
+  invalidateReportCache,
+} from '../analysis/reprocess.js';
+import { JOBS } from './registry.js';
 import { sendLong, showScreen } from '../../platform/telegram/ui.js';
 
 
@@ -185,11 +197,62 @@ async function confirmScreen(key, scopeRaw) {
 
 const PROGRESS_MS = 5000;
 
+function progressReporter(api, chatId, messageId, title) {
+  const stopKb = new InlineKeyboard().text('⛔️ Зупинити', 'prompt:stop');
+  let lastEdit = 0;
+  return async (s) => {
+    if (Date.now() - lastEdit < PROGRESS_MS) return;
+    lastEdit = Date.now();
+    const pct = s.total ? Math.round((s.cursor / s.total) * 100) : 0;
+    await api
+      .editMessageText(
+        chatId,
+        messageId,
+        `▶️ ${title}\n\nОброблено: ${s.done} · пропущено: ${s.skipped}${s.failed ? ` · помилок: ${s.failed}` : ''}\nПройдено ${pct}% обсягу`,
+        { reply_markup: stopKb }
+      )
+      .catch(() => {});
+  };
+}
+
+async function resumeInterruptedRun(api) {
+  try {
+    const row = await getRunningJob();
+    if (!row) return;
+    const title = JOBS[row.kind]?.title || row.kind;
+    const report = row.chatId && row.messageId
+      ? progressReporter(api, row.chatId, row.messageId, title)
+      : async () => {};
+    const finished = await resumeJob({ onProgress: report });
+    if (!finished) return;
+    console.log(`[prompt] перерахунок «${finished.job}» продовжено після перезапуску і завершено`);
+    if (row.chatId && row.messageId) {
+      await api
+        .editMessageText(
+          row.chatId,
+          row.messageId,
+          `${finished.stopped ? '⛔️ Зупинено' : '✅ Готово'} — ${title}
+
+` +
+            `Перераховано: ${finished.done}
+Пропущено (не підходили): ${finished.skipped}
+` +
+            (finished.failed ? `Не вдалося: ${finished.failed}
+` : '') +
+            'Прогін продовжився після перезапуску бота.'
+        )
+        .catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[prompt] не вдалося продовжити перерахунок: ${err.message}`);
+  }
+}
+
 async function startRun(ctx, key, scopeRaw) {
   const e = entryOf(key);
   const job = jobOf(key);
   if (!e || !job) return;
-  if (isRunning()) {
+  if (await isRunning()) {
     await showScreen(ctx, '⏳ Один перерахунок уже виконується. Дочекайтесь його завершення.', new InlineKeyboard().text(MENU, 'menu'));
     return;
   }
@@ -212,7 +275,13 @@ async function startRun(ctx, key, scopeRaw) {
 
   let result;
   try {
-    result = await run({ job: e.job, scope, onProgress });
+    const row = await createRun({
+      job: e.job,
+      scope,
+      chatId: ctx.chat.id,
+      messageId: msg.message_id,
+    });
+    result = await runJob(row, { onProgress });
   } catch (err) {
     await ctx.api.editMessageText(ctx.chat.id, msg.message_id, `⚠️ Перерахунок зупинився: ${err.message}`).catch(() => {});
     return;
@@ -347,7 +416,7 @@ function registerPrompt(bot) {
   });
 
   bot.callbackQuery('prompt:stop', async (ctx) => {
-    stop();
+    await stop();
     await ctx.answerCallbackQuery({ text: 'Зупиняю після поточного дзвінка' });
   });
 
@@ -370,4 +439,4 @@ function registerPrompt(bot) {
   });
 }
 
-export { registerPrompt, openPromptMenu, savePromptText };
+export { resumeInterruptedRun, registerPrompt, openPromptMenu, savePromptText };
