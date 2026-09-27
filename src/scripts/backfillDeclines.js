@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { usageLine } from '../platform/openai/client.js';
 import { getUnexplainedDeclines, setClientDeclineReason } from '../features/analysis/repo.js';
 import { getDeclineReasonCounts } from '../features/reporting/repo.js';
 import { migrate } from '../platform/db/pool.js';
@@ -55,6 +56,7 @@ async function main() {
   }
   console.log(`  без доказу → «причина не прозвучала»: ${downgraded}`);
   console.log(`  помилки: ${failed}`);
+  console.log(`  витрачено: ${usageLine()}`);
 
   console.log('\n[backfillDeclines] --- УСІ ПРИЧИНИ В БАЗІ ---');
   for (const row of await getDeclineReasonCounts()) {

@@ -1,4 +1,5 @@
 import { InlineKeyboard } from 'grammy';
+import { pingModel } from '../platform/openai/llm.js';
 import { spawn } from 'node:child_process';
 import { getAudioArchiveStats, getCheckpoint } from '../features/ingest/repo.js';
 import { listKbDocs } from '../features/knowledge-base/repo.js';
@@ -7,7 +8,6 @@ import { pingDb } from '../platform/db/pool.js';
 import { listCallsForPeriod } from '../core/binotel.js';
 import { getElevenLabsBalance, creditsToUsd, minBalanceUsd } from '../core/elevenlabs.js';
 import { freeSpaceMb } from '../core/audioStore.js';
-import { fetchOk } from '../core/http.js';
 import { classify } from '../core/errors.js';
 import { HEALTH } from '../core/errorTexts.js';
 import { ffmpegAvailable } from '../core/ffmpeg.js';
@@ -72,13 +72,7 @@ async function checkBinotel() {
 async function checkOpenAi() {
   if (!config.openai.apiKey) return { status: FAIL, detail: HEALTH.noKey };
   const model = config.openai.analyzeModel;
-  await fetchOk(
-    'openai',
-    'перевірка ключа',
-    `https://api.openai.com/v1/models/${encodeURIComponent(model)}`,
-    { headers: { Authorization: `Bearer ${config.openai.apiKey}` } },
-    { timeoutMs: PROBE_TIMEOUT_MS }
-  );
+  await pingModel(model, { op: 'перевірка ключа', timeoutMs: PROBE_TIMEOUT_MS });
   return { status: OK, detail: HEALTH.openAiOk };
 }
 

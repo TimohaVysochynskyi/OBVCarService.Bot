@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { usageLine } from '../platform/openai/client.js';
 import { getCallsMissingBlocker, resetAllBlockers, setCallBlocker } from '../features/analysis/repo.js';
 import { clearAllReportSegments, getBlockerStats } from '../features/reporting/repo.js';
 import { migrate } from '../platform/db/pool.js';
@@ -91,6 +92,7 @@ async function main() {
   console.log(`  помилки (повторити): ${failed}`);
   console.log(`  не перевірено (лишились NULL): ${unchecked}`);
   console.log(`  у БД тепер: черга ${after.noSlot}, профіль ${after.outOfScope}, не перевірено ${after.unchecked}`);
+  console.log(`  витрачено: ${usageLine()}`);
 
   if (!keepCache && (noSlot || outOfScope)) {
     const n = await clearAllReportSegments();

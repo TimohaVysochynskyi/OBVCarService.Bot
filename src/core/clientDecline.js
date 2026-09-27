@@ -1,7 +1,5 @@
-import { withRetry } from './retry.js';
 import { definePrompt } from './prompts.js';
-import { parseModelJson } from './errors.js';
-import { fetchOk } from './http.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { normalize } from './quoteMatch.js';
 import { CLIENT_REASON_KEYS, CLIENT_REASONS, reasonPromptList } from './declineReasons.js';
 import { config } from '../shared/config.js';
@@ -47,25 +45,19 @@ async function classifyClientDecline(transcript) {
   const text = String(transcript || '').trim();
   if (!text) return null;
 
-  const raw = await withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'причина відмови клієнта', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model(),
-          messages: [
-            { role: 'system', content: await declinePrompt() },
-            { role: 'user', content: text.slice(0, MAX_CHARS) },
-          ],
-          temperature: 0,
-          response_format: { type: 'json_schema', json_schema: SCHEMA },
-        }),
-      });
-      return parseModelJson(await res.json(), 'openai', 'причина відмови клієнта');
-    },
-    { attempts: 3, delayMs: 1500, label: 'OpenAI client decline' }
-  );
+  const raw = await chatJson({
+    op: 'причина відмови клієнта',
+    model: model(),
+    messages: [
+      { role: 'system', content: await declinePrompt() },
+      { role: 'user', content: text.slice(0, MAX_CHARS) },
+    ],
+    temperature: 0,
+    schema: SCHEMA,
+    attempts: 3,
+    delayMs: 1500,
+    label: 'OpenAI client decline',
+  });
 
   if (!CLIENT_REASON_KEYS.includes(raw.reason)) return null;
 

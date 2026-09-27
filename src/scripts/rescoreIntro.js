@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { usageLine } from '../platform/openai/client.js';
 import { getRecentCallsForIntro, updateCallIntro } from '../features/analysis/repo.js';
 import { migrate } from '../platform/db/pool.js';
 import { analyzeCallBehaviors } from '../core/analyzeCall.js';
@@ -87,6 +88,7 @@ async function main() {
   }
 
   console.log(`\n  розійшлось із попередньою (правиловою) оцінкою: ${changed.length} з ${done}`);
+  console.log(`  витрачено: ${usageLine()}`);
   for (const c of changed.slice(0, 12)) {
     const line = (c.segments || []).find((s) => s?.role === 'manager')?.text || '';
     console.log(

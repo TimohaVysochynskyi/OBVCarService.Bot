@@ -1,7 +1,5 @@
-import { withRetry } from './retry.js';
 import { definePrompt } from './prompts.js';
-import { parseModelJson } from './errors.js';
-import { fetchOk } from './http.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { findQuote } from './quoteMatch.js';
 import { pseudoSegments } from './analyzeCall.js';
 import { SERVICE_REASON_KEYS, bucketOfReason, reasonsOfBucket, reasonPromptList } from './declineReasons.js';
@@ -84,24 +82,21 @@ const VERIFY_SCHEMA = {
 };
 
 async function verifyBlocker(transcript, blocker, quote) {
-  const res = await fetchOk('openai', 'перевірка незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: model(),
-      messages: [
-        { role: 'system', content: await blockerReviewPrompt() },
-        {
-          role: 'user',
-          content:
-            `Твердження: ${BLOCKER_LABELS[blocker]}\nЦитата менеджера: «${quote}»\n\nПовна розмова:\n${transcript}`,
-        },
-      ],
-      temperature: 0,
-      response_format: { type: 'json_schema', json_schema: VERIFY_SCHEMA },
-    }),
+  return chatJson({
+    op: 'перевірка незакритої угоди',
+    model: model(),
+    messages: [
+      { role: 'system', content: await blockerReviewPrompt() },
+      {
+        role: 'user',
+        content:
+          `Твердження: ${BLOCKER_LABELS[blocker]}\nЦитата менеджера: «${quote}»\n\nПовна розмова:\n${transcript}`,
+      },
+    ],
+    temperature: 0,
+    schema: VERIFY_SCHEMA,
+    attempts: 1,
   });
-  return parseModelJson(await res.json(), 'openai', 'перевірка незакритої угоди');
 }
 
 function stripRoleLabel(quote) {
@@ -112,28 +107,22 @@ async function detectDealBlocker(transcript, segments, managerName) {
   const verifySegments = Array.isArray(segments) && segments.length ? segments : pseudoSegments(transcript);
   if (!transcript || !verifySegments.length) return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };
 
-  const raw = await withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'пошук незакритої угоди', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model(),
-          messages: [
-            { role: 'system', content: await blockerPrompt() },
-            {
-              role: 'user',
-              content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,
-            },
-          ],
-          temperature: 0,
-          response_format: { type: 'json_schema', json_schema: SCHEMA },
-        }),
-      });
-      return parseModelJson(await res.json(), 'openai', 'пошук незакритої угоди');
-    },
-    { attempts: 4, delayMs: 4000, label: 'OpenAI deal blocker' }
-  );
+  const raw = await chatJson({
+    op: 'пошук незакритої угоди',
+    model: model(),
+    messages: [
+      { role: 'system', content: await blockerPrompt() },
+      {
+        role: 'user',
+        content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,
+      },
+    ],
+    temperature: 0,
+    schema: SCHEMA,
+    attempts: 4,
+    delayMs: 4000,
+    label: 'OpenAI deal blocker',
+  });
 
   const blocker = DEAL_BLOCKERS.includes(raw.blocker) ? raw.blocker : NO_BLOCKER;
   if (blocker === NO_BLOCKER) return { blocker: NO_BLOCKER, reason: null, quote: null, start: null, end: null };

@@ -112,7 +112,9 @@ test('пауза росте з номером спроби', () => {
 });
 
 test('reduce звіту має 4 спроби замість 2', () => {
-  assert.match(readSrc('bot/analyze.js'), /attempts: 4, delayMs: 3000, label: `OpenAI reduce/);
+  const reduce = readSrc('bot/analyze.js').match(/op: 'аналіз дзвінків за період'[\s\S]*?\}\);/)[0];
+  assert.match(reduce, /attempts: 4/);
+  assert.match(reduce, /delayMs: 3000/);
 });
 
 test('збій аналізу → беремо вже пораховане, звіт не гине', () => {

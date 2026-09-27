@@ -1,7 +1,5 @@
-import { withRetry } from "./retry.js";
-import { parseModelJson } from "./errors.js";
-import { fetchOk } from "./http.js";
 import { SALES_STAGES } from "./stages.js";
+import { chatJson } from '../platform/openai/llm.js';
 import { definePrompt } from "./prompts.js";
 import { dialogueMetrics, metricsPromptBlock, timecodedDialogue } from "./dialogueMetrics.js";
 import { config } from '../shared/config.js';
@@ -52,28 +50,18 @@ async function classifyCall(transcript, segments = null) {
   const timecoded = timecodedDialogue(segments);
   const facts = metricsPromptBlock(dialogueMetrics(segments));
   const userContent = [timecoded || transcript, facts].filter(Boolean).join('\n\n');
-  return withRetry(
-    async () => {
-      const res = await fetchOk("openai", "оцінка дзвінка", "https://api.openai.com/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: config.openai.analyzeModel,
-          messages: [
-            { role: "system", content: system },
-            { role: "user", content: userContent },
-          ],
-          response_format: { type: "json_schema", json_schema: SCHEMA },
-        }),
-      });
-      const data = await res.json();
-      return parseModelJson(data, 'openai', 'оцінка дзвінка');
-    },
-    { attempts: 3, delayMs: 1500, label: "OpenAI call classification" },
-  );
+  return chatJson({
+    op: 'оцінка дзвінка',
+    model: config.openai.analyzeModel,
+    messages: [
+      { role: "system", content: system },
+      { role: "user", content: userContent },
+    ],
+    schema: SCHEMA,
+    attempts: 3,
+    delayMs: 1500,
+    label: "OpenAI call classification",
+  });
 }
 
 export {

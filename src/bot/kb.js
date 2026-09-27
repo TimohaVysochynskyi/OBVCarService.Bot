@@ -1,8 +1,8 @@
 import { InlineKeyboard } from 'grammy';
-import { fetchOk } from '../core/http.js';
+import { embed } from '../platform/openai/embeddings.js';
+import { chatJson as askModel } from '../platform/openai/llm.js';
 import { extractText as pdfExtractText, getDocumentProxy } from 'unpdf';
 import mammoth from 'mammoth';
-import { withRetry } from '../core/retry.js';
 import { appError, parseModelJson } from '../core/errors.js';
 import { reportToUser } from './errorReply.js';
 import {
@@ -193,18 +193,14 @@ async function embedTexts(texts) {
   const out = [];
   for (let i = 0; i < texts.length; i += 96) {
     const batch = texts.slice(i, i + 96);
-    const embeddings = await withRetry(
-      async () => {
-        const res = await fetchOk('openai', 'побудова векторів для пошуку', 'https://api.openai.com/v1/embeddings', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: EMBED_MODEL(), input: batch }),
-        });
-        const data = await res.json();
-        return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
-      },
-      { attempts: 3, delayMs: 1500, label: 'OpenAI embeddings' }
-    );
+    const embeddings = await embed({
+      op: 'побудова векторів для пошуку',
+      model: EMBED_MODEL(),
+      input: batch,
+      attempts: 3,
+      delayMs: 1500,
+      label: 'OpenAI embeddings',
+    });
     out.push(...embeddings);
   }
   return out;
@@ -269,22 +265,7 @@ const RERANK_SCHEMA = {
 };
 
 async function chatJson(messages, schema, { label, attempts = 2, delayMs = 1000 } = {}) {
-  return withRetry(
-    async () => {
-      const res = await fetchOk('openai', label, 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: CHAT_MODEL(),
-          messages,
-          response_format: { type: 'json_schema', json_schema: schema },
-        }),
-      });
-      const data = await res.json();
-      return parseModelJson(data, 'openai', label);
-    },
-    { attempts, delayMs, label }
-  );
+  return askModel({ op: label, model: CHAT_MODEL(), messages, schema, attempts, delayMs, label });
 }
 
 

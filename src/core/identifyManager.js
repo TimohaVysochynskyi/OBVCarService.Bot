@@ -1,7 +1,5 @@
-import { withRetry } from './retry.js';
 import { definePrompt } from './prompts.js';
-import { parseModelJson } from './errors.js';
-import { fetchOk } from './http.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { config } from '../shared/config.js';
 
 const identifyPrompt = definePrompt({
@@ -36,29 +34,19 @@ async function identifyManager(transcript, roster = []) {
     },
   };
 
-  return withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'визначення менеджера з розмови', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.openai.analyzeModel,
-          messages: [
-            { role: 'system', content: await identifyPrompt() },
-            { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\nТранскрипт:\n${transcript}` },
-          ],
-          response_format: { type: 'json_schema', json_schema: schema },
-        }),
-      });
-      const data = await res.json();
-      const parsed = parseModelJson(data, 'openai', 'визначення менеджера з розмови');
-      return parsed.operator || null;
-    },
-    { attempts: 3, delayMs: 1500, label: 'OpenAI manager identification' }
-  );
+  const parsed = await chatJson({
+    op: 'визначення менеджера з розмови',
+    model: config.openai.analyzeModel,
+    messages: [
+      { role: 'system', content: await identifyPrompt() },
+      { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\nТранскрипт:\n${transcript}` },
+    ],
+    schema,
+    attempts: 3,
+    delayMs: 1500,
+    label: 'OpenAI manager identification',
+  });
+  return parsed.operator || null;
 }
 
 export { identifyManager };

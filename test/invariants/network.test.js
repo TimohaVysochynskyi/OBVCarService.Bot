@@ -36,3 +36,40 @@ test('ffmpeg теж під таймаутом, включно з кешован�
   assert.match(ffmpeg, /FFMPEG_TIMEOUT_MS/);
   assert.match(ffmpeg, /-version/);
 });
+
+test('адреса OpenAI відома лише порту', () => {
+  const offenders = sources
+    .filter((f) => !f.startsWith('platform/openai/'))
+    .filter((f) => /api\.openai\.com/.test(readSrc(f)));
+  assert.deepEqual(offenders, [], `URL повз порт: ${offenders.join(', ')}`);
+});
+
+test('ключ підставляє в запит лише порт — решті дозволено хіба перевірити його наявність', () => {
+  const offenders = sources
+    .filter((f) => !f.startsWith('platform/openai/'))
+    .filter((f) => /Bearer \$\{[^}]*apiKey/.test(readSrc(f)));
+  assert.deepEqual(offenders, [], `ключ у чужому запиті: ${offenders.join(', ')}`);
+  assert.match(readSrc('bot/health.js'), /if \(!config\.openai\.apiKey\)/);
+});
+
+test('кожен виклик моделі йде через порт, а не через сирий fetchOk', () => {
+  const offenders = sources
+    .filter((f) => !f.startsWith('platform/openai/'))
+    .filter((f) => /fetchOk\(\s*['"]openai['"]/.test(readSrc(f)));
+  assert.deepEqual(offenders, [], `сирий виклик OpenAI: ${offenders.join(', ')}`);
+});
+
+test('ліміт токенів на хвилину має рівно одну реалізацію', () => {
+  const client = readSrc('platform/openai/client.js');
+  assert.match(client, /const WINDOW_MS = 60_000;/);
+  assert.match(client, /function waitMsFor/);
+  const others = sources.filter((f) => f !== 'platform/openai/client.js' && /30_000|30000/.test(readSrc(f)))
+    .filter((f) => /токен|TPM|tpm/.test(readSrc(f)));
+  assert.deepEqual(others, [], `друга черга лімітів: ${others.join(', ')}`);
+});
+
+test('точка підміни транспорту існує рівно одна і не вживається в src', () => {
+  assert.match(readSrc('platform/openai/client.js'), /function useTransport\(fn\)/);
+  const users = sources.filter((f) => f !== 'platform/openai/client.js' && /useTransport/.test(readSrc(f)));
+  assert.deepEqual(users, [], `підміна транспорту в робочому коді: ${users.join(', ')}`);
+});

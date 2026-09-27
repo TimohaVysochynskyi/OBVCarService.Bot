@@ -1,7 +1,5 @@
-import { withRetry } from './retry.js';
-import { parseModelJson } from './errors.js';
-import { fetchOk } from './http.js';
 import { normalize } from './quoteMatch.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { NON_SALES_PURPOSES, purposeRules } from './callPurpose.js';
 import { definePrompt } from './prompts.js';
 import { config } from '../shared/config.js';
@@ -58,25 +56,19 @@ async function classifyNonSalesPurpose(transcript) {
   const text = String(transcript || '').trim();
   if (!text) return null;
 
-  const raw = await withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'визначення типу дзвінка', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model(),
-          messages: [
-            { role: 'system', content: await personalSystem() },
-            { role: 'user', content: text.slice(0, MAX_CHARS) },
-          ],
-          temperature: 0,
-          response_format: { type: 'json_schema', json_schema: SCHEMA },
-        }),
-      });
-      return parseModelJson(await res.json(), 'openai', 'визначення типу дзвінка');
-    },
-    { attempts: 3, delayMs: 1500, label: 'OpenAI call purpose' }
-  );
+  const raw = await chatJson({
+    op: 'визначення типу дзвінка',
+    model: model(),
+    messages: [
+      { role: 'system', content: await personalSystem() },
+      { role: 'user', content: text.slice(0, MAX_CHARS) },
+    ],
+    temperature: 0,
+    schema: SCHEMA,
+    attempts: 3,
+    delayMs: 1500,
+    label: 'OpenAI call purpose',
+  });
 
   if (!NON_SALES_PURPOSES.includes(raw.purpose)) return null;
 

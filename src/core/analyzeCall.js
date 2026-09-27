@@ -1,7 +1,5 @@
-import { withRetry } from './retry.js';
-import { parseModelJson } from './errors.js';
-import { fetchOk } from './http.js';
 import { findQuote } from './quoteMatch.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { SALES_STAGES } from './stages.js';
 import { config } from '../shared/config.js';
 
@@ -97,27 +95,21 @@ async function analyzeCallBehaviors(transcript, segments, managerName) {
   if (!transcript || !verifySegments.length) return { version: ANALYSIS_VERSION, callPurpose: 'other', intro: NO_INTRO, items: [] };
 
   const system = await systemPrompt();
-  const raw = await withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'аналіз поведінки в дзвінку', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model(),
-          messages: [
-            { role: 'system', content: system },
-            {
-              role: 'user',
-              content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,
-            },
-          ],
-          response_format: { type: 'json_schema', json_schema: SCHEMA },
-        }),
-      });
-      return parseModelJson(await res.json(), 'openai', 'аналіз поведінки в дзвінку');
-    },
-    { attempts: 2, delayMs: 1500, label: 'OpenAI call behaviors' }
-  );
+  const raw = await chatJson({
+    op: 'аналіз поведінки в дзвінку',
+    model: model(),
+    messages: [
+      { role: 'system', content: system },
+      {
+        role: 'user',
+        content: `${managerName ? `Менеджер: ${managerName}\n\n` : ''}Транскрипт:\n${transcript}`,
+      },
+    ],
+    schema: SCHEMA,
+    attempts: 2,
+    delayMs: 1500,
+    label: 'OpenAI call behaviors',
+  });
 
   const callPurpose = CALL_PURPOSES.includes(raw.callPurpose) ? raw.callPurpose : 'other';
   const intro = verifyIntro(raw.intro, verifySegments, managerName);

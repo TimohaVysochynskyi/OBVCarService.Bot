@@ -1,12 +1,10 @@
-import { withRetry } from '../core/retry.js';
 import { definePrompt } from '../core/prompts.js';
-import { parseModelJson } from '../core/errors.js';
-import { fetchOk } from '../core/http.js';
+import { chatJson } from '../platform/openai/llm.js';
+import { config } from '../shared/config.js';
 import { findQuote, normalize } from '../core/quoteMatch.js';
 import { SALES_STAGES } from '../core/stages.js';
 import { dialogueMetrics } from '../core/dialogueMetrics.js';
 import { NON_SALES_PURPOSES } from '../core/callPurpose.js';
-import { config } from '../shared/config.js';
 
 
 const MIN_EVIDENCE = 2;
@@ -309,24 +307,18 @@ async function mergeFindings(managerName, findings) {
     .replace('{МАКСИМУМ}', String(MAX_PERIOD_FINDINGS));
 
   try {
-    const raw = await withRetry(
-      async () => {
-        const res = await fetchOk('openai', 'зведення знахідок за період', 'https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: reduceModel(),
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: listing },
-            ],
-            response_format: { type: 'json_schema', json_schema: MERGE_SCHEMA },
-          }),
-        });
-        return parseModelJson(await res.json(), 'openai', 'зведення знахідок за період');
-      },
-      { attempts: 2, delayMs: 2000, label: `OpenAI merge ${managerName}` }
-    );
+    const raw = await chatJson({
+      op: 'зведення знахідок за період',
+      model: reduceModel(),
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: listing },
+      ],
+      schema: MERGE_SCHEMA,
+      attempts: 2,
+      delayMs: 2000,
+      label: `OpenAI merge ${managerName}`,
+    });
     const merged = applyMergeGroups(raw.groups, findings);
     return merged.length ? merged : fallbackMerge(findings);
   } catch (err) {
@@ -349,24 +341,18 @@ async function verifyFindingsRelevance(findings) {
 
   let out;
   try {
-    out = await withRetry(
-      async () => {
-        const res = await fetchOk('openai', 'перевірка релевантності доказів', 'https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: reduceModel(),
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: JSON.stringify(payload) },
-            ],
-            response_format: { type: 'json_schema', json_schema: RELEVANCE_SCHEMA },
-          }),
-        });
-        return parseModelJson(await res.json(), 'openai', 'перевірка релевантності доказів');
-      },
-      { attempts: 2, delayMs: 1500, label: 'OpenAI relevance verify' }
-    );
+    out = await chatJson({
+      op: 'перевірка релевантності доказів',
+      model: reduceModel(),
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: JSON.stringify(payload) },
+      ],
+      schema: RELEVANCE_SCHEMA,
+      attempts: 2,
+      delayMs: 1500,
+      label: 'OpenAI relevance verify',
+    });
   } catch (err) {
     console.error(`[analyze] relevance verify failed, keeping assembled findings: ${err.message}`);
     return findings;
@@ -405,24 +391,18 @@ async function runReducePass(managerName, candidates, stats) {
 
   const user = `${metricsLine}\n\nКАНДИДАТИ:\n` + candidates.map(renderCandidate).join('\n');
 
-  return withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'аналіз дзвінків за період', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: reduceModel(),
-          messages: [
-            { role: 'system', content: system },
-            { role: 'user', content: user },
-          ],
-          response_format: { type: 'json_schema', json_schema: FINDINGS_SCHEMA },
-        }),
-      });
-      return parseModelJson(await res.json(), 'openai', 'аналіз дзвінків за період');
-    },
-    { attempts: 4, delayMs: 3000, label: `OpenAI reduce ${managerName}` }
-  );
+  return chatJson({
+    op: 'аналіз дзвінків за період',
+    model: reduceModel(),
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    schema: FINDINGS_SCHEMA,
+    attempts: 4,
+    delayMs: 3000,
+    label: `OpenAI reduce ${managerName}`,
+  });
 }
 
 const evidenceKey = (e) => `${e.callId}|${normalize(e.quote)}`;

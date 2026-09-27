@@ -1,5 +1,5 @@
 import { withRetry } from './retry.js';
-import { parseModelJson } from './errors.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { fetchOk, fetchRaw } from './http.js';
 import { probeChannels } from './audioMeta.js';
 import { config } from '../shared/config.js';
@@ -183,24 +183,18 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
       `Поверни JSON: reasoning (1-2 речення), manager (рівно один id: ${speakerIds.join(', ')}), confidence.`;
 
   try {
-    const out = await withRetry(
-      async () => {
-        const res = await fetchOk('openai', 'визначення ролей мовців', 'https://api.openai.com/v1/chat/completions', {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${config.openai.apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: config.openai.analyzeModel,
-            messages: [
-              { role: 'system', content: system },
-              { role: 'user', content: body },
-            ],
-            response_format: { type: 'json_schema', json_schema: ROLE_SCHEMA },
-          }),
-        });
-        return parseModelJson(await res.json(), 'openai', 'визначення ролей мовців');
-      },
-      { attempts: 2, delayMs: 1000, label: 'OpenAI speaker role' }
-    );
+    const out = await chatJson({
+      op: 'визначення ролей мовців',
+      model: config.openai.analyzeModel,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: body },
+      ],
+      schema: ROLE_SCHEMA,
+      attempts: 2,
+      delayMs: 1000,
+      label: 'OpenAI speaker role',
+    });
 
     if (!speakerIds.includes(out.manager)) return keyword ?? turns[0].speaker;
     if (!managerName && out.confidence === 'low' && keyword && keyword !== out.manager) {

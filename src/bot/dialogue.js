@@ -1,6 +1,4 @@
-import { withRetry } from '../core/retry.js';
-import { modelContent } from '../core/errors.js';
-import { fetchOk } from '../core/http.js';
+import { chatText } from '../platform/openai/llm.js';
 import { config } from '../shared/config.js';
 
 const DIALOGUE_SYSTEM = `Тобі дано транскрипт телефонної розмови в автосервісі між МЕНЕДЖЕРОМ (працівник сервісу) і КЛІЄНТОМ. Запис моно, без розділення каналів, тому репліки не розмічені.
@@ -15,27 +13,17 @@ const DIALOGUE_SYSTEM = `Тобі дано транскрипт телефонн
 async function formatDialogue(transcript) {
   const text = (transcript || '').trim();
   if (!text) return '(порожньо)';
-  return withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'форматування діалогу', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.openai.analyzeModel,
-          messages: [
-            { role: 'system', content: DIALOGUE_SYSTEM },
-            { role: 'user', content: text },
-          ],
-        }),
-      });
-      const data = await res.json();
-      return modelContent(data, 'openai', 'форматування діалогу');
-    },
-    { attempts: 3, delayMs: 2000, label: 'OpenAI dialogue format' }
-  );
+  return chatText({
+    op: 'форматування діалогу',
+    model: config.openai.analyzeModel,
+    messages: [
+      { role: 'system', content: DIALOGUE_SYSTEM },
+      { role: 'user', content: text },
+    ],
+    attempts: 3,
+    delayMs: 2000,
+    label: 'OpenAI dialogue format',
+  });
 }
 
 export { formatDialogue };

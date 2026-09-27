@@ -1,6 +1,7 @@
+import { transcribeFile } from '../platform/openai/transcribe.js';
 import { withRetry } from './retry.js';
-import { parseModelJson } from './errors.js';
 import { fetchOk } from './http.js';
+import { chatJson } from '../platform/openai/llm.js';
 import { transcribeDiarized } from './elevenlabs.js';
 import { config } from '../shared/config.js';
 
@@ -11,24 +12,16 @@ const PROMPTS = {
 const DEFAULT_PROMPT = PROMPTS.uk;
 
 async function transcribeOnce(audioBlob, { language, prompt } = {}) {
-  return withRetry(
-    async () => {
-      const form = new FormData();
-      form.append('file', audioBlob, 'call.mp3');
-      form.append('model', config.openai.transcribeModel);
-      if (language) form.append('language', language);
-      if (prompt) form.append('prompt', prompt);
-
-      const res = await fetchOk('openai', 'транскрипція розмови', 'https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${config.openai.apiKey}` },
-        body: form,
-      });
-      const data = await res.json();
-      return data.text;
-    },
-    { attempts: 3, delayMs: 2000, label: `OpenAI transcription${language ? ` (${language})` : ''}` }
-  );
+  return transcribeFile({
+    op: 'транскрипція розмови',
+    model: config.openai.transcribeModel,
+    audioBlob,
+    language,
+    prompt,
+    attempts: 3,
+    delayMs: 2000,
+    label: `OpenAI transcription${language ? ` (${language})` : ''}`,
+  });
 }
 
 const DETECT_SCHEMA = {
@@ -52,28 +45,18 @@ const DETECT_SYSTEM = `Проаналізуй транскрипт телефо�
 Приклад: людина говорить українською з суржиком, але текст записано російськими словами → spoken="uk", transcriptLanguage="ru".`;
 
 async function detectLanguages(text) {
-  return withRetry(
-    async () => {
-      const res = await fetchOk('openai', 'визначення мови розмови', 'https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${config.openai.apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model: config.openai.analyzeModel,
-          messages: [
-            { role: 'system', content: DETECT_SYSTEM },
-            { role: 'user', content: text.slice(0, 4000) },
-          ],
-          response_format: { type: 'json_schema', json_schema: DETECT_SCHEMA },
-        }),
-      });
-      const data = await res.json();
-      return parseModelJson(data, 'openai', 'визначення мови розмови');
-    },
-    { attempts: 2, delayMs: 1000, label: 'OpenAI language detection' }
-  );
+  return chatJson({
+    op: 'визначення мови розмови',
+    model: config.openai.analyzeModel,
+    messages: [
+      { role: 'system', content: DETECT_SYSTEM },
+      { role: 'user', content: text.slice(0, 4000) },
+    ],
+    schema: DETECT_SCHEMA,
+    attempts: 2,
+    delayMs: 1000,
+    label: 'OpenAI language detection',
+  });
 }
 
 async function toBlob(audio) {
