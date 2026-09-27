@@ -130,5 +130,5 @@ test('плюси й мінуси зводяться послідовно, не �
 });
 
 test('неповний аналіз стає ВИДИМИМ у документі', () => {
-  assert.match(readSrc('features/reporting/globalReportHtml.js'), /if \(!manager\.partial \|\| !manager\.days\) return '';/);
+  assert.match(readSrc('features/reporting/html/manager.js'), /if \(!manager\.partial \|\| !manager\.days\) return '';/);
 });

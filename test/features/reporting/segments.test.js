@@ -2,6 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSrc } from '../../helpers/repo.js';
 import { config } from '../../../src/shared/config.js';
+import { renderGlobalReport } from '../../../src/features/reporting/globalReportHtml.js';
+import { report } from './fixture.js';
 
 const seg = readSrc('features/reporting/segments.js');
 const fn = seg.match(/async function collectRangeFindings\([\s\S]*?\n\}/)[0];
@@ -86,5 +88,9 @@ test('неповний прогрів дає non-zero, тож його можн�
 });
 
 test('плашка в документі йде саме за прапорцем partial', () => {
-  assert.match(readSrc('features/reporting/globalReportHtml.js'), /if \(!manager\.partial \|\| !manager\.days\) return '';/);
+  const html = renderGlobalReport(report);
+  const cardOf = (name) => html.slice(html.indexOf(`data-manager-card="${name}"`),
+    html.indexOf('</section>', html.indexOf(`data-manager-card="${name}"`)));
+  assert.match(cardOf('Андрій'), /решту проаналізувати поки не вдалося/);
+  assert.ok(!/решту проаналізувати поки не вдалося/.test(cardOf('Роман')));
 });
