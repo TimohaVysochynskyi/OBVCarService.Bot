@@ -1,4 +1,5 @@
 import { withRetry } from '../../shared/retry.js';
+import { classify } from '../../shared/errors.js';
 import { chatJson } from '../openai/llm.js';
 import { fetchOk, fetchRaw } from '../../shared/http.js';
 import { probeChannels } from '../audio/meta.js';
@@ -208,7 +209,24 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
   }
 }
 
+const OUTAGE_CODES = new Set([
+  'ELV-NOKEY', 'ELV-QUOTA', 'ELV-AUTH', 'ELV-PERM', 'ELV-RATE', 'ELV-5XX', 'ELV-TIMEOUT', 'ELV-NET',
+]);
+
+function markOutage(err) {
+  if (OUTAGE_CODES.has(classify(err))) err.elevenlabsUnavailable = true;
+  return err;
+}
+
 async function transcribeDiarized(audioBlob, managerName, { audioPath } = {}) {
+  try {
+    return await diarize(audioBlob, managerName, { audioPath });
+  } catch (err) {
+    throw markOutage(err);
+  }
+}
+
+async function diarize(audioBlob, managerName, { audioPath } = {}) {
   const channels = await probeChannels(audioPath || audioBlob);
   const multichannel = (channels ?? 1) >= 2;
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);

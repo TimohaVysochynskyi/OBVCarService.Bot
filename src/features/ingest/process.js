@@ -167,6 +167,10 @@ async function processOneCall(call, roster) {
     await transcribeClassifyAndSave(call, roster);
     console.log(`[processCalls]   done: ${call.generalCallId}`);
   } catch (err) {
+    if (err?.elevenlabsUnavailable) {
+      console.error(`[processCalls]   aborting run - ElevenLabs is unavailable: ${err.message}`);
+      throw err;
+    }
     console.error(`[processCalls]   FAILED ${call.generalCallId}: ${err.message}`);
     await upsertPending({ ...call, managerName: pendingLabel }, err.message);
   }
@@ -251,6 +255,10 @@ async function retryPendingCalls() {
     } catch (err) {
       if (err?.binotelUnavailable) {
         console.error(`[processCalls]   aborting pending retries - Binotel is unavailable: ${err.message}`);
+        throw err;
+      }
+      if (err?.elevenlabsUnavailable) {
+        console.error(`[processCalls]   aborting pending retries - ElevenLabs is unavailable: ${err.message}`);
         throw err;
       }
       const code = classify(err);

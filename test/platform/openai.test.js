@@ -4,7 +4,6 @@ import { readSrc } from '../helpers/repo.js';
 import { installFakeOpenAi, scripted, jsonResponse, textResponse, embeddingResponse } from '../helpers/fakeOpenAi.js';
 import { chatJson, chatText } from '../../src/platform/openai/llm.js';
 import { embed } from '../../src/platform/openai/embeddings.js';
-import { transcribeFile } from '../../src/platform/openai/transcribe.js';
 import { usageReport, usageLine, estimateTokens, waitMsFor, TPM_BY_MODEL, PRICE_PER_MTOK } from '../../src/platform/openai/client.js';
 
 const MESSAGES = [{ role: 'user', content: 'привіт' }];
@@ -59,17 +58,6 @@ test('embed шле батч одним запитом', async () => {
     embed({ op: 'тест', model: 'text-embedding-3-small', input: ['a', 'b', 'c'] }));
   assert.equal(calls.length, 1);
   assert.deepEqual(calls[0].body.input, ['a', 'b', 'c']);
-});
-
-test('транскрипція йде формою, а не JSON', async () => {
-  const { value, calls } = await withFake(
-    scripted([{ json: async () => ({ text: 'розшифровка' }) }]),
-    () => transcribeFile({ op: 'тест', model: 'gpt-4o-mini-transcribe', audioBlob: new Blob(['x']), language: 'uk', attempts: 1 }));
-  assert.equal(value, 'розшифровка');
-  assert.equal(calls[0].path, '/audio/transcriptions');
-  assert.ok(calls[0].form instanceof FormData);
-  assert.equal(calls[0].form.get('language'), 'uk');
-  assert.equal(calls[0].form.get('model'), 'gpt-4o-mini-transcribe');
 });
 
 test('збій повторюється рівно стільки разів, скільки просив викликач', async () => {

@@ -53,7 +53,6 @@ test('дефолти моделей ті самі, що були в кожном
   assert.equal(c.openai.reportModel, 'gpt-4o');
   assert.equal(c.openai.blockerModel, 'gpt-4o');
   assert.equal(c.openai.embedModel, 'text-embedding-3-small');
-  assert.equal(c.openai.transcribeModel, 'gpt-4o-mini-transcribe');
   assert.equal(c.elevenlabs.sttModel, 'scribe_v1');
   assert.equal(c.elevenlabs.numSpeakers, '2');
 });
@@ -187,10 +186,10 @@ test('бот не стартує без бази й токена, і каже, �
   assert.deepEqual(defaults.missingConfig(['db', 'telegram']), ['DATABASE_URL', 'TELEGRAM_BOT_TOKEN']);
 });
 
-test('інжест не стартує без бази, Binotel і OpenAI', () => {
+test('інжест не стартує без бази, Binotel, OpenAI і ElevenLabs', () => {
   assert.deepEqual(
-    defaults.missingConfig(['db', 'binotel', 'openai']),
-    ['DATABASE_URL', 'BINOTEL_API_KEY', 'BINOTEL_API_SECRET', 'OPENAI_API_KEY']
+    defaults.missingConfig(['db', 'binotel', 'openai', 'elevenlabs']),
+    ['DATABASE_URL', 'BINOTEL_API_KEY', 'BINOTEL_API_SECRET', 'OPENAI_API_KEY', 'ELEVENLABS_API_KEY']
   );
 });
 
@@ -199,9 +198,14 @@ test('заповнені змінні зникають зі списку від�
   assert.deepEqual(missingConfig(['db', 'telegram']), []);
 });
 
-test('ElevenLabs не є обовʼязковим — без нього працює фолбек на OpenAI', () => {
-  assert.ok(!Object.keys(defaults.REQUIRED).includes('elevenlabs'));
+test('ElevenLabs став ОБОВʼЯЗКОВИМ: фолбеку на OpenAI більше немає', () => {
+  assert.deepEqual(defaults.REQUIRED.elevenlabs, ['ELEVENLABS_API_KEY']);
   assert.equal(defaults.config.elevenlabs.apiKey, null);
+  assert.ok(defaults.missingConfig(['elevenlabs']).includes('ELEVENLABS_API_KEY'));
+});
+
+test('модель транскрипції OpenAI зникла з конфігу разом із фолбеком', () => {
+  assert.equal(defaults.config.openai.transcribeModel, undefined);
 });
 
 test('здоровий конфіг не дає жодного зауваження', () => {

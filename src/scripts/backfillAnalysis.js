@@ -80,6 +80,11 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err?.elevenlabsUnavailable) {
+    console.error(`\n[backfill] ПРОГІН ЗУПИНЕНО: ElevenLabs недоступний (${err.message}).`);
+    console.error('[backfill] Дзвінки, яких не встигли обробити, лишились у борзі — запустіть скрипт знову, коли сервіс відновиться.');
+    process.exit(1);
+  }
   console.error(err);
   process.exit(1);
 });

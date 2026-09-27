@@ -394,6 +394,15 @@ const NOTICES = {
   binotelRecovered: (downFor) =>
     `Binotel знову відповідає, збір дзвінків продовжено${downFor ? ` (простій ${downFor})` : ''}.\n\n` +
     'Дзвінки за час простою обробляються прямо зараз.',
+  elevenLabsDown: 'Збір дзвінків зупинено: ElevenLabs не розшифровує розмови',
+  elevenLabsStillDown: (downFor, since) =>
+    `ElevenLabs не відповідає вже ${downFor}${since ? ` (з ${since})` : ''}. Збір дзвінків стоїть.`,
+  elevenLabsBackUp: (downFor) =>
+    `ElevenLabs знову розшифровує розмови, збір дзвінків продовжено${downFor ? ` (простій ${downFor})` : ''}.\n\n` +
+    'Дзвінки, що чекали, обробляються прямо зараз.',
+  callsWaiting:
+    'Дзвінки не втрачені: вони чекають у черзі й обробляться самі, щойно ElevenLabs запрацює. ' +
+    'Без нього розшифровка була б без таймкодів, тому збір навмисно чекає, а не робить її абияк.',
   binotelStillDown: (downFor, since) =>
     `Binotel не відповідає вже ${downFor}${since ? ` (з ${since})` : ''}. Збір дзвінків стоїть.`,
   elevenLabsRefilled: (usd) =>

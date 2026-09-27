@@ -55,6 +55,11 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err?.elevenlabsUnavailable) {
+    console.error(`\n[retranscribe] ПРОГІН ЗУПИНЕНО: ElevenLabs недоступний (${err.message}).`);
+    console.error('[retranscribe] Дзвінки, яких не встигли обробити, лишились у борзі — запустіть скрипт знову, коли сервіс відновиться.');
+    process.exit(1);
+  }
   console.error(err);
   process.exit(1);
 });

@@ -12,7 +12,7 @@ import { NOTICES } from '../../shared/errorTexts.js';
 
 installProcessTraps('poll');
 
-const missing = missingConfig(['db', 'binotel', 'openai']);
+const missing = missingConfig(['db', 'binotel', 'openai', 'elevenlabs']);
 if (missing.length) {
   console.error(`[poll] ${NOTICES.missingEnv(missing)}`);
   process.exit(1);

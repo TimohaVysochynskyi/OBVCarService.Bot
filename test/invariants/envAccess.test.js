@@ -38,7 +38,10 @@ test('значення заморожені на всю глибину, тож �
 });
 
 test('обидві точки входу перевіряють обовʼязкові змінні до першої дії', () => {
-  for (const [entry, groups] of [['apps/bot/index.js', "['db', 'telegram']"], ['apps/poller/index.js', "['db', 'binotel', 'openai']"]]) {
+  for (const [entry, groups] of [
+    ['apps/bot/index.js', "['db', 'telegram']"],
+    ['apps/poller/index.js', "['db', 'binotel', 'openai', 'elevenlabs']"],
+  ]) {
     const src = readSrc(entry);
     assert.ok(src.includes(`missingConfig(${groups})`), `${entry}: немає перевірки ${groups}`);
     assert.match(src, /process\.exit\(1\)/);

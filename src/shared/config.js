@@ -60,7 +60,6 @@ const config = deepFreeze({
     reportModel: str('OPENAI_REPORT_MODEL', 'gpt-4o'),
     blockerModel: str('OPENAI_BLOCKER_MODEL', 'gpt-4o'),
     embedModel: str('OPENAI_EMBED_MODEL', 'text-embedding-3-small'),
-    transcribeModel: str('OPENAI_TRANSCRIBE_MODEL', 'gpt-4o-mini-transcribe'),
   },
   elevenlabs: {
     apiKey: optional('ELEVENLABS_API_KEY'),
@@ -68,6 +67,7 @@ const config = deepFreeze({
     numSpeakers: str('ELEVENLABS_NUM_SPEAKERS', '2'),
     minBalanceUsd: number('ELEVENLABS_MIN_BALANCE_USD', 3.31, { min: 0, exclusive: true }),
     usdPer1000Credits: number('ELEVENLABS_USD_PER_1000_CREDITS', 0.3642, { min: 0, exclusive: true }),
+    outageReminderMin: number('ELEVENLABS_OUTAGE_REMINDER_MIN', 120, { min: 0, exclusive: true }),
   },
   call: {
     language: optional('CALL_LANGUAGE'),
@@ -128,6 +128,7 @@ const REQUIRED = {
   telegram: ['TELEGRAM_BOT_TOKEN'],
   binotel: ['BINOTEL_API_KEY', 'BINOTEL_API_SECRET'],
   openai: ['OPENAI_API_KEY'],
+  elevenlabs: ['ELEVENLABS_API_KEY'],
 };
 
 const VALUE_OF = {
@@ -136,6 +137,7 @@ const VALUE_OF = {
   BINOTEL_API_KEY: () => config.binotel.apiKey,
   BINOTEL_API_SECRET: () => config.binotel.apiSecret,
   OPENAI_API_KEY: () => config.openai.apiKey,
+  ELEVENLABS_API_KEY: () => config.elevenlabs.apiKey,
 };
 
 function missingConfig(groups) {

@@ -70,6 +70,29 @@ async function noteBinotelUp() {
   });
 }
 
+async function noteElevenLabsDown(err) {
+  return alertOnce('elevenlabs_outage', {
+    active: true,
+    reminderMin: config.elevenlabs.outageReminderMin,
+    message: ({ first, downFor, since }) =>
+      alertText(
+        describeError(err, {
+          action: 'ingest',
+          icon: '⚠️',
+          title: first ? NOTICES.elevenLabsDown : NOTICES.elevenLabsStillDown(downFor, since),
+          data: NOTICES.callsWaiting,
+        })
+      ),
+  });
+}
+
+async function noteElevenLabsUp() {
+  return alertOnce('elevenlabs_outage', {
+    active: false,
+    recovered: ({ downFor }) => NOTICES.elevenLabsBackUp(downFor),
+  });
+}
+
 async function pruneErrorLog() {
   const keepDays = config.poll.errorLogKeepDays;
   const removed = await deleteOldErrorLog(new Date(Date.now() - keepDays * 24 * 3600 * 1000));
@@ -98,6 +121,7 @@ async function pollNewCalls() {
     await processCallsForRange(start, end);
     await setCheckpoint(new Date(end.getTime() - checkpointOverlapMs()));
     await noteBinotelUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
+    await noteElevenLabsUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
     await clearIngestFailureAlerts().catch((e) => console.error(`[poll] alert reset failed: ${e.message}`));
   } catch (err) {
     if (err?.binotelUnavailable) {
@@ -107,6 +131,14 @@ async function pollNewCalls() {
       });
       err.alertSent = true;
       if (sent) console.log('[poll] outage alert sent');
+    }
+    if (err?.elevenlabsUnavailable) {
+      const sent = await noteElevenLabsDown(err).catch((e) => {
+        console.error(`[poll] outage alert failed: ${e.message}`);
+        return false;
+      });
+      err.alertSent = true;
+      if (sent) console.log('[poll] ElevenLabs outage alert sent');
     }
     throw err;
   }
