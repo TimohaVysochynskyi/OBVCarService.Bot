@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ROOT, SRC, readSrc } from '../helpers/repo.js';
 
-const NETWORK_GATE = 'core/http.js';
+const NETWORK_GATE = 'shared/http.js';
 
 function walk(dir, hits = []) {
   for (const name of fs.readdirSync(dir)) {
@@ -19,7 +19,7 @@ const sources = walk(path.join(ROOT, 'src'));
 
 test('сирого fetch поза єдиною точкою мережі немає', () => {
   const offenders = sources
-    .filter((f) => f !== NETWORK_GATE && f !== 'bot/site/app.js')
+    .filter((f) => f !== NETWORK_GATE && f !== 'features/reporting/site/app.js')
     .filter((f) => /\bfetch\(/.test(readSrc(f)));
   assert.deepEqual(offenders, [], `fetch поза ${NETWORK_GATE}: ${offenders.join(', ')}`);
 });
@@ -32,7 +32,7 @@ test('усі запити в http.js ідуть із таймаутом', () => 
 });
 
 test('ffmpeg теж під таймаутом, включно з кешованою пробою', () => {
-  const ffmpeg = readSrc('core/ffmpeg.js');
+  const ffmpeg = readSrc('platform/audio/ffmpeg.js');
   assert.match(ffmpeg, /FFMPEG_TIMEOUT_MS/);
   assert.match(ffmpeg, /-version/);
 });
@@ -49,7 +49,7 @@ test('ключ підставляє в запит лише порт — решт
     .filter((f) => !f.startsWith('platform/openai/'))
     .filter((f) => /Bearer \$\{[^}]*apiKey/.test(readSrc(f)));
   assert.deepEqual(offenders, [], `ключ у чужому запиті: ${offenders.join(', ')}`);
-  assert.match(readSrc('bot/health.js'), /if \(!config\.openai\.apiKey\)/);
+  assert.match(readSrc('features/ops/health.js'), /if \(!config\.openai\.apiKey\)/);
 });
 
 test('кожен виклик моделі йде через порт, а не через сирий fetchOk', () => {

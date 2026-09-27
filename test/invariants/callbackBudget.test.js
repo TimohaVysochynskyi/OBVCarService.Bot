@@ -1,18 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 import { SRC, readSrc, bytes } from '../helpers/repo.js';
-import { PERSONAL_OPERATORS, SHARED_EXTENSIONS } from '../../src/core/phoneLines.js';
+import { PERSONAL_OPERATORS, SHARED_EXTENSIONS } from '../../src/domain/call/phoneLines.js';
 
 const LIMIT = 64;
 const MIN_ROOM_FOR_VALUES = 16;
 
-const files = fs.readdirSync(`${SRC}bot`).filter((f) => f.endsWith('.js'));
+function allSources(dir = SRC, hits = []) {
+  for (const name of fs.readdirSync(dir)) {
+    const full = path.join(dir, name);
+    if (fs.statSync(full).isDirectory()) allSources(full, hits);
+    else if (name.endsWith('.js')) hits.push(path.relative(SRC, full).replace(/\\/g, '/'));
+  }
+  return hits;
+}
+
+const files = allSources();
 const CALLBACK_ARG = /\.text\(\s*(?:[^,()]|\([^()]*\))*,\s*(`[^`]*`|'[^']*'|"[^"]*")\s*\)/g;
 
 const callbacks = [];
 for (const file of files) {
-  for (const m of readSrc(`bot/${file}`).matchAll(CALLBACK_ARG)) {
+  for (const m of readSrc(file).matchAll(CALLBACK_ARG)) {
     callbacks.push({ file, raw: m[1] });
   }
 }
@@ -20,7 +30,7 @@ const literals = callbacks.filter((c) => !c.raw.startsWith('`')).map((c) => ({ .
 const templates = callbacks.filter((c) => c.raw.startsWith('`'))
   .map((c) => ({ ...c, skeleton: c.raw.slice(1, -1).replace(/\$\{[^}]*\}/g, '') }));
 
-const reportSrc = readSrc('bot/report.js');
+const reportSrc = readSrc('features/reporting/report.js');
 const expandSrc = reportSrc.slice(reportSrc.indexOf('const MODE_CODE'), reportSrc.indexOf('async function deliverReport'));
 const expandKeyOf = new Function('noteIssue', `${expandSrc}; return expandKeyOf;`)(() => ({ catch() {} }));
 const start = new Date('2026-09-19T00:00:00Z');

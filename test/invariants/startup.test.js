@@ -23,8 +23,8 @@ async function start(entry) {
   }
 }
 
-const bot = await start('src/bot/index.js');
-const poll = await start('src/jobs/index.js');
+const bot = await start('src/apps/bot/index.js');
+const poll = await start('src/apps/poller/index.js');
 
 test('бот із порожнім конфігом не стартує', () => {
   assert.equal(bot.code, 1);

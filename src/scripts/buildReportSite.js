@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { migrate } from '../platform/db/pool.js';
-import { buildGlobalReport } from '../bot/globalReportData.js';
-import { buildSite, zipSite } from '../bot/globalReportBundle.js';
+import { buildGlobalReport } from '../features/reporting/globalReportData.js';
+import { buildSite, zipSite } from '../features/reporting/globalReportBundle.js';
 
 
 function arg(name) {

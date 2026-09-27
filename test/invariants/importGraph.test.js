@@ -5,7 +5,7 @@ import path from 'node:path';
 import { ROOT, readRepo } from '../helpers/repo.js';
 
 const SKIP = new Set(['node_modules', '.git', 'data', 'report-site', 'temp', '.vscode', 'test']);
-const BROWSER_ASSETS = ['src/bot/site/app.js'];
+const BROWSER_ASSETS = ['src/features/reporting/site/app.js'];
 
 function walk(dir, hits = []) {
   for (const name of fs.readdirSync(dir)) {
@@ -72,7 +72,7 @@ test('статика сторінки звіту навмисно поза гр�
     assert.ok(files.includes(asset), `зник ${asset}`);
     assert.ok(!reachable.has(asset));
   }
-  assert.match(readRepo('src/bot/globalReportBundle.js'), /site/);
+  assert.match(readRepo('src/features/reporting/globalReportBundle.js'), /site/);
 });
 
 test('кожен зовнішній пакет оголошений у package.json', () => {
@@ -84,7 +84,7 @@ test('кожен зовнішній пакет оголошений у package.j
 test('обидва процеси pm2 стартують із наявних файлів', () => {
   const config = readRepo('ecosystem.config.cjs');
   const scripts = [...config.matchAll(/script: '([^']+)'/g)].map((m) => m[1]);
-  assert.deepEqual(scripts, ['src/bot/index.js', 'src/jobs/index.js']);
+  assert.deepEqual(scripts, ['src/apps/bot/index.js', 'src/apps/poller/index.js']);
   for (const s of scripts) assert.ok(files.includes(s), `pm2 вказує на неіснуючий ${s}`);
 });
 

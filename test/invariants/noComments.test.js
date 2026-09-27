@@ -95,7 +95,7 @@ test('прибирання коментарів не лишило керуючи
 });
 
 test('тексти промптів лишились цілими після чистки коментарів', () => {
-  const raw = fs.readFileSync(path.join(ROOT, 'src/core/prompts.default.json'), 'utf8');
+  const raw = fs.readFileSync(path.join(ROOT, 'src/features/prompts/defaults.json'), 'utf8');
   assert.ok(!/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/.test(raw));
   const prompts = JSON.parse(raw);
   for (const [key, lines] of Object.entries(prompts)) {

@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { getDirectionStats, getEarliestCallTime, updateDirectionIfMissing } from '../features/ingest/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { listCallsForPeriod } from '../core/binotel.js';
-import { DIRECTION_LABELS } from '../core/callDirection.js';
+import { listCallsForPeriod } from '../platform/binotel/client.js';
+import { DIRECTION_LABELS } from '../domain/call/direction.js';
 import { config } from '../shared/config.js';
 
 const MAX_CHUNK_MS = 23 * 60 * 60 * 1000;

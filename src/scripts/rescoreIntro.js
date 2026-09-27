@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { usageLine } from '../platform/openai/client.js';
 import { getRecentCallsForIntro, updateCallIntro } from '../features/analysis/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { analyzeCallBehaviors } from '../core/analyzeCall.js';
-import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
+import { analyzeCallBehaviors } from '../features/analysis/analyzeCall.js';
+import { PERSONAL_OPERATORS } from '../domain/call/phoneLines.js';
 import { config } from '../shared/config.js';
 
 

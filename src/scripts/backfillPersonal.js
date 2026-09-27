@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { getNonSalesCalls, setCallPurpose } from '../features/analysis/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { classifyNonSalesPurpose } from '../core/classifyPersonal.js';
-import { displayName } from '../bot/operators.js';
+import { classifyNonSalesPurpose } from '../features/analysis/classifyPersonal.js';
+import { displayName } from '../features/operators/display.js';
 import { config } from '../shared/config.js';
 
 const PAUSE_MS = config.backfill.personalPauseMs;

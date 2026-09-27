@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { getRecentCalls, updateCallAnalysis } from '../features/analysis/repo.js';
-import { getRecordingForCall } from '../core/audioStore.js';
-import { transcribeDiarized } from '../core/elevenlabs.js';
-import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
-import { displayName } from '../bot/operators.js';
+import { getRecordingForCall } from '../platform/audio/store.js';
+import { transcribeDiarized } from '../platform/elevenlabs/client.js';
+import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../features/analysis/analyzeCall.js';
+import { displayName } from '../features/operators/display.js';
 import { config } from '../shared/config.js';
 
 const LIMIT = config.backfill.retranscribeLastLimit;

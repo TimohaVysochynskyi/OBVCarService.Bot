@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { getCallsMissingSegments, updateCallFullAnalysis } from '../features/analysis/repo.js';
-import { getRecordingForCall } from '../core/audioStore.js';
-import { transcribeAudio } from '../core/transcribe.js';
-import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../core/analyzeCall.js';
-import { classifyCall } from '../core/classifyCall.js';
-import { displayName } from '../bot/operators.js';
+import { getRecordingForCall } from '../platform/audio/store.js';
+import { transcribeAudio } from '../features/analysis/transcribe.js';
+import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../features/analysis/analyzeCall.js';
+import { classifyCall } from '../features/analysis/classifyCall.js';
+import { displayName } from '../features/operators/display.js';
 import { config } from '../shared/config.js';
 
 async function main() {

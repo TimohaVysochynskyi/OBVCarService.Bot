@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { migrate } from '../platform/db/pool.js';
-import { processCallsForRange } from '../jobs/processCalls.js';
+import { processCallsForRange } from '../features/ingest/process.js';
 
 async function main() {
   const [startArg, endArg] = process.argv.slice(2);

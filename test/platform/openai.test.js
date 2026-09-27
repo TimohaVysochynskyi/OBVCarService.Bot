@@ -158,9 +158,9 @@ test('ключ перевіряється в транспорті — фейк �
 });
 
 test('увесь OpenAI сховано за портом: жодного URL поза platform/openai', () => {
-  for (const file of ['core/analyzeCall.js', 'core/classifyCall.js', 'core/dealBlocker.js', 'core/clientDecline.js',
-    'core/classifyPersonal.js', 'core/identifyManager.js', 'core/transcribe.js', 'core/elevenlabs.js',
-    'bot/analyze.js', 'bot/kb.js', 'bot/dialogue.js', 'bot/health.js']) {
+  for (const file of ['features/analysis/analyzeCall.js', 'features/analysis/classifyCall.js', 'features/analysis/dealBlocker.js', 'features/analysis/clientDecline.js',
+    'features/analysis/classifyPersonal.js', 'features/analysis/identifyManager.js', 'features/analysis/transcribe.js', 'platform/elevenlabs/client.js',
+    'features/reporting/analyze.js', 'features/knowledge-base/kb.js', 'features/archive/dialogue.js', 'features/ops/health.js']) {
     assert.ok(!/api\.openai\.com/.test(readSrc(file)), `${file} ходить в OpenAI повз порт`);
     assert.ok(!/Bearer \$\{config\.openai\.apiKey\}/.test(readSrc(file)), `${file} сам тримає ключ`);
   }

@@ -1,9 +1,9 @@
 import 'dotenv/config';
 import { getRecentCallsForOperator, updateCallTranscript } from '../features/analysis/repo.js';
 import { getOperators } from '../features/operators/repo.js';
-import { getRecordingForCall } from '../core/audioStore.js';
-import { transcribeAudio } from '../core/transcribe.js';
-import { displayName, hasAlias } from '../bot/operators.js';
+import { getRecordingForCall } from '../platform/audio/store.js';
+import { transcribeAudio } from '../features/analysis/transcribe.js';
+import { displayName, hasAlias } from '../features/operators/display.js';
 import { config } from '../shared/config.js';
 
 const PER_OPERATOR = config.backfill.retranscribeLimit;

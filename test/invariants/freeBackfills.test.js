@@ -5,9 +5,9 @@ import path from 'node:path';
 import { ROOT, readRepo } from '../helpers/repo.js';
 
 const PAID = [
-  'core/analyzeCall.js', 'core/classifyCall.js', 'core/classifyPersonal.js', 'core/clientDecline.js',
-  'core/dealBlocker.js', 'core/transcribe.js', 'core/elevenlabs.js', 'core/identifyManager.js',
-  'bot/analyze.js', 'bot/segments.js', 'bot/kb.js',
+  'features/analysis/analyzeCall.js', 'features/analysis/classifyCall.js', 'features/analysis/classifyPersonal.js', 'features/analysis/clientDecline.js',
+  'features/analysis/dealBlocker.js', 'features/analysis/transcribe.js', 'platform/elevenlabs/client.js', 'features/analysis/identifyManager.js',
+  'features/reporting/analyze.js', 'features/reporting/segments.js', 'features/knowledge-base/kb.js',
 ];
 const FREE_SCRIPTS = ['backfill:direction', 'backfill:intro'];
 

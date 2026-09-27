@@ -2,8 +2,8 @@ import 'dotenv/config';
 import { getCallsMissingIntro, updateCallIntro } from '../features/analysis/repo.js';
 import { getIntroBreakdown } from '../features/reporting/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { detectIntro } from '../core/managerIntro.js';
-import { PERSONAL_OPERATORS } from '../core/phoneLines.js';
+import { detectIntro } from '../domain/call/intro.js';
+import { PERSONAL_OPERATORS } from '../domain/call/phoneLines.js';
 
 
 const LIMIT = process.argv.includes('--limit')

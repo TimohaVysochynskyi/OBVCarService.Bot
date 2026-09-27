@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'obv-bot',
-      script: 'src/bot/index.js',
+      script: 'src/apps/bot/index.js',
       cwd: __dirname,
       autorestart: true,
       max_restarts: 100,
@@ -11,7 +11,7 @@ module.exports = {
     },
     {
       name: 'obv-poller',
-      script: 'src/jobs/index.js',
+      script: 'src/apps/poller/index.js',
       cwd: __dirname,
       autorestart: false,
       cron_restart: '*/15 * * * *',

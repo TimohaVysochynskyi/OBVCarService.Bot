@@ -1,4 +1,4 @@
-import { PERSONAL_OPERATORS } from '../../core/phoneLines.js';
+import { PERSONAL_OPERATORS } from '../../domain/call/phoneLines.js';
 
 const jsonParam = (v) => (v == null ? null : JSON.stringify(v));
 

@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { getSalesCallsWithSegments, updateCallScore } from '../features/analysis/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { classifyCall } from '../core/classifyCall.js';
+import { classifyCall } from '../features/analysis/classifyCall.js';
 
 
 async function main() {

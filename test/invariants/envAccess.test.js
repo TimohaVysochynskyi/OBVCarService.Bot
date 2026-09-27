@@ -38,7 +38,7 @@ test('значення заморожені на всю глибину, тож �
 });
 
 test('обидві точки входу перевіряють обовʼязкові змінні до першої дії', () => {
-  for (const [entry, groups] of [['bot/index.js', "['db', 'telegram']"], ['jobs/index.js', "['db', 'binotel', 'openai']"]]) {
+  for (const [entry, groups] of [['apps/bot/index.js', "['db', 'telegram']"], ['apps/poller/index.js', "['db', 'binotel', 'openai']"]]) {
     const src = readSrc(entry);
     assert.ok(src.includes(`missingConfig(${groups})`), `${entry}: немає перевірки ${groups}`);
     assert.match(src, /process\.exit\(1\)/);
@@ -47,13 +47,13 @@ test('обидві точки входу перевіряють обовʼязк
 });
 
 test('зауваження про підозрілі значення друкуються, а не ковтаються', () => {
-  for (const entry of ['bot/index.js', 'jobs/index.js']) {
+  for (const entry of ['apps/bot/index.js', 'apps/poller/index.js']) {
     assert.match(readSrc(entry), /for \(const issue of configIssues\(\)\)/);
   }
 });
 
 test('текст про незаповнені змінні живе в errorTexts, а не в конфігу', () => {
-  assert.match(readSrc('core/errorTexts.js'), /missingEnv: \(names\)/);
+  assert.match(readSrc('shared/errorTexts.js'), /missingEnv: \(names\)/);
   assert.ok(!/\.env/.test(configSrc.replace(/process\.env\[name\]/g, '')), 'конфіг не пояснює помилки сам');
 });
 

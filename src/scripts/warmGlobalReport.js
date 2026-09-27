@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { migrate } from '../platform/db/pool.js';
-import { buildGlobalReport, ALL } from '../bot/globalReportData.js';
+import { buildGlobalReport, ALL } from '../features/reporting/globalReportData.js';
 
 async function main() {
   const analyze = !process.argv.includes('--no-analyze');

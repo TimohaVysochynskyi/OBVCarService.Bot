@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
 
-const src = readSrc('core/errorTexts.js');
+const src = readSrc('shared/errorTexts.js');
 const texts = [...src.matchAll(/'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`/g)]
   .map((m) => m[1] ?? m[2])
   .filter((s) => /[а-яіїєґА-ЯІЇЄҐ]/.test(s));
@@ -46,7 +46,7 @@ test('дію в кожному коді написано з малої літе�
 });
 
 test('слово «продажний» не трапляється у видимих текстах', () => {
-  for (const file of ['core/errorTexts.js', 'bot/report.js', 'bot/globalReportHtml.js', 'bot/archive.js', 'bot/dynamics.js']) {
+  for (const file of ['shared/errorTexts.js', 'features/reporting/report.js', 'features/reporting/globalReportHtml.js', 'features/archive/archive.js', 'features/reporting/dynamics.js']) {
     assert.ok(!/продажн/.test(readSrc(file)), `${file}: у видимому тексті вжито «продажний»`);
   }
 });

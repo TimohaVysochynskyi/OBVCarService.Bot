@@ -1,6 +1,6 @@
 import { config } from '../../shared/config.js';
-import { fetchOk } from '../../core/http.js';
-import { withRetry } from '../../core/retry.js';
+import { fetchOk } from '../../shared/http.js';
+import { withRetry } from '../../shared/retry.js';
 
 const BASE_URL = 'https://api.openai.com/v1';
 const WINDOW_MS = 60_000;

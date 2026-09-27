@@ -1,4 +1,4 @@
-import { parseModelJson } from '../../core/errors.js';
+import { parseModelJson } from '../../shared/errors.js';
 import { post, get } from './client.js';
 
 async function chatJson({ op, model, messages, schema, temperature, attempts, delayMs, label }) {

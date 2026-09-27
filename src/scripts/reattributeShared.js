@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import { getNumericManagerCalls, getOperatorRoster, updateManagerName } from '../features/operators/repo.js';
 import { migrate } from '../platform/db/pool.js';
-import { identifyManager } from '../core/identifyManager.js';
-import { SHARED_EXTENSIONS } from '../core/phoneLines.js';
+import { identifyManager } from '../features/analysis/identifyManager.js';
+import { SHARED_EXTENSIONS } from '../domain/call/phoneLines.js';
 
 async function main() {
   await migrate();

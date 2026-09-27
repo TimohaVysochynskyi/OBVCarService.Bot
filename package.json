@@ -2,16 +2,16 @@
   "name": "OBVCarService.Bot",
   "version": "1.0.0",
   "description": "Polls Binotel for new calls, transcribes them, classifies each call and attributes it to a manager, and stores everything in Postgres for a separate reporting bot to consume",
-  "main": "src/jobs/index.js",
+  "main": "src/apps/poller/index.js",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "test": "node --test \"test/**/*.test.js\"",
-    "build:css": "tailwindcss -i tailwind/input.css -o src/bot/site/app.css --minify",
-    "poll": "cross-env JOB_TYPE=poll node src/jobs/index.js",
-    "bot": "node src/bot/index.js",
+    "build:css": "tailwindcss -i tailwind/input.css -o src/features/reporting/site/app.css --minify",
+    "poll": "cross-env JOB_TYPE=poll node src/apps/poller/index.js",
+    "bot": "node src/apps/bot/index.js",
     "test:call": "node src/scripts/testSingleCall.js",
     "backfill": "node src/scripts/backfill.js",
     "reattribute:shared": "node src/scripts/reattributeShared.js",

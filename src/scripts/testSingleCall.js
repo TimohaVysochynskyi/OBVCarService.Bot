@@ -1,6 +1,6 @@
 import 'dotenv/config';
-import { getCallRecordUrl } from '../core/binotel.js';
-import { transcribeAudio } from '../core/transcribe.js';
+import { getCallRecordUrl } from '../platform/binotel/client.js';
+import { transcribeAudio } from '../features/analysis/transcribe.js';
 
 async function main() {
   const generalCallId = process.argv[2];
