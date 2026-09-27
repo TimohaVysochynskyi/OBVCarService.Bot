@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readSrc } from '../helpers/repo.js';
+import { config } from '../../src/shared/config.js';
 import { installFakeOpenAi, scripted, jsonResponse, textResponse, embeddingResponse } from '../helpers/fakeOpenAi.js';
 import { chatJson, chatText } from '../../src/platform/openai/llm.js';
 import { embed } from '../../src/platform/openai/embeddings.js';
@@ -107,10 +108,20 @@ test('без запитів рядок вартості каже про це п�
   assert.equal(usageLine(), 'запитів до OpenAI не було');
 });
 
-test('ціна відома для всіх моделей, якими проєкт справді користується', () => {
-  for (const model of ['gpt-4o', 'gpt-4o-mini', 'text-embedding-3-small']) {
-    assert.ok(PRICE_PER_MTOK[model], `немає ціни для ${model}`);
-  }
+test('ціна відома для КОЖНОЇ моделі з конфігу — список береться з нього, не з памʼяті', () => {
+  const models = Object.entries(config.openai)
+    .filter(([key, value]) => key.endsWith('Model') && typeof value === 'string')
+    .map(([, value]) => value);
+  assert.ok(models.length >= 4, `моделей у конфігу лише ${models.length}`);
+  const unpriced = [...new Set(models)].filter((m) => !PRICE_PER_MTOK[m]);
+  assert.deepEqual(unpriced, [],
+    `нова модель без ціни: ${unpriced.join(', ')} — usageLine() напише «ціна невідома», і витрати знову стануть здогадом`);
+});
+
+test('модель без ціни чесно позначається, а не рахується як безкоштовна', () => {
+  assert.match(readSrc('platform/openai/client.js'), /usd: usdOf\(model, stat\)/);
+  assert.match(readSrc('platform/openai/client.js'), /ціна невідома/);
+  assert.match(readSrc('platform/openai/client.js'), /known\.length === models\.length \? known\.reduce/);
 });
 
 test('ліміт 30k/хв заведений саме на модель, що його ділить зі звітами', () => {

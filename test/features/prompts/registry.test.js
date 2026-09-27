@@ -137,8 +137,9 @@ test('перекласифікація не може зробити дзвіно
   assert.ok(/NON_SALES_PURPOSES\.includes\(purpose\)/.test(reprocess));
 });
 
-test('найдорожчий перерахунок іде з паузою 2.6с', () => {
-  assert.ok(/PAUSE_MS = \{ blocker: 2600 \}/.test(reprocess));
+test('темп найдорожчого перерахунку віддано черзі лімітів', () => {
+  assert.ok(/PAUSE_MS = \{ blocker: 0 \}/.test(reprocess));
+  assert.ok(/waitMsFor/.test(readSrc('platform/openai/client.js')), 'черга лімітів зникла — пауза була єдиним захистом');
 });
 
 test('збереження тексту тільки через підтвердження', () => {

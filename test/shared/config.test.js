@@ -80,7 +80,7 @@ test('решта дефолтів збережена', () => {
   assert.equal(c.report.kbClipPadPages, 1);
   assert.equal(c.liveness.botMaxMin, 10);
   assert.equal(c.liveness.pollMaxMin, 45);
-  assert.equal(c.backfill.blockerPauseMs, 2600);
+  assert.equal(c.backfill.blockerPauseMs, 0);
   assert.equal(c.backfill.audioPauseMs, 1500);
 });
 

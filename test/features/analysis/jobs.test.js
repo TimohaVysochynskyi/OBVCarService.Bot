@@ -81,7 +81,8 @@ test('журнал не падає, якщо таблиці jobs ще немає
   assert.match(readSrc('features/ops/incidents.js'), /getRecentJobs\(3\)\.catch\(\(\) => \[\]\)/);
 });
 
-test('паузи між дзвінками збережені — ліміт 30k/хв нікуди не дівся', () => {
-  assert.match(reprocess, /PAUSE_MS = \{ blocker: 2600 \}/);
+test('темп перерахунку тримає черга лімітів, а ручна пауза лишилась гальмом', () => {
+  assert.match(reprocess, /PAUSE_MS = \{ blocker: 0 \}/);
   assert.match(reprocess, /const pause = PAUSE_MS\[row\.kind\] \?\? DEFAULT_PAUSE_MS/);
+  assert.match(readSrc('platform/openai/client.js'), /TPM_BY_MODEL = \{ 'gpt-4o': DEFAULT_TPM \}/);
 });

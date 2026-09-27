@@ -30,7 +30,7 @@ import { JOBS } from '../prompts/registry.js';
 const BLOCK = 200;
 const PAGE = 50;
 
-const PAUSE_MS = { blocker: 2600 };
+const PAUSE_MS = { blocker: 0 };
 const DEFAULT_PAUSE_MS = 400;
 
 const nameFor = (call) => PERSONAL_OPERATORS[String(call.internalNumber)] || call.managerName;

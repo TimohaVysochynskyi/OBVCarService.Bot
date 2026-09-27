@@ -114,7 +114,7 @@ const config = deepFreeze({
   },
   backfill: {
     audioPauseMs: number('BACKFILL_AUDIO_PAUSE_MS', 1500, { min: 0 }),
-    blockerPauseMs: number('BACKFILL_BLOCKER_PAUSE_MS', 2600, { min: 0 }),
+    blockerPauseMs: number('BACKFILL_BLOCKER_PAUSE_MS', 0, { min: 0 }),
     declinePauseMs: number('BACKFILL_DECLINE_PAUSE_MS', 400, { min: 0 }),
     personalPauseMs: number('BACKFILL_PERSONAL_PAUSE_MS', 400, { min: 0 }),
     rescoreIntroPauseMs: number('RESCORE_INTRO_PAUSE_MS', 500, { min: 0 }),

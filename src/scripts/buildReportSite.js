@@ -2,6 +2,7 @@ import 'dotenv/config';
 import { migrate } from '../platform/db/pool.js';
 import { buildGlobalReport } from '../features/reporting/globalReportData.js';
 import { buildSite, zipSite } from '../features/reporting/globalReportBundle.js';
+import { usageLine } from '../platform/openai/client.js';
 
 
 function arg(name) {
@@ -27,6 +28,7 @@ async function main() {
   console.log(`  фрагментів:  вирізано ${c.cut}, узято готовими ${c.reused}, без таймкоду ${c.noTimecode}, без запису ${c.noRecording}, не вдалось ${c.failed}`);
   console.log(`  аудіо:       ${built.audio.files} файлів, ${(built.audio.bytes / 1048576).toFixed(1)} МБ`);
   console.log(`  зібрано за:  ${seconds}с`);
+  console.log(`  витрачено:   ${usageLine()}`);
 
   const incomplete = report.managers.filter((m) => m.partial).map((m) => m.display);
   if (incomplete.length) {
