@@ -1,4 +1,5 @@
 import { pool } from '../../platform/db/pool.js';
+import { PERSONAL_OPERATORS } from '../../domain/call/phoneLines.js';
 
 async function getOperatorRoster() {
   const { rows } = await pool.query(
