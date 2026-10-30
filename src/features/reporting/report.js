@@ -100,7 +100,7 @@ function headerText(report) {
       ? `\n\n_Аналіз є за ${report.coverage.analysed} з ${report.coverage.days} днів періоду — картина може бути неповною._`
       : '';
   const lines = [
-    `📊 *Доказовий звіт* — ${displayName(name)}`,
+    `📊 *Звіт із показниками* — ${displayName(name)}`,
     `${formatKyiv(start)} – ${formatKyiv(end)}`,
     '',
     `Дзвінків за період: *${stats.callCount}*, з них угод: *${sales}*.`,
@@ -149,7 +149,7 @@ function findingText(f, idx) {
   lines.push(`Чому це впливає на записи: ${f.why}`);
   lines.push(`Що зробити: ${f.action}`);
   lines.push('');
-  lines.push(`Докази (${f.evidence.length}):`);
+  lines.push(`Цитати (${f.evidence.length}):`);
   f.evidence.forEach((ev, i) => {
     lines.push(`${i + 1}. «${ev.quote}» — ${formatKyiv(new Date(ev.startTime))}`);
     if (ev.note) lines.push(`   ↳ ${ev.note}`);
@@ -280,7 +280,7 @@ async function sendManualReport(api, chatId) {
       }
       return { sent: true };
     },
-    { notice: '⏳ Бот формує доказовий звіт (аналіз), це може зайняти деякий час…' }
+    { notice: '⏳ Бот формує звіт із показниками (аналіз), це може зайняти деякий час…' }
   );
   if (res.empty) await api.sendMessage(chatId, 'За сьогодні ще немає оброблених дзвінків для звіту.');
   return res;
@@ -317,7 +317,7 @@ function registerReportActions(bot) {
         const { clips, missing } = await prepareClips(report);
         await sendReportFindings(ctx.api, ctx.chat.id, report, { clips, missing, replyToMessageId });
       },
-      { notice: '⏳ Готую деталі та аудіо-докази…' }
+      { notice: '⏳ Готую деталі та аудіо-фрагменти…' }
     );
   });
 

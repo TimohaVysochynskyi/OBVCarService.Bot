@@ -59,7 +59,7 @@ async function main() {
       const r = await detectDealBlocker(c.transcript, c.segments, who);
       if (r.unchecked) {
         unchecked += 1;
-        console.warn(`[backfillBlockers] ${i + 1}/${calls.length} ${c.generalCallId} — не перевірено (збій рецензента), лишається на потім`);
+        console.warn(`[backfillBlockers] ${i + 1}/${calls.length} ${c.generalCallId} — не перевірено (збій перевірки), лишається на потім`);
         if (i < calls.length - 1) await new Promise((r2) => setTimeout(r2, PAUSE_MS));
         continue;
       }

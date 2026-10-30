@@ -89,7 +89,7 @@ test('прибирання спрацьовує на БУДЬ-якій кноп�
 });
 
 test('переглянутий текст промпта запамʼятовується як тимчасовий', () => {
-  assert.ok(/const ids = await sendLong\([\s\S]{0,200}?rememberTemp\(ctx, ids\)/.test(promptSrc));
+  assert.ok(/const ids = await send\w+\([\s\S]{0,300}?rememberTemp\(ctx, ids\)/.test(promptSrc));
 });
 
 test('видалення не падає, якщо повідомлення вже немає', () => {

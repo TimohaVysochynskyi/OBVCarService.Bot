@@ -73,5 +73,7 @@ test('етап відсутній → сказано прямо, а не про�
 });
 
 test('заголовок і формат розмітки збережені', () => {
-  assert.ok(make({ callCount: 1, salesCount: 0, successCount: 0 }).includes('📊 *Доказовий звіт* — Роман'));
+  const header = make({ callCount: 1, salesCount: 0, successCount: 0 }).split('\n')[0];
+  assert.match(header, /^📊 \*[^*]+\* — Роман$/);
+  assert.ok(!/доказ/i.test(header));
 });

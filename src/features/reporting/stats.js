@@ -71,7 +71,7 @@ function registerStats(bot) {
       ctx.chat.id,
       'typing',
       () => deliverManagerReport(ctx.api, ctx.chat.id, name, start, end, { mode: MODE_BY_PERIOD[period] }),
-      { notice: '⏳ Формую доказовий звіт: аналізую дзвінки періоду, це може зайняти до хвилини…' }
+      { notice: '⏳ Формую звіт із показниками: аналізую дзвінки періоду, це може зайняти до хвилини…' }
     );
     if (res.empty) {
       await showScreen(ctx, `${operatorLabel(name)}\n\nНемає оброблених дзвінків за період.`, kb);

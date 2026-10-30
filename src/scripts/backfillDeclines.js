@@ -54,7 +54,7 @@ async function main() {
   for (const [reason, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
     console.log(`  ${String(n).padStart(4)}  ${reasonLabel(reason) || reason}`);
   }
-  console.log(`  без доказу → «причина не прозвучала»: ${downgraded}`);
+  console.log(`  без цитати → «причина не прозвучала»: ${downgraded}`);
   console.log(`  помилки: ${failed}`);
   console.log(`  витрачено: ${usageLine()}`);
 

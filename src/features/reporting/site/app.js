@@ -45,6 +45,11 @@
       each(tabs, function (tab) {
         tab.setAttribute('aria-selected', tab.dataset.managerTab === name ? 'true' : 'false');
       });
+      each(cards, function (card) {
+        if (card.hidden) return;
+        trendState(card).drawn = null;
+        drawTrend(card, true);
+      });
     }
 
     each(tabs, function (tab) {
@@ -79,8 +84,10 @@
     return (sr.decimals ? v.toFixed(sr.decimals).replace('.', ',') : String(v)) + (sr.suffix || '');
   }
 
+  var TREND_MS = 420;
+
   function trendState(card) {
-    if (!card.__trend) card.__trend = { hidden: {}, points: [], hover: null, note: '' };
+    if (!card.__trend) card.__trend = { hidden: {}, points: [], hover: null, note: '', drawn: null, raf: 0 };
     return card.__trend;
   }
 
@@ -88,14 +95,80 @@
     return '<text x="' + x + '" y="' + y + '" text-anchor="' + anchor + '" font-size="' + AXIS_SIZE + '" fill="' + AXIS_FILL + '">' + value + '</text>';
   }
 
-  function drawTrend(card) {
+  function stillMotion() {
+    return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+  }
+
+  function easeOut(t) {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function seriesTargets(pts, shown, maxLeft, plotH) {
+    var target = {};
+    for (var s = 0; s < shown.length; s += 1) {
+      var sr = shown[s];
+      var ys = [];
+      for (var i = 0; i < pts.length; i += 1) {
+        var raw = pts[i][sr.key];
+        if (raw == null) {
+          ys.push(null);
+        } else {
+          var frac = sr.axis === 'left' ? raw / maxLeft : (raw * (sr.scale || 1)) / 100;
+          ys.push(PT + plotH - frac * plotH);
+        }
+      }
+      target[sr.key] = ys;
+    }
+    return target;
+  }
+
+  function blendYs(from, target, t, baseline) {
+    var out = {};
+    Object.keys(target).forEach(function (key) {
+      var prev = from && from[key] && from[key].length === target[key].length ? from[key] : null;
+      out[key] = target[key].map(function (v, i) {
+        if (v == null) return null;
+        var start = prev && prev[i] != null ? prev[i] : baseline;
+        return start + (v - start) * t;
+      });
+    });
+    return out;
+  }
+
+  function seriesMarkup(shown, ys, x, withDots) {
+    var out = '';
+    for (var s = 0; s < shown.length; s += 1) {
+      var sr = shown[s];
+      var line = ys[sr.key] || [];
+      var d = '';
+      var open = false;
+      for (var a = 0; a < line.length; a += 1) {
+        if (line[a] == null) { open = false; continue; }
+        d += (open ? 'L' : 'M') + x(a).toFixed(1) + ' ' + line[a].toFixed(1) + ' ';
+        open = true;
+      }
+      if (d) out += '<path d="' + d.replace(/\s+$/, '') + '" fill="none" stroke="' + sr.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
+      if (!withDots) continue;
+      for (var b = 0; b < line.length; b += 1) {
+        if (line[b] == null) continue;
+        out += '<circle cx="' + x(b).toFixed(1) + '" cy="' + line[b].toFixed(1) + '" r="3" fill="#ffffff" stroke="' + sr.color + '" stroke-width="2"/>';
+      }
+    }
+    return out;
+  }
+
+  function drawTrend(card, animate) {
     var svg = card.querySelector('[data-trend]');
     if (!svg) return;
     var st = trendState(card);
+    if (st.raf) {
+      cancelAnimationFrame(st.raf);
+      st.raf = 0;
+    }
     var pts = st.points;
     var shown = TREND_SERIES.filter(function (sr) { return !st.hidden[sr.key]; });
 
-    var TW = Math.max(320, Math.round(svg.getBoundingClientRect().width || 680));
+    var TW = Math.max(220, Math.round(svg.getBoundingClientRect().width) || 680);
     var PLOT_W = TW - PL - PR;
     var PLOT_H = TH - PT - PB;
     svg.setAttribute('viewBox', '0 0 ' + TW + ' ' + TH);
@@ -106,6 +179,7 @@
       each(card.querySelectorAll('[data-series-val]'), function (el) { el.textContent = '—'; });
       var empty = card.querySelector('[data-trend-note]');
       if (empty) empty.textContent = st.note;
+      st.drawn = null;
       return;
     }
 
@@ -120,50 +194,54 @@
     maxLeft = niceMax(maxLeft);
 
     var x = function (n) { return pts.length < 2 ? PL + PLOT_W / 2 : PL + (n * PLOT_W) / (pts.length - 1); };
-    var yL = function (v) { return PT + PLOT_H - (v / maxLeft) * PLOT_H; };
-    var yR = function (v) { return PT + PLOT_H - (v / 100) * PLOT_H; };
 
-    var out = '';
+    var statics = '';
     for (var t = 0; t <= 4; t += 1) {
       var frac = t / 4;
       var gy = PT + PLOT_H - frac * PLOT_H;
-      out += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (PL + PLOT_W) + '" y2="' + gy + '" stroke="' + GRID_STROKE + '" stroke-width="1"/>';
-      out += axisText(PL - 8, gy + 4, Math.round(maxLeft * frac), 'end');
-      out += axisText(PL + PLOT_W + 8, gy + 4, Math.round(100 * frac) + '%', 'start');
+      statics += '<line x1="' + PL + '" y1="' + gy + '" x2="' + (PL + PLOT_W) + '" y2="' + gy + '" stroke="' + GRID_STROKE + '" stroke-width="1"/>';
+      statics += axisText(PL - 8, gy + 4, Math.round(maxLeft * frac), 'end');
+      statics += axisText(PL + PLOT_W + 8, gy + 4, Math.round(100 * frac) + '%', 'start');
     }
 
-    var step = Math.max(1, Math.ceil(pts.length / 12));
+    var fitLabels = Math.max(3, Math.floor(PLOT_W / 46));
+    var step = Math.max(1, Math.ceil(pts.length / fitLabels));
     for (var k = 0; k < pts.length; k += 1) {
       if (k % step !== 0 && k !== pts.length - 1) continue;
-      out += axisText(x(k).toFixed(1), TH - 9, pts[k].label, 'middle');
-    }
-
-    for (var sIdx = 0; sIdx < shown.length; sIdx += 1) {
-      var sr = shown[sIdx];
-      var d = '';
-      var open = false;
-      for (var a = 0; a < pts.length; a += 1) {
-        var raw = pts[a][sr.key];
-        if (raw == null) { open = false; continue; }
-        var py = sr.axis === 'left' ? yL(raw) : yR(raw * (sr.scale || 1));
-        d += (open ? 'L' : 'M') + x(a).toFixed(1) + ' ' + py.toFixed(1) + ' ';
-        open = true;
-      }
-      if (d) out += '<path d="' + d.replace(/\s+$/, '') + '" fill="none" stroke="' + sr.color + '" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>';
-      if (pts.length <= 14) {
-        for (var b = 0; b < pts.length; b += 1) {
-          var rv = pts[b][sr.key];
-          if (rv == null) continue;
-          var cy = sr.axis === 'left' ? yL(rv) : yR(rv * (sr.scale || 1));
-          out += '<circle cx="' + x(b).toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="3" fill="#ffffff" stroke="' + sr.color + '" stroke-width="2"/>';
-        }
-      }
+      statics += axisText(x(k).toFixed(1), TH - 9, pts[k].label, 'middle');
     }
 
     var at = st.hover == null ? pts.length - 1 : st.hover;
-    out += '<line x1="' + x(at).toFixed(1) + '" y1="' + PT + '" x2="' + x(at).toFixed(1) + '" y2="' + (PT + PLOT_H) + '" stroke="#98a2b3" stroke-width="1" stroke-dasharray="3 3"/>';
+    statics += '<line x1="' + x(at).toFixed(1) + '" y1="' + PT + '" x2="' + x(at).toFixed(1) + '" y2="' + (PT + PLOT_H) + '" stroke="#98a2b3" stroke-width="1" stroke-dasharray="3 3"/>';
 
-    svg.innerHTML = out;
+    var target = seriesTargets(pts, shown, maxLeft, PLOT_H);
+    var withDots = pts.length <= 14;
+    var paint = function (ys) {
+      svg.innerHTML = statics + seriesMarkup(shown, ys, x, withDots);
+    };
+
+    if (!animate || stillMotion()) {
+      paint(target);
+      st.drawn = target;
+    } else {
+      var from = st.drawn;
+      var baseline = PT + PLOT_H;
+      var startedAt = null;
+      var frame = function (now) {
+        if (startedAt === null) startedAt = now;
+        var progress = Math.min(1, (now - startedAt) / TREND_MS);
+        var current = blendYs(from, target, easeOut(progress), baseline);
+        paint(current);
+        st.drawn = current;
+        if (progress < 1) {
+          st.raf = requestAnimationFrame(frame);
+        } else {
+          st.raf = 0;
+          st.drawn = target;
+        }
+      };
+      st.raf = requestAnimationFrame(frame);
+    }
 
     each(card.querySelectorAll('[data-series-val]'), function (el) {
       var found = TREND_SERIES.filter(function (z) { return z.key === el.dataset.seriesVal; })[0];
@@ -182,7 +260,7 @@
       btn.addEventListener('click', function () {
         st.hidden[btn.dataset.series] = !st.hidden[btn.dataset.series];
         btn.setAttribute('aria-selected', st.hidden[btn.dataset.series] ? 'false' : 'true');
-        drawTrend(card);
+        drawTrend(card, true);
       });
     });
 
@@ -229,7 +307,7 @@
     st.points = ((DATA.series || {})[card.dataset.managerCard] || {})[month] || [];
     st.hover = null;
     st.note = month === ALL ? 'по місяцях' : 'по днях';
-    drawTrend(card);
+    drawTrend(card, true);
 
     select(card.querySelectorAll('[data-month-tab]'), month, 'month');
   }
@@ -546,7 +624,9 @@
     window.addEventListener('resize', function () {
       if (resizeAt) clearTimeout(resizeAt);
       resizeAt = setTimeout(function () {
-        each(document.querySelectorAll('[data-manager-card]'), drawTrend);
+        each(document.querySelectorAll('[data-manager-card]'), function (card) {
+          drawTrend(card);
+        });
       }, 150);
     });
   }

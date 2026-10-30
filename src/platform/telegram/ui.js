@@ -1,19 +1,40 @@
 const MAX = 4096;
 const TARGET = 3800;
 
-function splitMessage(text) {
-  if (text.length <= MAX) return [text];
+const COPY_TARGET = 2800;
+
+function splitMessage(text, target = TARGET, max = MAX) {
+  if (text.length <= max) return [text];
   const chunks = [];
   let remaining = text;
-  while (remaining.length > MAX) {
-    let at = remaining.lastIndexOf('\n\n', TARGET);
-    if (at <= 0) at = remaining.lastIndexOf('\n', TARGET);
-    if (at <= 0) at = TARGET;
+  while (remaining.length > max) {
+    let at = remaining.lastIndexOf('\n\n', target);
+    if (at <= 0) at = remaining.lastIndexOf('\n', target);
+    if (at <= 0) at = target;
     chunks.push(remaining.slice(0, at));
     remaining = remaining.slice(at).trimStart();
   }
   if (remaining) chunks.push(remaining);
   return chunks;
+}
+
+const escapeHtml = (text) =>
+  String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+async function sendCopyable(api, chatId, text, { intro } = {}) {
+  const chunks = splitMessage(String(text), COPY_TARGET, COPY_TARGET);
+  const ids = [];
+  for (const [i, chunk] of chunks.entries()) {
+    const head = i === 0 && intro ? `${intro}\n\n` : '';
+    const part = chunks.length > 1 ? `Частина ${i + 1} з ${chunks.length}\n` : '';
+    const plain = `${head}${part}${chunk}`;
+    let m = await api
+      .sendMessage(chatId, `${escapeHtml(head + part)}<pre>${escapeHtml(chunk)}</pre>`, { parse_mode: 'HTML' })
+      .catch(() => null);
+    if (!m) m = await api.sendMessage(chatId, plain).catch(() => null);
+    if (m?.message_id) ids.push(m.message_id);
+  }
+  return ids;
 }
 
 async function sendLong(api, chatId, text, { parseMode, replyMarkup, replyToMessageId } = {}) {
@@ -120,4 +141,4 @@ async function showScreen(ctx, text, kb, { parseMode = 'Markdown' } = {}) {
   return msg;
 }
 
-export { splitMessage, sendLong, withProgress, showScreen, installMessageTracker };
+export { splitMessage, sendLong, sendCopyable, withProgress, showScreen, installMessageTracker };

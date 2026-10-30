@@ -45,6 +45,21 @@ test('дію в кожному коді написано з малої літе�
   assert.deepEqual(capitalised, [], `дія з великої літери: ${capitalised.join(' | ')}`);
 });
 
+test('слова «доказ» і «рецензент» не трапляються у видимих текстах', () => {
+  for (const file of [
+    'shared/errorTexts.js',
+    'features/reporting/report.js',
+    'features/reporting/stats.js',
+    'features/reporting/analyze.js',
+    'features/prompts/defaults.json',
+    'features/prompts/ui.js',
+  ]) {
+    const text = readSrc(file);
+    assert.ok(!/доказ/i.test(text), `${file}: у видимому тексті вжито «доказ» — замовник цього слова не розуміє`);
+    assert.ok(!/рецензент/i.test(text), `${file}: у видимому тексті вжито «рецензент»`);
+  }
+});
+
 test('слово «продажний» не трапляється у видимих текстах', () => {
   for (const file of ['shared/errorTexts.js', 'features/reporting/report.js', 'features/reporting/globalReportHtml.js', 'features/archive/archive.js', 'features/reporting/dynamics.js']) {
     assert.ok(!/продажн/.test(readSrc(file)), `${file}: у видимому тексті вжито «продажний»`);

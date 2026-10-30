@@ -69,7 +69,7 @@ async function main() {
   console.log(`  → службові:      ${moved.other}`);
   console.log(`  без змін:        ${unchanged}`);
   console.log(`  помилки:         ${failed}`);
-  console.log(`  «особистий» без доказу (відкинуто): ${downgraded}`);
+  console.log(`  «особистий» без цитати (відкинуто): ${downgraded}`);
 
   if (failed) process.exitCode = 1;
 }

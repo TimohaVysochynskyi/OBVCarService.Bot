@@ -22,7 +22,7 @@ import {
   invalidateReportCache,
 } from '../analysis/reprocess.js';
 import { JOBS } from './registry.js';
-import { sendLong, showScreen } from '../../platform/telegram/ui.js';
+import { sendCopyable, showScreen } from '../../platform/telegram/ui.js';
 
 
 const MENU = '« Назад до меню';
@@ -91,7 +91,7 @@ async function detailScreen(key) {
     ? '✏️ Зараз використовується *власний* текст.'
     : '📄 Зараз використовується *стандартний* текст.';
 
-  const kb = new InlineKeyboard().text('👁 Переглянути поточний', `prompt:v:${key}`).row().text('✏️ Змінити', `prompt:e:${key}`).row();
+  const kb = new InlineKeyboard().text('📋 Переглянути й скопіювати', `prompt:v:${key}`).row().text('✏️ Змінити', `prompt:e:${key}`).row();
   if (job) kb.text('♻️ Застосувати до наявних дзвінків', `prompt:a:${key}`).row();
   else kb.text('🗑 Скинути збережені висновки звіту', `prompt:cache:${key}`).row();
   kb.text('↩️ Скинути до стандартного', `prompt:r:${key}`).row().text('« Назад', `prompt:g:${e.group}`).row().text(MENU, 'menu');
@@ -344,7 +344,9 @@ function registerPrompt(bot) {
     const key = ctx.match[1];
     const e = await promptInfo(key);
     if (!e) return;
-    const ids = await sendLong(ctx.api, ctx.chat.id, `Поточний текст (${e.isCustom ? 'власний' : 'стандартний'}):\n\n${e.value}`);
+    const ids = await sendCopyable(ctx.api, ctx.chat.id, e.value, {
+      intro: `Поточний текст (${e.isCustom ? 'власний' : 'стандартний'}). Натисніть на блок, щоб скопіювати його цілком.`,
+    });
     rememberTemp(ctx, ids);
     await screen(ctx, await detailScreen(key));
   });
@@ -352,13 +354,21 @@ function registerPrompt(bot) {
   bot.callbackQuery(/^prompt:e:(\w+)$/, async (ctx) => {
     await ctx.answerCallbackQuery();
     const key = ctx.match[1];
-    const e = entryOf(key);
+    const e = await promptInfo(key);
     if (!e) return;
     ctx.session.awaiting = { type: 'prompt', key };
-    await ctx.reply(
-      `✏️ Надішліть новий текст для «${e.button}» одним повідомленням.\n\n` +
+    const parts = await sendCopyable(ctx.api, ctx.chat.id, e.value, {
+      intro: `✏️ Зміна інструкції «${e.button}». Нижче — текст, який діє зараз.`,
+    });
+    rememberTemp(ctx, parts);
+    const hint = await ctx.reply(
+      'Натисніть на блок вище, щоб скопіювати текст, вставте його в поле вводу, виправте потрібне і надішліть одним повідомленням.\n\n' +
+        (parts.length > 1
+          ? 'Текст не вміщається в одне повідомлення — скопіюйте обидві частини підряд.\n\n'
+          : '') +
         'Перед збереженням буде підтвердження. Щоб скасувати — відкрийте /menu.'
     );
+    rememberTemp(ctx, hint?.message_id);
   });
 
   bot.callbackQuery(/^prompt:sv:(\w+)$/, async (ctx) => {
