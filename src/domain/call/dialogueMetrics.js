@@ -14,13 +14,17 @@ const WARNING_WORDS = [
 const WARNING_RE = new RegExp(`${EDGE}(?:${WARNING_WORDS.join('|')})`, 'iu');
 
 const BACKCHANNEL = new Set([
-  'ага', 'агаага', 'угу', 'угуугу', 'угум', 'мгм', 'м', 'мм', 'ммм', 'мммм',
-  'да', 'дада', 'так', 'тактак', 'ок', 'окей', 'еее', 'ее', 'е', 'аа', 'ааа',
+  'ага', 'угу', 'угум', 'мгм', 'м', 'мм', 'ммм', 'мммм', 'да', 'так', 'ок', 'окей', 'ну',
+  'е', 'ее', 'еее', 'а', 'аа', 'ааа', 'о', 'оо', 'я', 'все', 'всьо', 'всё', 'от',
+  'конечно', 'звичайно', 'понял', 'поняв', 'зрозумів', 'зрозуміло', 'понятно', 'ясно',
+  'хорошо', 'добре', 'бачу', 'вижу', 'точно', 'ладно', 'угуму',
 ]);
 
 const MIN_CLIENT_TURN_CHARS = 15;
 const MIN_MANAGER_TURN_CHARS = 10;
 const MIN_INTERRUPTED_CHARS = 12;
+const FRAGMENT_CHARS = 6;
+const FRAGMENTED_SHARE = 0.3;
 
 const INTERRUPT_OVERLAP = 'overlap';
 const INTERRUPT_CUT_OFF = 'cut_off';
@@ -56,9 +60,17 @@ function interruptOverlapSec() {
 const isClient = (s) => s?.role === 'client';
 const isManager = (s) => s?.role === 'manager';
 const clean = (t) => String(t ?? '').trim();
-const lettersOf = (t) => clean(t).toLowerCase().replace(/[^\p{L}]/gu, '');
 
-const isBackchannel = (text) => BACKCHANNEL.has(lettersOf(text));
+function isBackchannel(text) {
+  const words = clean(text).toLowerCase().split(/[^\p{L}]+/u).filter(Boolean);
+  return words.length > 0 && words.every((w) => BACKCHANNEL.has(w));
+}
+
+function isFragmented(segs) {
+  if (!segs.length) return false;
+  const fragments = segs.filter((s) => clean(s.text).length < FRAGMENT_CHARS).length;
+  return fragments / segs.length > FRAGMENTED_SHARE;
+}
 const warnsAboutDelay = (text) => WARNING_RE.test(clean(text));
 
 function mmss(sec) {
@@ -84,7 +96,8 @@ function overlapHit(segs, clientIndex, minOverlapSec) {
     if (managerEnd != null && Number(cur.end) > managerEnd) return null;
     const overlap = Math.min(Number(cur.end), managerEnd ?? Number(cur.end)) - Number(next.start);
     if (!(overlap > minOverlapSec)) return null;
-    if (isBackchannel(clean(next.text))) return null;
+    const quote = clean(next.text);
+    if (quote.length < MIN_MANAGER_TURN_CHARS || isBackchannel(quote)) return null;
     return { segIndex: j, overlapSec: round1(overlap), kind: INTERRUPT_OVERLAP };
   }
   return null;
@@ -94,12 +107,15 @@ function cutOffHit(segs, clientIndex) {
   if (!CUT_OFF_RE.test(clean(segs[clientIndex].text))) return null;
   const j = clientIndex + 1;
   const next = segs[j];
-  if (!isManager(next) || isBackchannel(clean(next.text))) return null;
+  if (!isManager(next)) return null;
+  const quote = clean(next.text);
+  if (quote.length < MIN_MANAGER_TURN_CHARS || isBackchannel(quote)) return null;
   return { segIndex: j, overlapSec: 0, kind: INTERRUPT_CUT_OFF };
 }
 
 function detectInterruptions(segments, minOverlapSec = interruptOverlapSec()) {
   const segs = Array.isArray(segments) ? segments : [];
+  const chopped = isFragmented(segs);
   const out = [];
   for (let i = 0; i < segs.length - 1; i += 1) {
     const cur = segs[i];
@@ -108,7 +124,7 @@ function detectInterruptions(segments, minOverlapSec = interruptOverlapSec()) {
     if (clientText.length < MIN_INTERRUPTED_CHARS) continue;
     if (TRAILED_OFF_RE.test(clientText)) continue;
 
-    const hit = overlapHit(segs, i, minOverlapSec) ?? cutOffHit(segs, i);
+    const hit = (chopped ? null : overlapHit(segs, i, minOverlapSec)) ?? cutOffHit(segs, i);
     if (!hit) continue;
     const next = segs[hit.segIndex];
     out.push({
