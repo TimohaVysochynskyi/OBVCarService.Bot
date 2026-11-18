@@ -2,6 +2,7 @@ import { withRetry } from '../../shared/retry.js';
 import { httpError } from '../../shared/errors.js';
 import { fetchRaw } from '../../shared/http.js';
 import { directionOf } from '../../domain/call/direction.js';
+import { normalizeLinePhone } from '../../domain/call/phoneLines.js';
 import { config } from '../../shared/config.js';
 
 const BASE_URL = config.binotel.baseUrl;
@@ -72,6 +73,12 @@ function extractClientName(call) {
   return name;
 }
 
+function pbxNumberOf(call) {
+  const raw = call.pbxNumberData?.number;
+  if (raw == null || raw === '') return null;
+  return normalizeLinePhone(raw) ?? String(raw).trim() ?? null;
+}
+
 async function listCallsForPeriod(startDate, endDate) {
   const data = await callBinotel('stats/list-of-calls-for-period.json', {
     startTime: toUnixSeconds(startDate),
@@ -86,6 +93,7 @@ async function listCallsForPeriod(startDate, endDate) {
     direction: directionOf(c.callType),
     clientName: extractClientName(c),
     hangupBy: c.whoHungUp || null,
+    pbxNumber: pbxNumberOf(c),
     startTime: new Date(Number(c.startTime) * 1000).toISOString(),
     durationSec: Number(c.billsec || 0),
     recordingStatus: c.recordingStatus,

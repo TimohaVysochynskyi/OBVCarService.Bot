@@ -9,7 +9,7 @@ const PAID = [
   'features/analysis/dealBlocker.js', 'features/analysis/transcribe.js', 'platform/elevenlabs/client.js', 'features/analysis/identifyManager.js',
   'features/reporting/analyze.js', 'features/reporting/segments.js', 'features/knowledge-base/kb.js',
 ];
-const FREE_SCRIPTS = ['backfill:direction', 'backfill:intro', 'fix:roles', 'audit:dialogue'];
+const FREE_SCRIPTS = ['backfill:direction', 'backfill:intro', 'fix:roles', 'audit:dialogue', 'backfill:pbxnumber'];
 
 const pkg = JSON.parse(readRepo('package.json'));
 const entryOf = (script) => /node\s+([^\s]+\.js)/.exec(pkg.scripts[script])[1];

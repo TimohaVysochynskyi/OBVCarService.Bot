@@ -33,7 +33,8 @@
     "kb:reindex": "node src/scripts/reindexKb.js",
     "rescore:sales": "node src/scripts/rescoreSales.js",
     "fix:roles": "node src/scripts/fixRoles.js",
-    "audit:dialogue": "node src/scripts/auditDialogue.js"
+    "audit:dialogue": "node src/scripts/auditDialogue.js",
+    "backfill:pbxnumber": "node src/scripts/backfillPbxNumber.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

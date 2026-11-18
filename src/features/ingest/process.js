@@ -98,6 +98,7 @@ async function transcribeClassifyAndSave(call, roster) {
   await saveCall({
     generalCallId: call.generalCallId,
     direction: call.direction ?? null,
+    pbxNumber: call.pbxNumber ?? null,
     internalNumber: call.internalNumber,
     managerName,
     startTime: call.startTime,

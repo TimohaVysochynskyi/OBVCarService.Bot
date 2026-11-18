@@ -1,3 +1,4 @@
+import { normalizeLinePhone } from '../../domain/call/phoneLines.js';
 import { config } from '../../shared/config.js';
 
 const DEFAULT_ALIASES = {};
@@ -34,11 +35,8 @@ function formatPhone(raw) {
 }
 
 function formatLinePhone(raw) {
-  const d = String(raw ?? '').replace(/\D/g, '');
-  let local = d;
-  if (d.length === 12 && d.startsWith('380')) local = `0${d.slice(3)}`;
-  else if (d.length === 9) local = `0${d}`;
-  if (local.length !== 10 || !local.startsWith('0')) return String(raw ?? '');
+  const local = normalizeLinePhone(raw);
+  if (!local) return String(raw ?? '');
   return `${local.slice(0, 3)} ${local.slice(3, 6)} ${local.slice(6, 8)} ${local.slice(8, 10)}`;
 }
 

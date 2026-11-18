@@ -9,8 +9,8 @@ async function callExists(generalCallId) {
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction, intro_name, intro_company)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction, intro_name, intro_company, pbx_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -37,6 +37,7 @@ async function saveCall(call) {
       call.direction ?? null,
       call.introName ?? null,
       call.introCompany ?? null,
+      call.pbxNumber ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);
@@ -94,6 +95,22 @@ async function updateDirectionIfMissing(generalCallId, direction) {
   return rowCount;
 }
 
+async function updatePbxNumberIfMissing(generalCallId, pbxNumber) {
+  const { rowCount } = await pool.query(
+    'UPDATE calls SET pbx_number = $2::text WHERE general_call_id = $1 AND pbx_number IS NULL AND $2::text IS NOT NULL',
+    [generalCallId, pbxNumber ?? null]
+  );
+  return rowCount;
+}
+
+async function getPbxNumberStats() {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(pbx_number, 'невідомо') AS "pbxNumber", COUNT(*)::int AS count
+     FROM calls GROUP BY 1 ORDER BY 2 DESC`
+  );
+  return rows;
+}
+
 async function getDirectionStats() {
   const { rows } = await pool.query(
     `SELECT COALESCE(direction, 'невідомо') AS direction, COUNT(*)::int AS count
@@ -121,12 +138,13 @@ async function getEarliestCallTime() {
 
 async function upsertPending(call, errorMessage) {
   await pool.query(
-    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, client_name, direction, attempts, status, last_error, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', $9, now())
+    `INSERT INTO pending_calls (general_call_id, internal_number, manager_name, start_time, duration_sec, client_number, client_name, direction, attempts, status, last_error, updated_at, pbx_number)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, 'pending', $9, now(), $10)
      ON CONFLICT (general_call_id) DO UPDATE SET
        attempts = pending_calls.attempts + 1,
        last_error = $9,
-       updated_at = now()`,
+       updated_at = now(),
+       pbx_number = COALESCE($10, pending_calls.pbx_number)`,
     [
       call.generalCallId,
       call.internalNumber,
@@ -137,6 +155,7 @@ async function upsertPending(call, errorMessage) {
       call.clientName ?? null,
       call.direction ?? null,
       errorMessage || null,
+      call.pbxNumber ?? null,
     ]
   );
 }
@@ -153,7 +172,8 @@ async function getPendingCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber", manager_name AS "managerName",
             start_time AS "startTime", duration_sec AS "durationSec", client_number AS "clientNumber",
-            client_name AS "clientName", direction, attempts, last_error AS "lastError"
+            client_name AS "clientName", direction, pbx_number AS "pbxNumber",
+            attempts, last_error AS "lastError"
      FROM pending_calls
      WHERE status = 'pending'
      ORDER BY start_time`
@@ -179,6 +199,8 @@ export {
   getAudioArchiveStats,
   updateDirectionIfMissing,
   getDirectionStats,
+  updatePbxNumberIfMissing,
+  getPbxNumberStats,
   updateClientInfoIfMissing,
   getEarliestCallTime,
   upsertPending,

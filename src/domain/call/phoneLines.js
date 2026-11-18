@@ -53,6 +53,15 @@ const LINE_KINDS = {
 };
 
 
+function normalizeLinePhone(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (digits.length === 12 && digits.startsWith('380')) return `0${digits.slice(3)}`;
+  if (digits.length === 11 && digits.startsWith('80')) return `0${digits.slice(2)}`;
+  if (digits.length === 10 && digits.startsWith('0')) return digits;
+  if (digits.length === 9) return `0${digits}`;
+  return null;
+}
+
 function lineInfo(ext) {
   const number = String(ext ?? '').trim();
   const phone = LINE_NUMBERS[number] || null;
@@ -68,4 +77,5 @@ export {
   LINE_KINDS,
   LINE_NUMBERS,
   lineInfo,
+  normalizeLinePhone,
 };
