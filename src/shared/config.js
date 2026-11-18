@@ -73,7 +73,7 @@ const config = deepFreeze({
     language: optional('CALL_LANGUAGE'),
     longPauseSec: number('LONG_PAUSE_SEC', 6, { min: 0, exclusive: true }),
     holdSuspectSec: number('HOLD_SUSPECT_SEC', 20, { min: 0, exclusive: true }),
-    interruptOverlapSec: number('INTERRUPT_MIN_OVERLAP_SEC', 0.4, { min: 0, exclusive: true }),
+    interruptOverlapSec: number('INTERRUPT_MIN_OVERLAP_SEC', 1.5, { min: 0, exclusive: true }),
     turnGapSec: number('TURN_GAP_SEC', 0.8, { min: 0, exclusive: true }),
     managerChannel: number('MANAGER_AUDIO_CHANNEL', 0, { min: 0 }),
   },

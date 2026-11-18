@@ -69,7 +69,7 @@ test('решта дефолтів збережена', () => {
   assert.equal(c.binotel.outageReminderMin, 120);
   assert.equal(c.call.longPauseSec, 6);
   assert.equal(c.call.holdSuspectSec, 20);
-  assert.equal(c.call.interruptOverlapSec, 0.4);
+  assert.equal(c.call.interruptOverlapSec, 1.5);
   assert.equal(c.call.turnGapSec, 0.8);
   assert.equal(c.call.managerChannel, 0);
   assert.equal(c.audio.clipPadSec, 3);
