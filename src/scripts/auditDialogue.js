@@ -66,12 +66,18 @@ async function main() {
   let turns = 0;
   const overlapExamples = [];
   const cutOffExamples = [];
+  const fragmentBands = [0.05, 0.1, 0.15, 0.2, 0.3, 1.01];
+  const callsByFragments = fragmentBands.map(() => 0);
+  const overlapBands = [0.6, 1, 1.5, 2, 3, 99];
+  const overlapsBySize = overlapBands.map(() => 0);
 
   for (const call of calls) {
     const segments = call.segments || [];
     turns += segments.length;
     fragments += segments.filter((s) => String(s.text || '').trim().length < 6).length;
-    if (fragmentShare(segments) > 0.3) fragmentedCalls += 1;
+    const share = fragmentShare(segments);
+    if (share > 0.3) fragmentedCalls += 1;
+    callsByFragments[fragmentBands.findIndex((b) => share <= b)] += 1;
 
     const found = detectLongPauses(segments);
     const cut = detectInterruptions(segments);
@@ -96,6 +102,9 @@ async function main() {
         quote: it.quote,
       };
       (it.kind === INTERRUPT_OVERLAP ? overlapExamples : cutOffExamples).push(sample);
+      if (it.kind === INTERRUPT_OVERLAP) {
+        overlapsBySize[overlapBands.findIndex((b) => it.overlapSec <= b)] += 1;
+      }
     }
     if (cut.length) callsWithInterrupt.add(call.generalCallId);
 
@@ -118,6 +127,15 @@ async function main() {
   console.log(`  кандидатів:          ${interrupts.total} на ${callsWithInterrupt.size} дзвінк(ах)`);
   console.log(`  за перекриттям:      ${interrupts[INTERRUPT_OVERLAP]}`);
   console.log(`  за обривом на тире:  ${interrupts[INTERRUPT_CUT_OFF]}`);
+
+  console.log('\n[auditDialogue] перекриття за розміром:');
+  overlapBands.forEach((band, i) => {
+    console.log(`  до ${String(band).padStart(5)}с: ${String(overlapsBySize[i]).padStart(5)}`);
+  });
+  console.log('\n[auditDialogue] дзвінки за часткою реплік-уламків:');
+  fragmentBands.forEach((band, i) => {
+    console.log(`  до ${String(Math.round(band * 100)).padStart(4)}%: ${String(callsByFragments[i]).padStart(5)}`);
+  });
 
   printExamples('перебивання за перекриттям', overlapExamples);
   printExamples('перебивання за обривом на тире', cutOffExamples);
