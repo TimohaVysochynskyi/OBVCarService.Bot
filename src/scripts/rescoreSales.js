@@ -1,4 +1,5 @@
 import 'dotenv/config';
+const SEPARATE_ONLY = process.argv.includes('--separate-only');
 import { getSalesCallsWithSegments, updateCallScore } from '../features/analysis/repo.js';
 import { migrate } from '../platform/db/pool.js';
 import { classifyCall } from '../features/analysis/classifyCall.js';
@@ -6,7 +7,7 @@ import { classifyCall } from '../features/analysis/classifyCall.js';
 
 async function main() {
   await migrate();
-  const calls = await getSalesCallsWithSegments();
+  const calls = await getSalesCallsWithSegments({ separateOnly: SEPARATE_ONLY });
   if (!calls.length) {
     console.log('[rescore:sales] немає дзвінків-угод із segments — нічого робити');
     return true;

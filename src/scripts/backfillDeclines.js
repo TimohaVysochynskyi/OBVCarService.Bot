@@ -1,4 +1,5 @@
 import 'dotenv/config';
+const SEPARATE_ONLY = process.argv.includes('--separate-only');
 import { usageLine } from '../platform/openai/client.js';
 import { getUnexplainedDeclines, setClientDeclineReason } from '../features/analysis/repo.js';
 import { getDeclineReasonCounts } from '../features/reporting/repo.js';
@@ -18,7 +19,7 @@ async function main() {
   const { limit } = parseArgs(process.argv.slice(2));
   await migrate();
 
-  const calls = await getUnexplainedDeclines({ limit });
+  const calls = await getUnexplainedDeclines({ limit, separateOnly: SEPARATE_ONLY });
   if (!calls.length) {
     console.log('[backfillDeclines] нема чого перевіряти');
     return;

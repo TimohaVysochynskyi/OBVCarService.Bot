@@ -1,4 +1,5 @@
 import 'dotenv/config';
+const SEPARATE_ONLY = process.argv.includes('--separate-only');
 import { usageLine } from '../platform/openai/client.js';
 import { getCallsMissingBlocker, resetAllBlockers, setCallBlocker } from '../features/analysis/repo.js';
 import { clearAllReportSegments, getBlockerStats } from '../features/reporting/repo.js';
@@ -38,7 +39,7 @@ async function main() {
     console.log('[backfillBlockers] --relabel: перевіряються заново лише вже знайдені відмови, щоб отримати третю категорію і конкретну причину');
   }
 
-  const calls = await getCallsMissingBlocker({ limit, relabel });
+  const calls = await getCallsMissingBlocker({ limit, relabel, separateOnly: SEPARATE_ONLY });
   if (!calls.length) {
     console.log('[backfillBlockers] нічого перевіряти — усі незакриті дзвінки вже перевірені.');
     process.exit(0);

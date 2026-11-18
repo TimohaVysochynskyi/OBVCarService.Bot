@@ -68,6 +68,9 @@ npm run normalize:operators                # канонічні імена пе�
 npm run retranscribe:recent                # останні 5 дзвінків кожного оператора через ElevenLabs
 npm run retranscribe:last                  # останні N глобально, ФОРСОВАНО ElevenLabs (без фолбеку)
 npm run retranscribe:combined              # переклад історії в separate; --max-credits N; --reserve N
+#   ⚠️ --separate-only у backfill:purpose, rescore:sales, backfill:blockers і backfill:declines
+#   звужує перерахунок до дзвінків, уже перекладених у separate — щоб не платити двічі за ті,
+#   які ще чекають своєї черги на ретранскрипцію
 npm run kb:reindex                         # переіндексувати базу знань; -- 5 для одного дока
 ```
 

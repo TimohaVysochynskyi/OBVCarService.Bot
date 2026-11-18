@@ -1,11 +1,12 @@
 import 'dotenv/config';
+const SEPARATE_ONLY = process.argv.includes('--separate-only');
 import { getCallsMissingPurpose, updateCallAnalysis } from '../features/analysis/repo.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../features/analysis/analyzeCall.js';
 import { displayName } from '../features/operators/display.js';
 
 
 async function main() {
-  const calls = await getCallsMissingPurpose();
+  const calls = await getCallsMissingPurpose({ separateOnly: SEPARATE_ONLY });
   console.log(`[backfill:purpose] ${calls.length} call(s) with NULL purpose + transcript to process\n`);
   if (calls.length === 0) {
     console.log('[backfill:purpose] nothing to do.');

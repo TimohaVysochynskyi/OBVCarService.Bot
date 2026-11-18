@@ -1,4 +1,4 @@
-import { BLOCKED_FILTER, HAS_TEXT, NOT_BLOCKED_FILTER, SALES_FILTER, jsonParam } from '../../platform/db/filters.js';
+import { BLOCKED_FILTER, HAS_TEXT, NOT_BLOCKED_FILTER, SALES_FILTER, jsonParam, sttScope } from '../../platform/db/filters.js';
 import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 import { pool } from '../../platform/db/pool.js';
 
@@ -248,11 +248,12 @@ async function getCallsMissingSegments() {
   return rows;
 }
 
-async function getCallsMissingPurpose() {
+async function getCallsMissingPurpose({ separateOnly = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments
      FROM calls
      WHERE call_purpose IS NULL AND transcript IS NOT NULL AND transcript <> ''
+       ${sttScope(separateOnly)}
      ORDER BY start_time DESC`
   );
   return rows;
@@ -275,12 +276,13 @@ async function setCallPurpose(generalCallId, purpose) {
   await pool.query('UPDATE calls SET call_purpose = $2 WHERE general_call_id = $1', [generalCallId, purpose]);
 }
 
-async function getCallsMissingBlocker({ limit = null, relabel = false } = {}) {
+async function getCallsMissingBlocker({ limit = null, relabel = false, separateOnly = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
             call_purpose AS "callPurpose", transcript, segments
      FROM calls
      WHERE ${relabel ? BLOCKED_FILTER : 'deal_blocker IS NULL'} AND is_success IS NOT TRUE
+       ${sttScope(separateOnly)}
        AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time ASC
      ${limit ? 'LIMIT ' + Number(limit) : ''}`
@@ -288,11 +290,12 @@ async function getCallsMissingBlocker({ limit = null, relabel = false } = {}) {
   return rows;
 }
 
-async function getUnexplainedDeclines({ limit = null } = {}) {
+async function getUnexplainedDeclines({ limit = null, separateOnly = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript
      FROM calls
      WHERE ${SALES_FILTER} AND is_success IS NOT TRUE AND ${NOT_BLOCKED_FILTER}
+       ${sttScope(separateOnly)}
        AND client_decline_reason IS NULL
        AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time ASC
@@ -344,12 +347,13 @@ async function updateCallTranscript(generalCallId, transcript) {
   await pool.query('UPDATE calls SET transcript = $2 WHERE general_call_id = $1', [generalCallId, transcript]);
 }
 
-async function getSalesCallsWithSegments() {
+async function getSalesCallsWithSegments({ separateOnly = false } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", transcript, segments,
             communication_score AS "communicationScore"
      FROM calls
      WHERE call_purpose = 'sales' AND segments IS NOT NULL
+       ${sttScope(separateOnly)}
        AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time`
   );

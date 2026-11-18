@@ -19,6 +19,9 @@ const BLOCKER_COLUMNS_SQL = `
 
 const HAS_TEXT = `transcript IS NOT NULL AND transcript <> ''`;
 
+const SEPARATE_STT = `stt_mode = 'separate'`;
+const sttScope = (separateOnly) => (separateOnly ? `AND ${SEPARATE_STT}` : '');
+
 const KYIV_MONTH = `to_char(start_time AT TIME ZONE 'Europe/Kyiv', 'YYYY-MM')`;
 
 const IS_PERSON = `manager_name !~ '^[0-9]+$'`;
@@ -31,6 +34,8 @@ export {
   NOT_BLOCKED_FILTER,
   BLOCKER_COLUMNS_SQL,
   HAS_TEXT,
+  SEPARATE_STT,
+  sttScope,
   KYIV_MONTH,
   IS_PERSON,
 };
