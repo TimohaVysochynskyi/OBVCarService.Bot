@@ -110,3 +110,33 @@ test('перевірка висновків дістає повний замір
   assert.match(prompt, /сам факт ще не означає проблему/);
   assert.ok(!/доказ|рецензент/i.test(prompt), 'у видимому тексті зʼявились заборонені слова');
 });
+
+test('цитата на два-три слова нічого не демонструє і доказом не стає', () => {
+  const { showsBehaviour } = new Function(
+    'MIN_QUOTE_CHARS',
+    'MIN_QUOTE_WORDS',
+    `${sliceFunction(src, 'function showsBehaviour')}
+return { showsBehaviour };`
+  )(20, 4);
+  for (const quote of ['Це на чому?', 'Якого року?', 'А в чем?', 'Ага.', '']) {
+    assert.equal(showsBehaviour(quote), false, `пройшла цитата «${quote}»`);
+  }
+});
+
+test('змістовна цитата проходить і за довжиною, і за кількістю слів', () => {
+  const { showsBehaviour } = new Function(
+    'MIN_QUOTE_CHARS',
+    'MIN_QUOTE_WORDS',
+    `${sliceFunction(src, 'function showsBehaviour')}
+return { showsBehaviour };`
+  )(20, 4);
+  assert.equal(showsBehaviour('Можу записати вас на четвер о десятій'), true);
+  assert.equal(showsBehaviour('а що там з авто'), true);
+});
+
+test('перевірка довжини стоїть ДО пошуку цитати в сегментах', () => {
+  const fn = sliceFunction(src, 'function verifyCandidate');
+  assert.ok(fn.indexOf('showsBehaviour') < fn.indexOf('findQuote'), 'короткі цитати дарма шукаються в сегментах');
+  assert.ok(!/length < 3/.test(fn), 'стара межа у 3 символи лишилась');
+  assert.match(src, /const MIN_QUOTE_CHARS = 20;/);
+});

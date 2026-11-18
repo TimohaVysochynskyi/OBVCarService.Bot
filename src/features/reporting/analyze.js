@@ -9,6 +9,8 @@ import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 
 const MIN_EVIDENCE = 2;
 const MIN_EVIDENCE_CALLS = 2;
+const MIN_QUOTE_CHARS = 20;
+const MIN_QUOTE_WORDS = 4;
 const MAX_PHRASES = 5;
 const reduceModel = () => config.openai.reportModel;
 
@@ -186,14 +188,20 @@ function renderCandidate(c) {
   return `[${c.id}] (${c.type}/${c.stage}) ${c.label} | "${c.quote}"${c.note ? ` | ${c.note}` : ''}`;
 }
 
+function showsBehaviour(quote) {
+  const text = String(quote || '').trim();
+  if (text.length >= MIN_QUOTE_CHARS) return true;
+  return text.split(/\s+/).filter(Boolean).length >= MIN_QUOTE_WORDS;
+}
+
 function verifyCandidate(c) {
   const note = c.note || null;
+  if (!showsBehaviour(c.quote)) return null;
   if (Array.isArray(c.segments) && c.segments.length) {
     const hit = findQuote(c.segments, c.quote, { requireRole: 'manager' });
     if (!hit) return null;
     return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end, note };
   }
-  if (String(c.quote).trim().length < 3) return null;
   return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note };
 }
 
