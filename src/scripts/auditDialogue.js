@@ -64,6 +64,8 @@ async function main() {
   let fragments = 0;
   let fragmentedCalls = 0;
   let turns = 0;
+  const overlapExamples = [];
+  const cutOffExamples = [];
 
   for (const call of calls) {
     const segments = call.segments || [];
@@ -82,7 +84,19 @@ async function main() {
       }
     }
     interrupts.total += cut.length;
-    for (const it of cut) interrupts[it.kind] += 1;
+    const callFragments = segments.filter((x) => String(x.text || '').trim().length < 6).length;
+    for (const it of cut) {
+      interrupts[it.kind] += 1;
+      const sample = {
+        callId: call.generalCallId,
+        fragments: callFragments,
+        turns: segments.length,
+        overlapSec: it.overlapSec,
+        clientText: it.clientText,
+        quote: it.quote,
+      };
+      (it.kind === INTERRUPT_OVERLAP ? overlapExamples : cutOffExamples).push(sample);
+    }
     if (cut.length) callsWithInterrupt.add(call.generalCallId);
 
     const key = call.managerName || '—';
@@ -104,6 +118,9 @@ async function main() {
   console.log(`  кандидатів:          ${interrupts.total} на ${callsWithInterrupt.size} дзвінк(ах)`);
   console.log(`  за перекриттям:      ${interrupts[INTERRUPT_OVERLAP]}`);
   console.log(`  за обривом на тире:  ${interrupts[INTERRUPT_CUT_OFF]}`);
+
+  printExamples('перебивання за перекриттям', overlapExamples);
+  printExamples('перебивання за обривом на тире', cutOffExamples);
 
   console.log('\n[auditDialogue] --- ЯКІСТЬ ТРАНСКРИПТІВ ---');
   console.log(`  реплік усього:            ${turns}`);
