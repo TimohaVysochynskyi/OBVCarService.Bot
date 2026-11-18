@@ -32,7 +32,8 @@
     "backfill:blockers": "node src/scripts/backfillBlockers.js",
     "kb:reindex": "node src/scripts/reindexKb.js",
     "rescore:sales": "node src/scripts/rescoreSales.js",
-    "fix:roles": "node src/scripts/fixRoles.js"
+    "fix:roles": "node src/scripts/fixRoles.js",
+    "audit:dialogue": "node src/scripts/auditDialogue.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

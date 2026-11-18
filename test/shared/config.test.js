@@ -5,7 +5,8 @@ const NAMES = [
   'DATABASE_URL', 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_BOOTSTRAP_CHAT_IDS', 'ALERT_FALLBACK_CHAT_IDS',
   'BINOTEL_API_KEY', 'BINOTEL_API_SECRET', 'BINOTEL_BASE_URL', 'OPENAI_API_KEY',
   'OPENAI_ANALYZE_MODEL', 'OPENAI_REPORT_MODEL', 'ELEVENLABS_API_KEY', 'ELEVENLABS_MIN_BALANCE_USD',
-  'CALL_LANGUAGE', 'LONG_PAUSE_SEC', 'SHARED_EXTENSIONS', 'EXCLUDED_EXTENSIONS', 'PERSONAL_OPERATORS',
+  'CALL_LANGUAGE', 'LONG_PAUSE_SEC', 'HOLD_SUSPECT_SEC', 'INTERRUPT_MIN_OVERLAP_SEC',
+  'TURN_GAP_SEC', 'MANAGER_AUDIO_CHANNEL', 'SHARED_EXTENSIONS', 'EXCLUDED_EXTENSIONS', 'PERSONAL_OPERATORS',
   'POLL_OVERLAP_MIN', 'POLL_CHUNK_PAUSE_MS', 'MAX_PENDING_ATTEMPTS', 'AUDIO_CLIP_PAD_SEC',
   'SEGMENT_CONSISTENCY_PASSES', 'GLOBAL_REPORT_CONCURRENCY', 'GLOBAL_REPORT_PAUSE_MS',
   'GLOBAL_REPORT_BUDGET_MS', 'HTTP_TIMEOUT_MS', 'KB_CLIP_PAD_PAGES', 'FFMPEG_PATH',
@@ -66,7 +67,11 @@ test('решта дефолтів збережена', () => {
   const c = defaults.config;
   assert.equal(c.binotel.baseUrl, 'https://api.binotel.com/api/4.0');
   assert.equal(c.binotel.outageReminderMin, 120);
-  assert.equal(c.call.longPauseSec, 4);
+  assert.equal(c.call.longPauseSec, 6);
+  assert.equal(c.call.holdSuspectSec, 20);
+  assert.equal(c.call.interruptOverlapSec, 0.4);
+  assert.equal(c.call.turnGapSec, 0.8);
+  assert.equal(c.call.managerChannel, 0);
   assert.equal(c.audio.clipPadSec, 3);
   assert.equal(c.audio.minFreeMb, 1024);
   assert.equal(c.audio.ffmpegPath, 'ffmpeg');

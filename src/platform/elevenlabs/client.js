@@ -29,7 +29,7 @@ async function sttDiarize(audioBlob, { multichannel = false } = {}) {
       if (multichannel) {
         form.append('use_multi_channel', 'true');
         form.append('diarize', 'false');
-        form.append('multichannel_output_style', 'combined');
+        form.append('multichannel_output_style', 'separate');
       } else {
         form.append('diarize', 'true');
         form.append('num_speakers', numSpeakers());
@@ -85,6 +85,12 @@ function speakerIdOf(word, multichannel, previous) {
   return previous ?? 'speaker_0';
 }
 
+function tidyTurns(turns) {
+  return turns
+    .map((x) => ({ speaker: x.speaker, text: x.text.replace(/\s+/g, ' ').trim(), start: x.start, end: x.end }))
+    .filter((x) => x.text);
+}
+
 function buildTurns(words, multichannel = false) {
   const turns = [];
   let cur = null;
@@ -105,9 +111,47 @@ function buildTurns(words, multichannel = false) {
     }
   }
   if (cur) turns.push(cur);
-  return turns
-    .map((x) => ({ speaker: x.speaker, text: x.text.replace(/\s+/g, ' ').trim(), start: x.start, end: x.end }))
-    .filter((x) => x.text);
+  return tidyTurns(turns);
+}
+
+function buildChannelTurns(words, speaker, gapSec) {
+  const turns = [];
+  let cur = null;
+  for (const w of words || []) {
+    const t = w.text ?? '';
+    if (w.type === 'spacing') {
+      if (cur) cur.text += t;
+      continue;
+    }
+    const start = w.start ?? null;
+    const silence = cur && start != null && cur.end != null && start - cur.end > gapSec;
+    if (!cur || silence) {
+      if (cur) turns.push(cur);
+      cur = { speaker, text: t, start, end: w.end ?? null };
+    } else {
+      cur.text += t;
+      if (start != null && cur.start == null) cur.start = start;
+      if (w.end != null) cur.end = w.end;
+    }
+  }
+  if (cur) turns.push(cur);
+  return tidyTurns(turns);
+}
+
+function turnsFromResponse(data, multichannel) {
+  const perChannel = multichannel && Array.isArray(data.transcripts) ? data.transcripts : null;
+  if (!perChannel) return buildTurns(data.words, multichannel);
+  const gapSec = config.call.turnGapSec;
+  return perChannel
+    .map((t, index) => buildChannelTurns(t.words, `speaker_${t.channel_index ?? index}`, gapSec))
+    .flat()
+    .sort((a, b) => (a.start ?? 0) - (b.start ?? 0));
+}
+
+function plainText(data) {
+  if (data.text) return String(data.text).trim();
+  if (!Array.isArray(data.transcripts)) return '';
+  return data.transcripts.map((t) => String(t.text || '').trim()).filter(Boolean).join('\n\n');
 }
 
 const ROLE_SCHEMA = {
@@ -227,8 +271,8 @@ async function diarize(audioBlob, { managerName, audioPath, direction } = {}) {
   const multichannel = (channels ?? 1) >= 2;
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);
   const data = await sttDiarize(audioBlob, { multichannel });
-  const plain = (data.text || '').trim();
-  const turns = buildTurns(data.words, multichannel);
+  const plain = plainText(data);
+  const turns = turnsFromResponse(data, multichannel);
   if (turns.length === 0) return { transcript: plain || '(порожньо)', segments: null };
 
   const speakerIds = [...new Set(turns.map((t) => t.speaker))];

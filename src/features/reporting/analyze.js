@@ -3,11 +3,12 @@ import { chatJson } from '../../platform/openai/llm.js';
 import { config } from '../../shared/config.js';
 import { findQuote, normalize } from '../../domain/call/quoteMatch.js';
 import { SALES_STAGES } from '../../domain/call/stages.js';
-import { dialogueMetrics } from '../../domain/call/dialogueMetrics.js';
+import { dialogueMetrics, INTERRUPT_OVERLAP } from '../../domain/call/dialogueMetrics.js';
 import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 
 
 const MIN_EVIDENCE = 2;
+const MIN_EVIDENCE_CALLS = 2;
 const MAX_PHRASES = 5;
 const reduceModel = () => config.openai.reportModel;
 
@@ -95,27 +96,46 @@ const RELEVANCE_SCHEMA = {
   },
 };
 
+const MAX_DIALOGUE_PER_CALL = 2;
+
+function interleave(queues, howMany) {
+  const out = [];
+  let turn = 0;
+  while (out.length < howMany && queues.some((q) => q.length)) {
+    const queue = queues[turn % queues.length];
+    if (queue.length) out.push(queue.shift());
+    turn += 1;
+  }
+  return out;
+}
+
 function dialogueCandidates(call) {
   const segs = Array.isArray(call.segments) ? call.segments : null;
   if (!segs?.length) return [];
   const { interruptions, longPauses, thresholdSec } = dialogueMetrics(segs);
-  const out = [];
-  for (const it of interruptions) {
-    if (!it.quote) continue;
-    out.push({
+
+  const interrupted = interruptions
+    .filter((it) => it.quote)
+    .sort((a, b) => b.overlapSec - a.overlapSec)
+    .map((it) => ({
       type: 'error',
       stage: SALES_STAGES[0],
-      label: 'перебив клієнта на півслові',
+      label: 'заговорив, поки клієнт ще говорив',
       quote: it.quote,
       start: it.start,
       end: it.end,
       segIndex: it.segIndex,
-      note: `клієнт не договорив: «${it.clientText}»`,
-    });
-  }
-  for (const p of longPauses) {
-    if (!p.quote) continue;
-    out.push({
+      note:
+        `клієнт не договорив: «${it.clientText}»` +
+        (it.kind === INTERRUPT_OVERLAP
+          ? `; менеджер почав говорити за ${it.overlapSec}с до кінця його репліки, і клієнт замовк`
+          : '; репліку клієнта обірвано, далі одразу говорить менеджер'),
+    }));
+
+  const waited = longPauses
+    .filter((p) => p.quote && !p.justified)
+    .sort((a, b) => b.pauseSec - a.pauseSec)
+    .map((p) => ({
       type: 'error',
       stage: SALES_STAGES[0],
       label: `пауза ${p.pauseSec}с перед відповіддю (поріг ${thresholdSec}с)`,
@@ -125,10 +145,11 @@ function dialogueCandidates(call) {
       segIndex: p.segIndex,
       note:
         `клієнт сказав: «${p.clientText}», менеджер відповів лише через ${p.pauseSec}с` +
-        (p.prevManagerText ? `; попередня репліка менеджера: «${p.prevManagerText}»` : ''),
-    });
-  }
-  return out;
+        (p.prevManagerText ? `; попередня репліка менеджера: «${p.prevManagerText}»` : '') +
+        '; код перевірив: попередження про затримку не було',
+    }));
+
+  return interleave([interrupted, waited], MAX_DIALOGUE_PER_CALL);
 }
 
 function buildCandidates(calls) {
@@ -176,6 +197,11 @@ function verifyCandidate(c) {
   return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note };
 }
 
+function enoughEvidence(evidence) {
+  if (evidence.length < MIN_EVIDENCE) return false;
+  return new Set(evidence.map((e) => e.callId)).size >= MIN_EVIDENCE_CALLS;
+}
+
 function assembleFindings(rawFindings, calls) {
   const { byId } = buildCandidates(calls);
   const usedIds = new Set();
@@ -196,7 +222,7 @@ function assembleFindings(rawFindings, calls) {
       usedQuotes.add(quoteKey);
       evidence.push(ev);
     }
-    if (evidence.length < MIN_EVIDENCE) continue;
+    if (!enoughEvidence(evidence)) continue;
     findings.push({
       type,
       claim: String(f.claim || '').trim(),
@@ -239,6 +265,25 @@ const MERGE_SCHEMA = {
   },
 };
 
+function spreadAcrossCalls(pool, limit) {
+  const seenCalls = new Set();
+  const picked = [];
+  const leftovers = [];
+  for (const ev of pool) {
+    if (seenCalls.has(ev.callId)) leftovers.push(ev);
+    else {
+      seenCalls.add(ev.callId);
+      picked.push(ev);
+    }
+    if (picked.length >= limit) return picked;
+  }
+  for (const ev of leftovers) {
+    if (picked.length >= limit) break;
+    picked.push(ev);
+  }
+  return picked;
+}
+
 function applyMergeGroups(groups, findings) {
   const usedQuotes = new Set();
   const out = [];
@@ -246,19 +291,18 @@ function applyMergeGroups(groups, findings) {
     const members = (g.member_indices || []).map((i) => findings[i]).filter(Boolean);
     if (!members.length) continue;
     const type = g.type === 'strength' ? 'strength' : 'error';
-    const evidence = [];
+    const pool = [];
     for (const m of members) {
       if (m.type !== type) continue;
       for (const ev of m.evidence || []) {
         const key = `${ev.callId}|${normalize(ev.quote)}`;
         if (usedQuotes.has(key)) continue;
         usedQuotes.add(key);
-        evidence.push(ev);
-        if (evidence.length >= MAX_EVIDENCE_PER_FINDING) break;
+        pool.push(ev);
       }
-      if (evidence.length >= MAX_EVIDENCE_PER_FINDING) break;
     }
-    if (evidence.length < MIN_EVIDENCE) continue;
+    const evidence = spreadAcrossCalls(pool, MAX_EVIDENCE_PER_FINDING);
+    if (!enoughEvidence(evidence)) continue;
     out.push({
       type,
       claim: String(g.claim || members[0].claim || '').trim(),
@@ -288,8 +332,9 @@ function fallbackMerge(findings) {
       usedQuotes.add(key);
       evidence.push(ev);
     }
-    if (evidence.length < MIN_EVIDENCE) continue;
-    out.push({ ...f, evidence: evidence.slice(0, MAX_EVIDENCE_PER_FINDING) });
+    const spread = spreadAcrossCalls(evidence, MAX_EVIDENCE_PER_FINDING);
+    if (!enoughEvidence(spread)) continue;
+    out.push({ ...f, evidence: spread });
     if (out.length >= MAX_PERIOD_FINDINGS) break;
   }
   return out;
@@ -363,8 +408,8 @@ async function verifyFindingsRelevance(findings) {
   findings.forEach((f, fi) => {
     const sup = supMap.get(fi);
     if (!sup) return;
-    const evidence = f.evidence.filter((_, ei) => sup.has(ei));
-    if (evidence.length < MIN_EVIDENCE) return;
+    const evidence = f.evidence.filter((unused, ei) => sup.has(ei));
+    if (!enoughEvidence(evidence)) return;
     kept.push({ ...f, evidence });
   });
   return kept;
@@ -385,8 +430,8 @@ async function runReducePass(managerName, candidates, stats) {
     `Використовуй ТІЛЬКИ id зі списку. НЕ вигадуй цитат і НЕ пиши цитати в тексті — цитати підставить система за id.\n` +
     `Не додавай finding, якщо для нього немає щонайменше ${MIN_EVIDENCE} цитат. Один id не використовуй у двох findings.\n\n` +
     `ОКРЕМО про КУЛЬТУРУ ДІАЛОГУ. Частина кандидатів — це не оцінки моделі, а ЗАМІРИ КОДУ з аудіо:\n` +
-    `- «перебив клієнта на півслові» — клієнт не договорив (репліка обірвана), і менеджер почав говорити. Це реальний факт; якщо таких кандидатів кілька, зроби з них окремий finding про те, що менеджер не дослуховує клієнта.\n` +
-    `- «пауза Nс перед відповіддю» — скільки клієнт чекав на відповідь. Це помилка ЛИШЕ тоді, коли пауза не виправдана. НЕ вважай помилкою й НЕ включай у finding, якщо з цитати видно, що менеджер попередив про перевірку («секунду», «хвилинку», «зараз уточню/подивлюсь») або якщо клієнт сам замовк/думав.\n` +
+    `- «заговорив, поки клієнт ще говорив» — менеджер почав свою репліку поверх мови клієнта, і клієнт після цього замовк. Код уже відсіяв підтакування й випадки, де клієнт стих сам. Якщо таких кандидатів кілька, зроби з них окремий finding про те, що менеджер не дослуховує клієнта.\n` +
+    `- «пауза Nс перед відповіддю» — скільки клієнт чекав. Після цитати окремим полем їде замір: що саме сказав клієнт і що менеджер казав перед тим. У самій цитаті цього не видно й бути не може — цитата це репліка ПІСЛЯ паузи. Код уже відкинув паузи, де менеджер попередив про перевірку, де клієнт лише підтакнув і де дзвінок переводили. Якщо із заміру все ж видно, що чекати було за що, — не включай такий кандидат у finding.\n` +
     `У claim таких findings пиши саме про поведінку (перебиває / довго не відповідає), а не про цифри.`;
 
   const user = `${metricsLine}\n\nКАНДИДАТИ:\n` + candidates.map(renderCandidate).join('\n');

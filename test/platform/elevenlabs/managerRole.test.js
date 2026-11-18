@@ -66,6 +66,7 @@ test('моно-дзвінок, як і раніше, визначає роль �
 test('у стереорежимі мовець береться з НОМЕРА КАНАЛУ, а не з рядка speaker_id', () => {
   const build = new Function(
     `${sliceFunction(src, 'function speakerIdOf')}
+${sliceFunction(src, 'function tidyTurns')}
 ${sliceFunction(src, 'function buildTurns')}
 return buildTurns;`
   )();
@@ -80,6 +81,7 @@ return buildTurns;`
 test('у моно номера каналу немає — лишається мітка діаризації', () => {
   const build = new Function(
     `${sliceFunction(src, 'function speakerIdOf')}
+${sliceFunction(src, 'function tidyTurns')}
 ${sliceFunction(src, 'function buildTurns')}
 return buildTurns;`
   )();

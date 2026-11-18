@@ -117,6 +117,17 @@ async function updateCallIntro(generalCallId, { name, company }) {
   ]);
 }
 
+async function getCallsWithSegments() {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            start_time AS "startTime", call_purpose AS "callPurpose", segments
+     FROM calls
+     WHERE segments IS NOT NULL AND jsonb_array_length(segments) >= 2
+     ORDER BY start_time ASC`
+  );
+  return rows;
+}
+
 async function getCallsForRoleAudit({ limit = null, since = null } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
@@ -328,6 +339,7 @@ export {
   updateCallMap,
   updateCallClassification,
   updateCallIntro,
+  getCallsWithSegments,
   getCallsForRoleAudit,
   applyRoleFix,
   getCallsMissingSegments,
