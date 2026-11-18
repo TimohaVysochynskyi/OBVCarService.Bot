@@ -4,30 +4,52 @@ import { migrate } from '../platform/db/pool.js';
 import { detectClientComplaint } from '../features/analysis/clientComplaint.js';
 import { complaintLabel } from '../domain/call/complaint.js';
 import { displayName } from '../features/operators/display.js';
-import { usageLine } from '../platform/openai/client.js';
+import { usageLine, usageReport } from '../platform/openai/client.js';
 import { config } from '../shared/config.js';
 
 
-const LIMIT = process.argv.includes('--limit')
-  ? Number(process.argv[process.argv.indexOf('--limit') + 1])
-  : null;
+const DEFAULT_BUDGET_USD = 1;
+
+function flagValue(name) {
+  const at = process.argv.indexOf(name);
+  return at > 0 ? process.argv[at + 1] : null;
+}
+
+const LIMIT = flagValue('--limit') ? Number(flagValue('--limit')) : null;
+const BUDGET_USD = flagValue('--budget') ? Number(flagValue('--budget')) : DEFAULT_BUDGET_USD;
 const PAUSE_MS = config.backfill.complaintPauseMs;
+
+function budgetSpent() {
+  const usd = usageReport().usd;
+  return usd != null && usd >= BUDGET_USD;
+}
 
 async function main() {
   await migrate();
 
   const calls = await getCallsMissingComplaint(LIMIT ? { limit: LIMIT } : {});
-  console.log(`[backfillComplaints] неперевірених дзвінків: ${calls.length} (найновіші першими)`);
+  console.log(
+    `[backfillComplaints] неперевірених дзвінків: ${calls.length} (найновіші першими)` +
+      ` · межа витрат $${BUDGET_USD} — прогін спиниться сам, щойно її буде досягнуто`
+  );
 
   const byType = new Map();
   const byManager = new Map();
   let found = 0;
   let failed = 0;
+  let checked = 0;
+  let stoppedOnBudget = false;
 
   for (const [i, call] of calls.entries()) {
+    if (budgetSpent()) {
+      stoppedOnBudget = true;
+      console.log(`\n[backfillComplaints] межу $${BUDGET_USD} досягнуто на ${i} дзвінку з ${calls.length} — зупиняюсь.`);
+      break;
+    }
     try {
       const result = await detectClientComplaint(call.transcript, call.segments);
       await setClientComplaint(call.generalCallId, result);
+      checked += 1;
       if (result.hasComplaint) {
         found += 1;
         byType.set(result.type, (byType.get(result.type) || 0) + 1);
@@ -47,7 +69,11 @@ async function main() {
   }
 
   console.log('\n[backfillComplaints] --- РЕЗУЛЬТАТ ---');
-  console.log(`  перевірено:            ${calls.length}`);
+  console.log(`  перевірено:            ${checked} з ${calls.length}`);
+  if (stoppedOnBudget) {
+    console.log(`  зупинено на межі:      $${BUDGET_USD}; решта лишилась із has_complaint IS NULL`);
+    console.log('                         повторний запуск продовжить саме звідти, нічого не перевіряючи двічі');
+  }
   console.log(`  незадоволень знайдено: ${found}`);
   console.log(`  не вдалося:            ${failed}`);
   console.log(`  вартість: ${usageLine()}`);
