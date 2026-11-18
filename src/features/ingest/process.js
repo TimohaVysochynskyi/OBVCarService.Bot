@@ -14,6 +14,7 @@ import { transcribeAudio } from '../analysis/transcribe.js';
 import { classifyCall } from '../analysis/classifyCall.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../analysis/analyzeCall.js';
 import { detectDealBlocker, NO_BLOCKER } from '../analysis/dealBlocker.js';
+import { detectEngineRequest, NOT_ENGINE } from '../analysis/engineRequest.js';
 import { identifyManager } from '../analysis/identifyManager.js';
 import { sendAlert } from '../ops/notify.js';
 import { appError, classify, describeError, isHopeless, reviveError } from '../../shared/errors.js';
@@ -95,6 +96,17 @@ async function transcribeClassifyAndSave(call, roster) {
     }
   }
 
+  let engine = NOT_ENGINE;
+  try {
+    engine = await detectEngineRequest(transcript);
+    if (engine.isEngineRequest) {
+      console.log(`[processCalls]   ${call.generalCallId} engine request: ${engine.service}${engine.car ? ` (${engine.car})` : ''}`);
+    }
+  } catch (err) {
+    console.error(`[processCalls]   engine check failed for ${call.generalCallId}: ${err.message}`);
+    engine = { ...NOT_ENGINE, isEngineRequest: null };
+  }
+
   await saveCall({
     generalCallId: call.generalCallId,
     direction: call.direction ?? null,
@@ -118,6 +130,10 @@ async function transcribeClassifyAndSave(call, roster) {
     communicationScore: classification.communicationScore,
     dealBlocker: classification.isSuccess === true ? NO_BLOCKER : blocker.blocker,
     dealBlockerQuote: blocker.quote,
+    engineRequest: engine.isEngineRequest,
+    engineService: engine.service,
+    engineCar: engine.car,
+    engineQuote: engine.quote,
     audioPath: audio.relPath,
     audioBytes: audio.relPath ? audio.bytes : null,
     audioStatus: audio.relPath ? 'stored' : null,

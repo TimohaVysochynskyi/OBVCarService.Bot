@@ -11,6 +11,7 @@ import {
   setCallBlocker,
   setCallPurpose,
   setClientDeclineReason,
+  setEngineRequest,
   updateCallClassification,
   updateCallMap,
 } from './repo.js';
@@ -25,6 +26,8 @@ import { identifyManager } from './identifyManager.js';
 import { isSales, NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 import { SHARED_EXTENSIONS, PERSONAL_OPERATORS } from '../../domain/call/phoneLines.js';
 import { JOBS } from '../prompts/registry.js';
+import { mentionsEngine } from '../../domain/call/engine.js';
+import { detectEngineRequest } from './engineRequest.js';
 
 
 const BLOCK = 200;
@@ -89,6 +92,14 @@ const RUNNERS = {
       const roster = await getOperatorRoster();
       const name = await identifyManager({ transcript: call.transcript, segments: call.segments }, roster);
       if (name) await updateManagerName(call.generalCallId, name);
+    },
+  },
+
+  engine: {
+    applies: (call) => mentionsEngine(call.transcript),
+    async run(call) {
+      const found = await detectEngineRequest(call.transcript);
+      await setEngineRequest(call.generalCallId, found);
     },
   },
 };

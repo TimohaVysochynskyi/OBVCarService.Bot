@@ -123,6 +123,7 @@ const config = deepFreeze({
     declinePauseMs: number('BACKFILL_DECLINE_PAUSE_MS', 400, { min: 0 }),
     personalPauseMs: number('BACKFILL_PERSONAL_PAUSE_MS', 400, { min: 0 }),
     rescoreIntroPauseMs: number('RESCORE_INTRO_PAUSE_MS', 500, { min: 0 }),
+    enginePauseMs: number('BACKFILL_ENGINE_PAUSE_MS', 300, { min: 0 }),
     retranscribeLimit: number('RETRANSCRIBE_LIMIT', 5, { min: 1 }),
     retranscribeLastLimit: number('RETRANSCRIBE_LAST_LIMIT', 7, { min: 1 }),
   },

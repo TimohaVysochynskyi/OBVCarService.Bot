@@ -33,8 +33,8 @@ for (const e of prompts) {
 
 const call = (o = {}) => ({ internalNumber: '903', callPurpose: 'sales', isSuccess: false, dealBlocker: null, ...o });
 
-test('у меню всі 13 інструкцій', () => {
-  assert.equal(prompts.length, 13);
+test('у меню всі 14 інструкцій', () => {
+  assert.equal(prompts.length, 14);
 });
 
 test('кожна має кнопку, заголовок, пояснення і непорожній стандартний текст', () => {

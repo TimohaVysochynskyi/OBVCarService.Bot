@@ -131,6 +131,63 @@ async function getBlockedCalls(name, start, end) {
   return rows;
 }
 
+async function getEngineBreakdown() {
+  const { rows } = await pool.query(
+    `SELECT ${KYIV_MONTH} AS month, engine_service AS service, COUNT(*)::int AS count
+     FROM calls
+     WHERE engine_request
+     GROUP BY 1, 2
+     ORDER BY 1, 3 DESC`
+  );
+  return rows;
+}
+
+async function getEngineMonthlyTotals() {
+  const { rows } = await pool.query(
+    `SELECT ${KYIV_MONTH} AS month,
+            COUNT(*) FILTER (WHERE engine_request)::int AS engine,
+            COUNT(*) FILTER (WHERE engine_request AND ${SALES_FILTER})::int AS "engineSales",
+            COUNT(*) FILTER (WHERE engine_request AND is_success)::int AS "engineBooked",
+            COUNT(*)::int AS total
+     FROM calls
+     WHERE ${HAS_TEXT}
+     GROUP BY 1
+     ORDER BY 1`
+  );
+  return rows;
+}
+
+async function getEngineCars() {
+  const { rows } = await pool.query(
+    `SELECT engine_car AS car, COUNT(*)::int AS count
+     FROM calls
+     WHERE engine_request AND engine_car IS NOT NULL AND engine_car <> ''
+     GROUP BY 1 ORDER BY 2 DESC, 1`
+  );
+  return rows;
+}
+
+async function getEngineExamples(limit = 8) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime", manager_name AS "managerName",
+            engine_service AS service, engine_car AS car, engine_quote AS quote
+     FROM calls
+     WHERE engine_request AND engine_quote IS NOT NULL
+     ORDER BY start_time DESC LIMIT $1`,
+    [limit]
+  );
+  return rows;
+}
+
+async function getEngineCoverage() {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE engine_request IS NOT NULL)::int AS checked,
+            COUNT(*)::int AS total
+     FROM calls WHERE ${HAS_TEXT}`
+  );
+  return rows[0];
+}
+
 async function getDeclineReasonCounts() {
   const { rows } = await pool.query(
     `SELECT 'service' AS side, deal_blocker_reason AS reason, COUNT(*)::int AS count
@@ -408,6 +465,11 @@ export {
   getBlockerStats,
   getBucketedTrend,
   getCallsForReport,
+  getEngineBreakdown,
+  getEngineMonthlyTotals,
+  getEngineCars,
+  getEngineExamples,
+  getEngineCoverage,
   deleteReportSegmentsOverlapping,
   clearAllReportSegments,
   getReportTimes,

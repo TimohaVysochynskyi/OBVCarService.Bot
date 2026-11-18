@@ -5,6 +5,7 @@ import '../analysis/analyzeCall.js';
 import '../analysis/classifyCall.js';
 import '../analysis/dealBlocker.js';
 import '../analysis/clientDecline.js';
+import '../analysis/engineRequest.js';
 import '../analysis/classifyPersonal.js';
 import '../analysis/identifyManager.js';
 import '../reporting/analyze.js';
