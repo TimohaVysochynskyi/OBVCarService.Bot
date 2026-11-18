@@ -15,8 +15,28 @@ const PAUSE_REASONS = [
   'hold', 'warned_before', 'warned_after', 'client_asked_nothing', 'manager_said_nothing', 'same_exchange',
 ];
 
+const EXAMPLES = process.argv.includes('--examples')
+  ? Number(process.argv[process.argv.indexOf('--examples') + 1])
+  : 0;
+
 function pct(part, total) {
   return total ? `${((part / total) * 100).toFixed(1)}%` : '—';
+}
+
+function spread(rows, howMany) {
+  if (rows.length <= howMany) return rows;
+  const step = rows.length / howMany;
+  return Array.from({ length: howMany }, (unused, i) => rows[Math.floor(i * step)]);
+}
+
+function printExamples(title, rows) {
+  if (!EXAMPLES || !rows.length) return;
+  console.log(`\n[auditDialogue] приклади — ${title}:`);
+  for (const row of spread(rows, EXAMPLES)) {
+    console.log(`  ${row.callId} · уламків у дзвінку ${pct(row.fragments, row.turns)} · перекриття ${row.overlapSec}с`);
+    console.log(`     клієнт: «${row.clientText}»`);
+    console.log(`     менеджер: «${row.quote}»`);
+  }
 }
 
 function fragmentShare(segments) {
