@@ -4,6 +4,8 @@ import { config } from '../../shared/config.js';
 import { findQuote, normalize } from '../../domain/call/quoteMatch.js';
 import { SALES_STAGES } from '../../domain/call/stages.js';
 import { dialogueMetrics, INTERRUPT_OVERLAP } from '../../domain/call/dialogueMetrics.js';
+import { CLIENT_ROLE, MANAGER_ROLE } from '../../domain/call/roles.js';
+import { complaintLabel } from '../../domain/call/complaint.js';
 import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 
 
@@ -154,12 +156,29 @@ function dialogueCandidates(call) {
   return interleave([interrupted, waited], MAX_DIALOGUE_PER_CALL);
 }
 
+function complaintCandidates(call) {
+  if (!call.hasComplaint || !call.complaintQuote) return [];
+  return [
+    {
+      type: 'error',
+      stage: SALES_STAGES[0],
+      label: `клієнт висловив незадоволення: ${complaintLabel(call.complaintType) || call.complaintType}`,
+      quote: call.complaintQuote,
+      quoteRole: CLIENT_ROLE,
+      start: null,
+      end: null,
+      segIndex: null,
+      note: 'це слова КЛІЄНТА, не менеджера — претензія прозвучала просто в розмові',
+    },
+  ];
+}
+
 function buildCandidates(calls) {
   const candidates = [];
   const byId = new Map();
   calls.forEach((c) => {
     if (NON_SALES_PURPOSES.includes(c.callPurpose)) return;
-    const items = [...(c.behaviors?.items || []), ...dialogueCandidates(c)];
+    const items = [...(c.behaviors?.items || []), ...dialogueCandidates(c), ...complaintCandidates(c)];
     items.forEach((it) => {
       if (!it?.quote) return;
       const id = `e${candidates.length}`;
@@ -175,6 +194,7 @@ function buildCandidates(calls) {
         start: it.start ?? null,
         end: it.end ?? null,
         segIndex: it.segIndex ?? null,
+        quoteRole: it.quoteRole || MANAGER_ROLE,
         note: it.note || null,
       };
       candidates.push(cand);
@@ -196,13 +216,15 @@ function showsBehaviour(quote) {
 
 function verifyCandidate(c) {
   const note = c.note || null;
+  const role = c.quoteRole || MANAGER_ROLE;
+  const said = role === CLIENT_ROLE ? CLIENT_ROLE : null;
   if (!showsBehaviour(c.quote)) return null;
   if (Array.isArray(c.segments) && c.segments.length) {
-    const hit = findQuote(c.segments, c.quote, { requireRole: 'manager' });
+    const hit = findQuote(c.segments, c.quote, { requireRole: role });
     if (!hit) return null;
-    return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end, note };
+    return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: hit.start, end: hit.end, note, said };
   }
-  return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note };
+  return { callId: c.callId, startTime: c.startTime, quote: c.quote, start: null, end: null, note, said };
 }
 
 function enoughEvidence(evidence) {

@@ -371,6 +371,8 @@ async function getCallsForReport(name, start, end) {
     `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
             is_success AS "isSuccess", weakest_stage AS "weakestStage",
             communication_score AS "communicationScore", call_purpose AS "callPurpose",
+            has_complaint AS "hasComplaint", complaint_type AS "complaintType",
+            complaint_quote AS "complaintQuote",
             segments, behaviors
      FROM calls
      WHERE manager_name = $1 AND start_time >= $2 AND start_time < $3

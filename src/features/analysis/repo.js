@@ -149,6 +149,26 @@ async function getCallsMissingEngine({ limit = null } = {}) {
   return rows;
 }
 
+async function setClientComplaint(generalCallId, { hasComplaint, type, quote }) {
+  await pool.query(
+    `UPDATE calls SET has_complaint = $2, complaint_type = $3, complaint_quote = $4
+     WHERE general_call_id = $1`,
+    [generalCallId, hasComplaint ?? null, type ?? null, quote ?? null]
+  );
+}
+
+async function getCallsMissingComplaint({ limit = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            start_time AS "startTime", transcript, segments
+     FROM calls
+     WHERE has_complaint IS NULL AND ${HAS_TEXT}
+     ORDER BY start_time DESC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
 async function getCallsForRoleAudit({ limit = null, since = null } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
@@ -380,6 +400,8 @@ export {
   getCallsWithSegments,
   setEngineRequest,
   getCallsMissingEngine,
+  setClientComplaint,
+  getCallsMissingComplaint,
   getCallsForRoleAudit,
   applyRoleFix,
   countNonSalesScores,

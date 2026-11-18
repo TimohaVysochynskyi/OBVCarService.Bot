@@ -56,7 +56,7 @@ function findingBlock(finding, kind) {
   const examples = finding.examples
     .map(
       (e) => `<li class="mb-3 last:mb-0">
-        <blockquote class="rounded-lg border ${quoteBorder} bg-canvas px-3 py-2 text-sm">${esc(e.quote)}</blockquote>
+        <blockquote class="rounded-lg border ${quoteBorder} bg-canvas px-3 py-2 text-sm">${e.said === 'client' ? '<span class="font-semibold">Клієнт: </span>' : ''}${esc(e.quote)}</blockquote>
         ${e.note ? `<div class="mt-1 text-xs text-muted">${esc(e.note)}</div>` : ''}
         ${e.at ? `<div class="mt-1 text-xs text-muted">${esc(formatDate(e.at))}</div>` : ''}
         ${player(e)}

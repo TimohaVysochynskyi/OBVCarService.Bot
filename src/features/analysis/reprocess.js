@@ -11,6 +11,7 @@ import {
   setCallBlocker,
   setCallPurpose,
   setClientDeclineReason,
+  setClientComplaint,
   setEngineRequest,
   updateCallClassification,
   updateCallMap,
@@ -28,6 +29,7 @@ import { SHARED_EXTENSIONS, PERSONAL_OPERATORS } from '../../domain/call/phoneLi
 import { JOBS } from '../prompts/registry.js';
 import { mentionsEngine } from '../../domain/call/engine.js';
 import { detectEngineRequest } from './engineRequest.js';
+import { detectClientComplaint } from './clientComplaint.js';
 
 
 const BLOCK = 200;
@@ -100,6 +102,14 @@ const RUNNERS = {
     async run(call) {
       const found = await detectEngineRequest(call.transcript);
       await setEngineRequest(call.generalCallId, found);
+    },
+  },
+
+  complaint: {
+    applies: () => true,
+    async run(call) {
+      const found = await detectClientComplaint(call.transcript, call.segments);
+      await setClientComplaint(call.generalCallId, found);
     },
   },
 };

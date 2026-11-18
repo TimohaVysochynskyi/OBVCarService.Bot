@@ -15,6 +15,7 @@ import { classifyCall } from '../analysis/classifyCall.js';
 import { analyzeCallBehaviors, ANALYSIS_VERSION } from '../analysis/analyzeCall.js';
 import { detectDealBlocker, NO_BLOCKER } from '../analysis/dealBlocker.js';
 import { detectEngineRequest, NOT_ENGINE } from '../analysis/engineRequest.js';
+import { detectClientComplaint, NO_COMPLAINT } from '../analysis/clientComplaint.js';
 import { identifyManager } from '../analysis/identifyManager.js';
 import { sendAlert } from '../ops/notify.js';
 import { appError, classify, describeError, isHopeless, reviveError } from '../../shared/errors.js';
@@ -107,6 +108,17 @@ async function transcribeClassifyAndSave(call, roster) {
     engine = { ...NOT_ENGINE, isEngineRequest: null };
   }
 
+  let complaint = NO_COMPLAINT;
+  try {
+    complaint = await detectClientComplaint(transcript, segments);
+    if (complaint.hasComplaint) {
+      console.log(`[processCalls]   ${call.generalCallId} client complaint: ${complaint.type} — «${complaint.quote?.slice(0, 70)}»`);
+    }
+  } catch (err) {
+    console.error(`[processCalls]   complaint check failed for ${call.generalCallId}: ${err.message}`);
+    complaint = { ...NO_COMPLAINT, hasComplaint: null };
+  }
+
   await saveCall({
     generalCallId: call.generalCallId,
     direction: call.direction ?? null,
@@ -130,6 +142,9 @@ async function transcribeClassifyAndSave(call, roster) {
     communicationScore: classification.communicationScore,
     dealBlocker: classification.isSuccess === true ? NO_BLOCKER : blocker.blocker,
     dealBlockerQuote: blocker.quote,
+    hasComplaint: complaint.hasComplaint,
+    complaintType: complaint.type,
+    complaintQuote: complaint.quote,
     engineRequest: engine.isEngineRequest,
     engineService: engine.service,
     engineCar: engine.car,

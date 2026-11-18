@@ -151,7 +151,7 @@ function findingText(f, idx) {
   lines.push('');
   lines.push(`Цитати (${f.evidence.length}):`);
   f.evidence.forEach((ev, i) => {
-    lines.push(`${i + 1}. «${ev.quote}» — ${formatKyiv(new Date(ev.startTime))}`);
+    lines.push(`${i + 1}. ${ev.said === 'client' ? 'КЛІЄНТ: ' : ''}«${ev.quote}» — ${formatKyiv(new Date(ev.startTime))}`);
     if (ev.note) lines.push(`   ↳ ${ev.note}`);
   });
   return lines.join('\n');

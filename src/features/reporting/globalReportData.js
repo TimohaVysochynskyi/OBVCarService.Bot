@@ -149,6 +149,7 @@ function topFindings(findings, type, name) {
       action: withoutName(f.action, name),
       examples: (f.evidence || []).slice(0, TOP_N).map((e) => ({
         quote: e.quote,
+        said: e.said || null,
         note: e.note || null,
         at: e.startTime || null,
         callId: e.callId ?? null,
