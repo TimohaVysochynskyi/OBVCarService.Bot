@@ -36,7 +36,8 @@
     "audit:dialogue": "node src/scripts/auditDialogue.js",
     "backfill:pbxnumber": "node src/scripts/backfillPbxNumber.js",
     "backfill:engine": "node src/scripts/backfillEngine.js",
-    "backfill:complaints": "node src/scripts/backfillComplaints.js"
+    "backfill:complaints": "node src/scripts/backfillComplaints.js",
+    "retranscribe:combined": "node src/scripts/retranscribeCombined.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

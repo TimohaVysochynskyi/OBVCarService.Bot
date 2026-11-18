@@ -138,6 +138,11 @@ function buildChannelTurns(words, speaker, gapSec) {
   return tidyTurns(turns);
 }
 
+function sttModeOf(data, multichannel) {
+  if (!multichannel) return 'diarize';
+  return Array.isArray(data.transcripts) ? 'separate' : 'multichannel';
+}
+
 function turnsFromResponse(data, multichannel) {
   const perChannel = multichannel && Array.isArray(data.transcripts) ? data.transcripts : null;
   if (!perChannel) return buildTurns(data.words, multichannel);
@@ -272,12 +277,13 @@ async function diarize(audioBlob, { managerName, audioPath, direction } = {}) {
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);
   const data = await sttDiarize(audioBlob, { multichannel });
   const plain = plainText(data);
+  const sttMode = sttModeOf(data, multichannel);
   const turns = turnsFromResponse(data, multichannel);
-  if (turns.length === 0) return { transcript: plain || '(порожньо)', segments: null };
+  if (turns.length === 0) return { transcript: plain || '(порожньо)', segments: null, sttMode };
 
   const speakerIds = [...new Set(turns.map((t) => t.speaker))];
   if (speakerIds.length < 2) {
-    return { transcript: plain || turns.map((t) => t.text).join(' '), segments: null };
+    return { transcript: plain || turns.map((t) => t.text).join(' '), segments: null, sttMode };
   }
 
   const managerId = await resolveManagerSpeaker(turns, speakerIds, { multichannel, managerName, direction });
@@ -287,7 +293,7 @@ async function diarize(audioBlob, { managerName, audioPath, direction } = {}) {
     start: t.start,
     end: t.end,
   }));
-  return { transcript: transcriptFromSegments(segments), segments };
+  return { transcript: transcriptFromSegments(segments), segments, sttMode };
 }
 
 export {

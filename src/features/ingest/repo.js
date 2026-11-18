@@ -9,8 +9,8 @@ async function callExists(generalCallId) {
 
 async function saveCall(call) {
   await pool.query(
-    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction, intro_name, intro_company, pbx_number, engine_request, engine_service, engine_car, engine_quote, has_complaint, complaint_type, complaint_quote)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+    `INSERT INTO calls (general_call_id, internal_number, manager_name, start_time, duration_sec, transcript, is_success, weakest_stage, communication_score, segments, behaviors, analysis_version, call_purpose, client_number, client_name, hangup_by, audio_path, audio_bytes, audio_status, deal_blocker, deal_blocker_quote, direction, intro_name, intro_company, pbx_number, engine_request, engine_service, engine_car, engine_quote, has_complaint, complaint_type, complaint_quote, stt_mode)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
      ON CONFLICT (general_call_id) DO NOTHING`,
     [
       call.generalCallId,
@@ -45,6 +45,7 @@ async function saveCall(call) {
       call.hasComplaint ?? null,
       call.complaintType ?? null,
       call.complaintQuote ?? null,
+      call.sttMode ?? null,
     ]
   );
   await pool.query('DELETE FROM pending_calls WHERE general_call_id = $1', [call.generalCallId]);

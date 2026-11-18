@@ -2,12 +2,13 @@ import { BLOCKED_FILTER, HAS_TEXT, NOT_BLOCKED_FILTER, SALES_FILTER, jsonParam }
 import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 import { pool } from '../../platform/db/pool.js';
 
-async function updateCallAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose }) {
+async function updateCallAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose, sttMode }) {
   await pool.query(
     `UPDATE calls SET transcript = COALESCE($2, transcript),
-       segments = $3::jsonb, behaviors = $4::jsonb, analysis_version = $5, call_purpose = $6
+       segments = $3::jsonb, behaviors = $4::jsonb, analysis_version = $5, call_purpose = $6,
+       stt_mode = COALESCE($7, stt_mode)
      WHERE general_call_id = $1`,
-    [generalCallId, transcript ?? null, jsonParam(segments), jsonParam(behaviors), analysisVersion ?? null, callPurpose ?? null]
+    [generalCallId, transcript ?? null, jsonParam(segments), jsonParam(behaviors), analysisVersion ?? null, callPurpose ?? null, sttMode ?? null]
   );
 }
 
@@ -165,6 +166,30 @@ async function getCallsMissingComplaint({ limit = null } = {}) {
      WHERE has_complaint IS NULL AND ${HAS_TEXT}
      ORDER BY start_time DESC
      ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function markSttMode(generalCallId, mode) {
+  await pool.query('UPDATE calls SET stt_mode = $2 WHERE general_call_id = $1', [generalCallId, mode]);
+}
+
+async function getCallsToRetranscribe({ limit = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            start_time AS "startTime", direction
+     FROM calls
+     WHERE stt_mode IS NULL AND audio_path IS NOT NULL AND ${HAS_TEXT}
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`
+  );
+  return rows;
+}
+
+async function getSttModeStats() {
+  const { rows } = await pool.query(
+    `SELECT COALESCE(stt_mode, 'не позначено') AS mode, COUNT(*)::int AS count
+     FROM calls WHERE ${HAS_TEXT} GROUP BY 1 ORDER BY 2 DESC`
   );
   return rows;
 }
@@ -402,6 +427,9 @@ export {
   getCallsMissingEngine,
   setClientComplaint,
   getCallsMissingComplaint,
+  markSttMode,
+  getCallsToRetranscribe,
+  getSttModeStats,
   getCallsForRoleAudit,
   applyRoleFix,
   countNonSalesScores,

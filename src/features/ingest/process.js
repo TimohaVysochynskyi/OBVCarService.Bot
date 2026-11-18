@@ -60,11 +60,12 @@ async function transcribeClassifyAndSave(call, roster) {
     `[processCalls]   audio ${audio.reused ? 'reused' : 'stored'}: ${audio.relPath ?? '(не збережено)'} (${audio.bytes} B)`
   );
 
-  const { transcript, segments } = await transcribeAudio(audio.buffer, {
+  const stt = await transcribeAudio(audio.buffer, {
     managerName: knownManagerName(call),
     audioPath: audio.path,
     direction: call.direction ?? null,
   });
+  const { transcript, segments } = stt;
   const managerName = await resolveManagerName(call, { transcript, segments }, roster);
 
   let behaviors = null;
@@ -145,6 +146,7 @@ async function transcribeClassifyAndSave(call, roster) {
     hasComplaint: complaint.hasComplaint,
     complaintType: complaint.type,
     complaintQuote: complaint.quote,
+    sttMode: stt.sttMode ?? null,
     engineRequest: engine.isEngineRequest,
     engineService: engine.service,
     engineCar: engine.car,
