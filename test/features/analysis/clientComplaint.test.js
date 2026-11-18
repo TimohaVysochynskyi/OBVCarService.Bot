@@ -72,7 +72,7 @@ test('претензія стає кандидатом у звіт із ролл
   const fn = sliceFunction(analyze, 'function complaintCandidates');
   assert.match(fn, /quoteRole: CLIENT_ROLE/);
   assert.match(fn, /type: 'error'/);
-  assert.match(analyze, /\.\.\.complaintCandidates\(c\)/);
+  assert.ok(sliceFunction(analyze, 'function buildCandidates').includes('complaintCandidates(c)'));
 });
 
 test('перевірка цитати бере роль із кандидата, а не завжди менеджера', () => {
@@ -98,4 +98,17 @@ test('промпт вимагає саме репліку клієнта і за
   assert.match(prompt, /ДОСЛІВНА фраза саме КЛІЄНТА/);
   assert.match(prompt, /Фраза менеджера не підходить/);
   assert.match(prompt, /Сумніваєшся — став false/);
+});
+
+test('претензія доходить до звіту навіть із НЕПРОДАЖНОГО дзвінка', () => {
+  const fn = sliceFunction(analyze, 'function buildCandidates');
+  assert.ok(fn.includes('? complaints'), 'непродажні дзвінки не дають жодного кандидата');
+  assert.ok(!fn.includes('includes(c.callPurpose)) return;'),
+    'непродажні знову відкидаються цілком — саме там і лежали всі скарги з реального кейсу');
+});
+
+test('із непродажних беруться ЛИШЕ претензії, а не весь розбір', () => {
+  const fn = sliceFunction(analyze, 'function buildCandidates');
+  const branch = fn.slice(fn.indexOf('? complaints'), fn.indexOf('];'));
+  assert.ok(!branch.includes('behaviors'), 'поведінки менеджера почали рахуватись на непродажних');
 });

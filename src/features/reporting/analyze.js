@@ -177,8 +177,10 @@ function buildCandidates(calls) {
   const candidates = [];
   const byId = new Map();
   calls.forEach((c) => {
-    if (NON_SALES_PURPOSES.includes(c.callPurpose)) return;
-    const items = [...(c.behaviors?.items || []), ...dialogueCandidates(c), ...complaintCandidates(c)];
+    const complaints = complaintCandidates(c);
+    const items = NON_SALES_PURPOSES.includes(c.callPurpose)
+      ? complaints
+      : [...(c.behaviors?.items || []), ...dialogueCandidates(c), ...complaints];
     items.forEach((it) => {
       if (!it?.quote) return;
       const id = `e${candidates.length}`;
