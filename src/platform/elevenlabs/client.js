@@ -15,6 +15,7 @@ import { config } from '../../shared/config.js';
 
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
 const SUBSCRIPTION_URL = 'https://api.elevenlabs.io/v1/user/subscription';
+const BALANCE_TIMEOUT_MS = 15_000;
 const sttModel = () => config.elevenlabs.sttModel;
 const numSpeakers = () => config.elevenlabs.numSpeakers;
 
@@ -61,9 +62,13 @@ async function getElevenLabsBalance() {
   const key = config.elevenlabs.apiKey;
   if (!key) return { ok: false, reason: 'no_key' };
   try {
-    const res = await fetchRaw('elevenlabs', 'перевірка балансу', SUBSCRIPTION_URL, {
-      headers: { 'xi-api-key': key },
-    });
+    const res = await fetchRaw(
+      'elevenlabs',
+      'перевірка балансу',
+      SUBSCRIPTION_URL,
+      { headers: { 'xi-api-key': key } },
+      { timeoutMs: BALANCE_TIMEOUT_MS }
+    );
     if (res.status === 401) {
       const body = await res.text();
       return { ok: false, reason: /missing_permission|user_read/i.test(body) ? 'missing_permission' : 'unauthorized' };

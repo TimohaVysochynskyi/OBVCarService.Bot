@@ -125,3 +125,10 @@ test('ліміт алертиться один раз, із нагадуванн
   assert.ok(poll.indexOf('noteOpenAiFree()') < poll.indexOf('catch (err)'),
     'відновлення мусить відмічатись на успішному прогоні');
 });
+
+test('перевірка балансу має ВЛАСНИЙ короткий таймаут, не 300с від транскрипції', () => {
+  assert.match(elevenlabs, /const BALANCE_TIMEOUT_MS = 15_000;/);
+  const fn = sliceFunction(elevenlabs, 'async function getElevenLabsBalance');
+  assert.match(fn, /timeoutMs: BALANCE_TIMEOUT_MS/);
+  assert.match(fn, /catch \(err\)/, 'збій балансу мусить лишатись не фатальним');
+});
