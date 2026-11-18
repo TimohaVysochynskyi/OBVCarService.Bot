@@ -58,3 +58,19 @@ test('скрипт оголошений у package.json', () => {
   const pkg = JSON.parse(readRepo('package.json'));
   assert.equal(pkg.scripts['retranscribe:combined'], 'node src/scripts/retranscribeCombined.js');
 });
+
+test('межа кредитів працює й тоді, коли баланс недоступний', () => {
+  const estimate = new Function(
+    'CREDITS_PER_MIN',
+    `${sliceFunction(src, 'const creditsFor')}
+return creditsFor;`
+  )(20);
+  assert.equal(estimate(60), 20);
+  assert.equal(estimate(30), 10);
+  assert.equal(estimate(0), 10, 'надто короткий дзвінок усе одно щось коштує');
+  assert.match(main, /MAX_CREDITS != null && spent \+ creditsFor/);
+});
+
+test('оцінка кредитів рахується з заміряного курсу, а не з вигаданого', () => {
+  assert.match(src, /const CREDITS_PER_MIN = 20;/);
+});

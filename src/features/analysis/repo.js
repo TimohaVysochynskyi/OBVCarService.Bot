@@ -177,7 +177,7 @@ async function markSttMode(generalCallId, mode) {
 async function getCallsToRetranscribe({ limit = null } = {}) {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
-            start_time AS "startTime", direction
+            start_time AS "startTime", direction, duration_sec AS "durationSec"
      FROM calls
      WHERE stt_mode IS NULL AND audio_path IS NOT NULL AND ${HAS_TEXT}
      ORDER BY start_time ASC

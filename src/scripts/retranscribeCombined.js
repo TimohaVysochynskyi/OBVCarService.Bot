@@ -12,6 +12,9 @@ import { config } from '../shared/config.js';
 
 const DEFAULT_RESERVE = 3000;
 const BALANCE_EVERY = 25;
+const CREDITS_PER_MIN = 20;
+
+const creditsFor = (durationSec) => Math.ceil((Math.max(Number(durationSec) || 0, 30) / 60) * CREDITS_PER_MIN);
 
 function flagValue(name) {
   const at = process.argv.indexOf(name);
@@ -20,6 +23,7 @@ function flagValue(name) {
 
 const LIMIT = flagValue('--limit') ? Number(flagValue('--limit')) : null;
 const RESERVE = flagValue('--reserve') ? Number(flagValue('--reserve')) : DEFAULT_RESERVE;
+const MAX_CREDITS = flagValue('--max-credits') ? Number(flagValue('--max-credits')) : null;
 const PAUSE_MS = config.backfill.audioPauseMs;
 
 async function remainingCredits() {
@@ -45,12 +49,18 @@ async function main() {
   let noAudio = 0;
   let failed = 0;
   let credits = startCredits;
+  let spent = 0;
   let stoppedOnReserve = false;
 
   for (const [i, call] of calls.entries()) {
     if (credits != null && credits <= RESERVE) {
       stoppedOnReserve = true;
       console.log(`\n[retranscribeCombined] залишок ${credits} кредитів досяг резерву ${RESERVE} — зупиняюсь на ${i} з ${calls.length}.`);
+      break;
+    }
+    if (MAX_CREDITS != null && spent + creditsFor(call.durationSec) > MAX_CREDITS) {
+      stoppedOnReserve = true;
+      console.log(`\n[retranscribeCombined] межу ${MAX_CREDITS} кредитів вичерпано (витрачено ~${spent}) — зупиняюсь на ${i} з ${calls.length}.`);
       break;
     }
 
@@ -92,6 +102,7 @@ async function main() {
         sttMode: stt.sttMode,
       });
       done += 1;
+      spent += creditsFor(call.durationSec);
       console.log(`   ✓ ${call.generalCallId} (${who}) — ${stt.segments?.length ?? 0} реплік, режим ${stt.sttMode}`);
     } catch (err) {
       if (err?.elevenlabsUnavailable) {
@@ -116,7 +127,8 @@ async function main() {
   console.log(`  моно, пропущено:    ${mono} (кредитів не витрачено)`);
   console.log(`  без запису:         ${noAudio}`);
   console.log(`  не вдалося:         ${failed}`);
-  if (stoppedOnReserve) console.log(`  зупинено на резерві ${RESERVE} кредитів; решта чекає наступного заходу`);
+  console.log(`  витрачено кредитів (оцінка): ~${spent}`);
+  if (stoppedOnReserve) console.log('  зупинено за межею витрат; решта лишилась без позначки й чекає наступного заходу');
   if (startCredits != null && endCredits != null) {
     console.log(`  кредитів витрачено: ${startCredits - endCredits} (лишилось ${endCredits}, ~$${creditsToUsd(endCredits).toFixed(2)})`);
   }
