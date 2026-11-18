@@ -8,7 +8,7 @@ const process = readSrc('features/ingest/process.js');
 const poll = readSrc('features/ingest/poll.js');
 
 test('транскрипція йде ЛИШЕ через ElevenLabs — фолбеку на OpenAI більше немає', () => {
-  assert.match(transcribe, /transcribeDiarized\(audioBlob, managerName/);
+  assert.match(transcribe, /transcribeDiarized\(audioBlob, \{ managerName/);
   assert.ok(!/openai/i.test(transcribe), 'у транскрипції лишилась згадка OpenAI');
   assert.ok(!/falling back|fallback/i.test(transcribe));
 });

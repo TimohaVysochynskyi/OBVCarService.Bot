@@ -19,11 +19,11 @@ async function toBlob(audio) {
   throw new Error('transcribeAudio: expected a Buffer, Blob or URL string');
 }
 
-async function transcribeAudio(audio, { managerName, audioPath } = {}) {
+async function transcribeAudio(audio, { managerName, audioPath, direction } = {}) {
   const audioBlob = await toBlob(audio);
   console.log(`[transcribe] audio ready: ${audioBlob.size} bytes`);
 
-  const result = await transcribeDiarized(audioBlob, managerName, { audioPath });
+  const result = await transcribeDiarized(audioBlob, { managerName, audioPath, direction });
   console.log(
     `[transcribe] ElevenLabs OK — ${result.transcript.length} chars (diarized, ${result.segments?.length ?? 0} segments)`
   );

@@ -28,7 +28,7 @@ function relPathFor(generalCallId, startTime) {
   return `${monthFolder(startTime)}/${safeId(generalCallId)}.mp3`;
 }
 
-const absolutePath = (relPath) => join(storageRoot(), relPath);
+const storedAudioPath = (relPath) => join(storageRoot(), relPath);
 
 async function fileSize(path) {
   try {
@@ -65,7 +65,7 @@ async function fetchRecording(generalCallId) {
 
 async function saveRecording(generalCallId, startTime, buffer) {
   const relPath = relPathFor(generalCallId, startTime);
-  const path = absolutePath(relPath);
+  const path = storedAudioPath(relPath);
   const existing = await fileSize(path);
   if (existing === buffer.length) return { relPath, path, bytes: existing };
   await writeAtomic(path, buffer);
@@ -74,7 +74,7 @@ async function saveRecording(generalCallId, startTime, buffer) {
 
 async function storeRecording(generalCallId, startTime) {
   const relPath = relPathFor(generalCallId, startTime);
-  const path = absolutePath(relPath);
+  const path = storedAudioPath(relPath);
 
   const existing = await fileSize(path);
   if (existing) {
@@ -96,7 +96,7 @@ async function storeRecording(generalCallId, startTime) {
 async function readStoredRecording({ generalCallId, startTime, audioPath } = {}) {
   const relPath = audioPath || (generalCallId ? relPathFor(generalCallId, startTime) : null);
   if (!relPath) return null;
-  const path = absolutePath(relPath);
+  const path = storedAudioPath(relPath);
   if (!(await fileSize(path))) return null;
   try {
     return { buffer: await readFile(path), path, relPath };
@@ -144,6 +144,7 @@ async function freeSpaceMb() {
 
 export {
   storageRoot,
+  storedAudioPath,
   fetchRecording,
   saveRecording,
   storeRecording,

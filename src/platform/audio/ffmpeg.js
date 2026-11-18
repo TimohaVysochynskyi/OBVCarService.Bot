@@ -32,9 +32,10 @@ function ffmpegAvailable() {
   return probe;
 }
 
-function runFfmpeg(args) {
+function runFfmpeg(args, { capture = false } = {}) {
   return new Promise((resolve, reject) => {
     const p = spawn(FFMPEG, args);
+    const chunks = [];
     let stderr = '';
     const timer = setTimeout(() => {
       p.kill('SIGKILL');
@@ -42,6 +43,7 @@ function runFfmpeg(args) {
       err.name = 'TimeoutError';
       reject(err);
     }, FFMPEG_TIMEOUT_MS);
+    if (capture) p.stdout.on('data', (d) => chunks.push(d));
     p.stderr.on('data', (d) => (stderr += d.toString()));
     p.on('error', (err) => {
       clearTimeout(timer);
@@ -49,7 +51,7 @@ function runFfmpeg(args) {
     });
     p.on('close', (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve();
+      if (code === 0) resolve(capture ? Buffer.concat(chunks) : undefined);
       else reject(new Error(`ffmpeg exit ${code}: ${stderr.slice(-300)}`));
     });
   });
@@ -68,4 +70,19 @@ async function cutMp3(src, out, from, duration) {
   ]);
 }
 
-export { ffmpegAvailable, cutMp3, FFMPEG_TIMEOUT_MS };
+async function decodePcm(src, { rate, channels }) {
+  return runFfmpeg(
+    [
+      '-v', 'error',
+      '-i', src,
+      '-ac', String(channels),
+      '-ar', String(rate),
+      '-acodec', 'pcm_s16le',
+      '-f', 's16le',
+      '-',
+    ],
+    { capture: true }
+  );
+}
+
+export { ffmpegAvailable, cutMp3, decodePcm, FFMPEG_TIMEOUT_MS };

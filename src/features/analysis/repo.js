@@ -117,9 +117,36 @@ async function updateCallIntro(generalCallId, { name, company }) {
   ]);
 }
 
+async function getCallsForRoleAudit({ limit = null, since = null } = {}) {
+  const { rows } = await pool.query(
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName",
+            start_time AS "startTime", direction, audio_path AS "audioPath", segments
+     FROM calls
+     WHERE audio_path IS NOT NULL AND segments IS NOT NULL
+       AND jsonb_array_length(segments) >= 2
+       AND ($1::timestamptz IS NULL OR start_time >= $1::timestamptz)
+     ORDER BY start_time ASC
+     ${limit ? 'LIMIT ' + Number(limit) : ''}`,
+    [since]
+  );
+  return rows;
+}
+
+async function applyRoleFix(generalCallId, { transcript, segments }) {
+  await pool.query(
+    `UPDATE calls SET transcript = $2, segments = $3::jsonb,
+       behaviors = NULL, analysis_version = NULL, call_purpose = NULL,
+       is_success = NULL, weakest_stage = NULL, communication_score = NULL,
+       deal_blocker = NULL, deal_blocker_quote = NULL, deal_blocker_reason = NULL,
+       client_decline_reason = NULL, intro_name = NULL, intro_company = NULL
+     WHERE general_call_id = $1`,
+    [generalCallId, transcript, jsonParam(segments)]
+  );
+}
+
 async function getCallsMissingSegments() {
   const { rows } = await pool.query(
-    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName"
+    `SELECT general_call_id AS "generalCallId", manager_name AS "managerName", direction
      FROM calls
      WHERE segments IS NULL AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time DESC`
@@ -200,7 +227,7 @@ async function resetAllBlockers() {
 
 async function getRecentCallsForOperator(name, limit = 5) {
   const { rows } = await pool.query(
-    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime", direction,
             (segments IS NOT NULL) AS "hasSegments", analysis_version AS "analysisVersion"
      FROM calls WHERE manager_name = $1
      ORDER BY start_time DESC LIMIT $2`,
@@ -211,7 +238,7 @@ async function getRecentCallsForOperator(name, limit = 5) {
 
 async function getRecentCalls(limit = 7) {
   const { rows } = await pool.query(
-    `SELECT general_call_id AS "generalCallId", start_time AS "startTime",
+    `SELECT general_call_id AS "generalCallId", start_time AS "startTime", direction,
             manager_name AS "managerName", internal_number AS "internalNumber"
      FROM calls ORDER BY start_time DESC LIMIT $1`,
     [limit]
@@ -301,6 +328,8 @@ export {
   updateCallMap,
   updateCallClassification,
   updateCallIntro,
+  getCallsForRoleAudit,
+  applyRoleFix,
   getCallsMissingSegments,
   getCallsMissingPurpose,
   getNonSalesCalls,

@@ -3,6 +3,14 @@ import { classify } from '../../shared/errors.js';
 import { chatJson } from '../openai/llm.js';
 import { fetchOk, fetchRaw } from '../../shared/http.js';
 import { probeChannels } from '../audio/meta.js';
+import {
+  MANAGER_ROLE,
+  CLIENT_ROLE,
+  keywordSpeaker,
+  selfIntroSpeaker,
+  speakerOfChannel,
+  transcriptFromSegments,
+} from '../../domain/call/roles.js';
 import { config } from '../../shared/config.js';
 
 const STT_URL = 'https://api.elevenlabs.io/v1/speech-to-text';
@@ -70,7 +78,14 @@ async function getElevenLabsBalance() {
   }
 }
 
-function buildTurns(words) {
+function speakerIdOf(word, multichannel, previous) {
+  if (multichannel && word.channel_index != null) return `speaker_${word.channel_index}`;
+  if (word.speaker_id != null) return word.speaker_id;
+  if (word.channel_index != null) return `speaker_${word.channel_index}`;
+  return previous ?? 'speaker_0';
+}
+
+function buildTurns(words, multichannel = false) {
   const turns = [];
   let cur = null;
   for (const w of words || []) {
@@ -79,9 +94,7 @@ function buildTurns(words) {
       if (cur) cur.text += t;
       continue;
     }
-    const sid =
-      w.speaker_id ??
-      (w.channel_index != null ? `speaker_${w.channel_index}` : cur ? cur.speaker : 'speaker_0');
+    const sid = speakerIdOf(w, multichannel, cur?.speaker);
     if (!cur || cur.speaker !== sid) {
       if (cur) turns.push(cur);
       cur = { speaker: sid, text: t, start: w.start ?? null, end: w.end ?? null };
@@ -112,55 +125,22 @@ const ROLE_SCHEMA = {
   },
 };
 
-const MANAGER_MARKERS = [
-  'автосервіс', 'автосервис', 'сервіс', 'сервис', 'сто', 'наш майстер', 'майстер', 'мастер',
-  'запиш', 'записати', 'запишу', 'запишемо', 'запис на', 'на яку годину', 'на яке авто', 'яка марка',
-  'яке авто', 'яка машина', 'діагностик', 'диагностик', 'вартість', 'коштує', 'стоит', 'по ціні',
-  'приїжджайте', 'приезжайте', 'підʼїжджайте', 'подъезжайте', 'чим можу допомогти', 'чем могу помочь',
-  'передзвоню', 'перезвоню', 'уточню', 'вільн', 'свободн', 'гарного дня', 'працюємо до', 'гривень', 'грн',
-  'у нас є', 'наша адреса', 'запчастин', 'запчаст',
-];
+const DIRECTION_FACTS = {
+  in: 'Це ВХІДНИЙ дзвінок: слухавку взяв НАШ працівник, тож першим зазвичай говорить саме він.',
+  out:
+    'Це ВИХІДНИЙ дзвінок: ми подзвонили, тож першим відповідає СПІВРОЗМОВНИК ("алло"), ' +
+    'а наш працівник говорить другим. Те, що людина пояснює свою потребу, НЕ робить її нашим працівником.',
+};
 
-function selfIntroManager(turns, speakerIds, managerName) {
-  const n = String(managerName || '').trim().toLowerCase();
-  if (n.length < 3) return null;
-  const patterns = [
-    `це ${n}`, `это ${n}`, `мене звати ${n}`, `меня зовут ${n}`, `звати ${n}`, `зовут ${n}`,
-    `${n} вас турбує`, `${n} вас беспокоит`, `${n} турбує`, `${n} беспокоит`,
-    `${n} на зв`, `${n} на связи`, `це знову ${n}`, `это снова ${n}`,
-  ];
-  for (const t of turns) {
-    const low = t.text.toLowerCase();
-    if (patterns.some((p) => low.includes(p))) return t.speaker;
-  }
-  return null;
-}
-
-function heuristicManager(turns, speakerIds) {
-  const score = Object.fromEntries(speakerIds.map((s) => [s, 0]));
-  for (const t of turns) {
-    const low = t.text.toLowerCase();
-    for (const m of MANAGER_MARKERS) if (low.includes(m)) score[t.speaker] += 1;
-  }
-  let best = null;
-  let bestScore = 0;
-  for (const sid of speakerIds) {
-    if (score[sid] > bestScore) {
-      bestScore = score[sid];
-      best = sid;
-    }
-  }
-  return best;
-}
-
-async function pickManagerSpeaker(turns, speakerIds, managerName) {
-  const intro = selfIntroManager(turns, speakerIds, managerName);
+async function pickManagerSpeaker(turns, speakerIds, { managerName, direction } = {}) {
+  const intro = selfIntroSpeaker(turns, managerName);
   if (intro) {
     console.log(`[elevenlabs] manager by self-introduction ("${managerName}") → ${intro}`);
     return intro;
   }
 
-  const keyword = heuristicManager(turns, speakerIds);
+  const keyword = keywordSpeaker(turns, speakerIds);
+  const directionFact = DIRECTION_FACTS[direction] ? `${DIRECTION_FACTS[direction]}\n` : '';
 
   const MAX_CHARS = 8000;
   let body = '';
@@ -174,12 +154,15 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
     ? `Ти аналізуєш транскрипт телефонної розмови автосервісу (СТО). Учасники: ${speakerIds.join(', ')}. ` +
       `Один із них — НАШ працівник на імʼя «${managerName}» (враховуй варіанти написання: Андрій/Андрей, Володимир/Владимир тощо). Визнач, ХТО з мовців — це «${managerName}».\n` +
       `Найнадійніше — САМОПРЕДСТАВЛЕННЯ цим імʼям ("це ${managerName}", "мене звати ${managerName}", "${managerName} вас турбує/беспокоит"): тоді ЦЕЙ мовець і є наш працівник — навіть якщо він сам комусь телефонує й звучить як замовник.\n` +
-      `Якщо імені в розмові немає: наш працівник — той, хто поводиться як працівник СТО (вітає від сервісу, консультує клієнта, пропонує запис/ціни/майстра); АБО, якщо це ВИХІДНИЙ дзвінок (наш працівник сам телефонує постачальнику/іншому сервісу), наш працівник — той, хто телефонує й пояснює свою потребу, а НЕ той, хто підняв слухавку ("алло").\n` +
+      `⚠️ ЗВЕРТАННЯ — це НЕ представлення: "Алло, ${managerName}", "Да, ${managerName}", "${managerName}, добрий день" говорить той, хто ЗВЕРТАЄТЬСЯ до «${managerName}», отже сам ним НЕ є.\n` +
+      directionFact +
+      `Якщо імені в розмові немає: наш працівник — той, хто поводиться як працівник СТО (вітає від сервісу, консультує клієнта, пропонує запис/ціни/майстра).\n` +
       `Поверни JSON: reasoning (1-2 речення), manager (рівно один id: ${speakerIds.join(', ')}), confidence.`
     : `Ти аналізуєш транскрипт телефонної розмови автосервісу (СТО). Учасники: ${speakerIds.join(', ')}. ` +
       `Рівно один із них — працівник СТО (МЕНЕДЖЕР), решта — КЛІЄНТ.\n` +
       `Ознаки МЕНЕДЖЕРА: вітається від імені сервісу; питає марку/проблему авто; пропонує запис, ціни, майстра.\n` +
       `Ознаки КЛІЄНТА: описує СВОЮ проблему ("у мене стукає"), питає ціну, погоджується/відмовляється.\n` +
+      directionFact +
       `Аналізуй ВЕСЬ діалог — клієнт міг заговорити першим ("алло?").\n` +
       `Поверни JSON: reasoning (1-2 речення), manager (рівно один id: ${speakerIds.join(', ')}), confidence.`;
 
@@ -198,7 +181,7 @@ async function pickManagerSpeaker(turns, speakerIds, managerName) {
     });
 
     if (!speakerIds.includes(out.manager)) return keyword ?? turns[0].speaker;
-    if (!managerName && out.confidence === 'low' && keyword && keyword !== out.manager) {
+    if (out.confidence === 'low' && keyword && keyword !== out.manager) {
       console.log(`[elevenlabs] low-confidence role (LLM=${out.manager}, keyword=${keyword}) → using keyword heuristic`);
       return keyword;
     }
@@ -218,21 +201,34 @@ function markOutage(err) {
   return err;
 }
 
-async function transcribeDiarized(audioBlob, managerName, { audioPath } = {}) {
+async function transcribeDiarized(audioBlob, { managerName, audioPath, direction } = {}) {
   try {
-    return await diarize(audioBlob, managerName, { audioPath });
+    return await diarize(audioBlob, { managerName, audioPath, direction });
   } catch (err) {
     throw markOutage(err);
   }
 }
 
-async function diarize(audioBlob, managerName, { audioPath } = {}) {
+async function resolveManagerSpeaker(turns, speakerIds, { multichannel, managerName, direction }) {
+  if (multichannel) {
+    const channel = config.call.managerChannel;
+    const ours = speakerOfChannel(speakerIds, channel);
+    if (ours) {
+      console.log(`[elevenlabs] role from audio channel ${channel} → ${ours} (no model call)`);
+      return ours;
+    }
+    console.warn(`[elevenlabs] audio channel ${channel} has no speaker here — falling back to transcript analysis`);
+  }
+  return pickManagerSpeaker(turns, speakerIds, { managerName, direction });
+}
+
+async function diarize(audioBlob, { managerName, audioPath, direction } = {}) {
   const channels = await probeChannels(audioPath || audioBlob);
   const multichannel = (channels ?? 1) >= 2;
   if (multichannel) console.log(`[elevenlabs] ${channels}-channel audio → multichannel STT (per-channel speakers)`);
   const data = await sttDiarize(audioBlob, { multichannel });
   const plain = (data.text || '').trim();
-  const turns = buildTurns(data.words);
+  const turns = buildTurns(data.words, multichannel);
   if (turns.length === 0) return { transcript: plain || '(порожньо)', segments: null };
 
   const speakerIds = [...new Set(turns.map((t) => t.speaker))];
@@ -240,12 +236,14 @@ async function diarize(audioBlob, managerName, { audioPath } = {}) {
     return { transcript: plain || turns.map((t) => t.text).join(' '), segments: null };
   }
 
-  const managerId = await pickManagerSpeaker(turns, speakerIds, managerName);
-  const role = (sid) => (sid === managerId ? 'manager' : 'client');
-  const label = (sid) => (sid === managerId ? 'Менеджер' : 'Клієнт');
-  const transcript = turns.map((t) => `${label(t.speaker)}: ${t.text}`).join('\n\n');
-  const segments = turns.map((t) => ({ role: role(t.speaker), text: t.text, start: t.start, end: t.end }));
-  return { transcript, segments };
+  const managerId = await resolveManagerSpeaker(turns, speakerIds, { multichannel, managerName, direction });
+  const segments = turns.map((t) => ({
+    role: t.speaker === managerId ? MANAGER_ROLE : CLIENT_ROLE,
+    text: t.text,
+    start: t.start,
+    end: t.end,
+  }));
+  return { transcript: transcriptFromSegments(segments), segments };
 }
 
 export {

@@ -31,7 +31,8 @@
     "backfill:audio": "node src/scripts/backfillAudio.js",
     "backfill:blockers": "node src/scripts/backfillBlockers.js",
     "kb:reindex": "node src/scripts/reindexKb.js",
-    "rescore:sales": "node src/scripts/rescoreSales.js"
+    "rescore:sales": "node src/scripts/rescoreSales.js",
+    "fix:roles": "node src/scripts/fixRoles.js"
   },
   "dependencies": {
     "dotenv": "^17.4.2",

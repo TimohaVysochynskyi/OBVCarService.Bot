@@ -36,19 +36,19 @@ function splitIntoChunks(start, end) {
   return chunks;
 }
 
-async function resolveManagerName(call, transcript, roster) {
+function knownManagerName(call) {
   const ext = String(call.internalNumber);
+  if (PERSONAL_OPERATORS[ext]) return PERSONAL_OPERATORS[ext];
+  if (SHARED_EXTENSIONS.includes(ext)) return null;
+  return call.employeeName || null;
+}
 
-  if (PERSONAL_OPERATORS[ext]) {
-    return PERSONAL_OPERATORS[ext];
-  }
+async function resolveManagerName(call, transcript, roster) {
+  const known = knownManagerName(call);
+  if (known) return known;
 
-  if (SHARED_EXTENSIONS.includes(ext) || !call.employeeName) {
-    const identified = await identifyManager(transcript, roster);
-    return identified || call.employeeName || ext;
-  }
-
-  return call.employeeName;
+  const identified = await identifyManager(transcript, roster);
+  return identified || call.employeeName || String(call.internalNumber);
 }
 
 async function transcribeClassifyAndSave(call, roster) {
@@ -59,8 +59,9 @@ async function transcribeClassifyAndSave(call, roster) {
   );
 
   const { transcript, segments } = await transcribeAudio(audio.buffer, {
-    managerName: call.employeeName,
+    managerName: knownManagerName(call),
     audioPath: audio.path,
+    direction: call.direction ?? null,
   });
   const managerName = await resolveManagerName(call, transcript, roster);
 

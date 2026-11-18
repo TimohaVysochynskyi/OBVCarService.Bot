@@ -72,6 +72,7 @@ const config = deepFreeze({
   call: {
     language: optional('CALL_LANGUAGE'),
     longPauseSec: number('LONG_PAUSE_SEC', 4, { min: 0, exclusive: true }),
+    managerChannel: number('MANAGER_AUDIO_CHANNEL', 0, { min: 0 }),
   },
   lines: {
     shared: list('SHARED_EXTENSIONS', ['901', '902']),

@@ -324,6 +324,15 @@ async function getCallsForReport(name, start, end) {
   return rows;
 }
 
+async function deleteReportSegmentsOverlapping(managerName, from, to) {
+  const { rowCount } = await pool.query(
+    `DELETE FROM report_segments
+     WHERE manager_name = $1 AND (kind = 'global' OR (period_start < $3 AND period_end > $2))`,
+    [managerName, from, to]
+  );
+  return rowCount;
+}
+
 async function clearAllReportSegments() {
   const { rowCount } = await pool.query('DELETE FROM report_segments');
   return rowCount;
@@ -399,6 +408,7 @@ export {
   getBlockerStats,
   getBucketedTrend,
   getCallsForReport,
+  deleteReportSegmentsOverlapping,
   clearAllReportSegments,
   getReportTimes,
   addReportTime,

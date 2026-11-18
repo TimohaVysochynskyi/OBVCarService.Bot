@@ -39,6 +39,7 @@ async function main() {
         const { transcript } = await transcribeAudio(audio.buffer, {
           managerName: displayName(op.name),
           audioPath: audio.path,
+          direction: c.direction,
         });
         await updateCallTranscript(c.generalCallId, transcript);
         console.log(`   ✓ ${c.generalCallId} (${c.startTime}) — ${transcript.length} chars`);

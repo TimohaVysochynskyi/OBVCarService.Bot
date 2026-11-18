@@ -9,7 +9,7 @@ const PAID = [
   'features/analysis/dealBlocker.js', 'features/analysis/transcribe.js', 'platform/elevenlabs/client.js', 'features/analysis/identifyManager.js',
   'features/reporting/analyze.js', 'features/reporting/segments.js', 'features/knowledge-base/kb.js',
 ];
-const FREE_SCRIPTS = ['backfill:direction', 'backfill:intro'];
+const FREE_SCRIPTS = ['backfill:direction', 'backfill:intro', 'fix:roles'];
 
 const pkg = JSON.parse(readRepo('package.json'));
 const entryOf = (script) => /node\s+([^\s]+\.js)/.exec(pkg.scripts[script])[1];
@@ -52,7 +52,7 @@ for (const script of FREE_SCRIPTS) {
   });
 }
 
-test('обидва безкоштовні беклоги досі оголошені в package.json', () => {
+test('усі безкоштовні прогони досі оголошені в package.json', () => {
   for (const script of FREE_SCRIPTS) {
     assert.ok(pkg.scripts[script], `зник скрипт ${script} — перевірка втратила предмет`);
     assert.ok(fs.existsSync(path.join(ROOT, entryOf(script))), `${script} вказує на неіснуючий файл`);

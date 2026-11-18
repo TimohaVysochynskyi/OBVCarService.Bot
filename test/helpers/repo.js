@@ -8,11 +8,26 @@ const readRepo = (rel) => fs.readFileSync(ROOT + rel, 'utf8');
 const readSrc = (rel) => fs.readFileSync(SRC + rel, 'utf8');
 const readJson = (rel) => JSON.parse(readSrc(rel));
 
+function skipParams(src, from) {
+  const paren = src.indexOf('(', from);
+  const brace = src.indexOf('{', from);
+  if (paren < 0 || (brace >= 0 && brace < paren)) return from;
+  let depth = 0;
+  for (let i = paren; i < src.length; i += 1) {
+    if (src[i] === '(') depth += 1;
+    else if (src[i] === ')') {
+      depth -= 1;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return from;
+}
+
 function sliceFunction(src, signature) {
   const from = src.indexOf(signature);
   if (from < 0) throw new Error(`не знайшов функцію ${signature}`);
   let depth = 0;
-  for (let i = from; i < src.length; i += 1) {
+  for (let i = skipParams(src, from); i < src.length; i += 1) {
     if (src[i] === '{') depth += 1;
     else if (src[i] === '}') {
       depth -= 1;

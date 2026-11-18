@@ -35,6 +35,7 @@ async function main() {
       const { transcript, segments } = await transcribeAudio(audio.buffer, {
         managerName: name,
         audioPath: audio.path,
+        direction: c.direction,
       });
 
       let behaviors = null;

@@ -33,7 +33,7 @@ async function main() {
       }
       const blob = new Blob([audio.buffer], { type: 'audio/mpeg' });
 
-      const { transcript, segments } = await transcribeDiarized(blob, who, { audioPath: audio.path });
+      const { transcript, segments } = await transcribeDiarized(blob, { managerName: who, audioPath: audio.path, direction: c.direction });
       let behaviors = null;
       try {
         behaviors = await analyzeCallBehaviors(transcript, segments, who);
