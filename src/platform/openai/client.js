@@ -1,6 +1,7 @@
 import { config } from '../../shared/config.js';
 import { fetchOk } from '../../shared/http.js';
 import { withRetry } from '../../shared/retry.js';
+import { classify } from '../../shared/errors.js';
 
 const BASE_URL = 'https://api.openai.com/v1';
 const WINDOW_MS = 60_000;
@@ -130,21 +131,32 @@ function resetUsage() {
   spent.clear();
 }
 
+const LIMIT_CODES = new Set(['OAI-RATE', 'OAI-QUOTA']);
+
+function markLimit(err) {
+  if (LIMIT_CODES.has(classify(err))) err.openaiLimited = true;
+  return err;
+}
+
 async function post(path, { op, body, model, attempts = 2, delayMs = 2000, label }) {
-  return withRetry(
-    () =>
-      throttled(model, body, async () => {
-        const res = await transport(op, path, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        const data = await res.json();
-        record(model, data);
-        return data;
-      }),
-    { attempts, delayMs, label: label || `OpenAI ${op}` }
-  );
+  try {
+    return await withRetry(
+      () =>
+        throttled(model, body, async () => {
+          const res = await transport(op, path, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const data = await res.json();
+          record(model, data);
+          return data;
+        }),
+      { attempts, delayMs, label: label || `OpenAI ${op}` }
+    );
+  } catch (err) {
+    throw markLimit(err);
+  }
 }
 
 async function postForm(path, { op, form, attempts = 2, delayMs = 2000, label }) {

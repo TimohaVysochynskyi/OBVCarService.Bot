@@ -62,3 +62,26 @@ test('канал менеджера й запас читаються ззовн�
   assert.match(src, /const DEFAULT_MARGIN = 1\.35;/);
   assert.match(src, /flagValue\('--margin'\)/);
 });
+
+test('сміттєві оцінки на непродажних обнуляються тим самим прогоном', () => {
+  const fn = sliceFunction(src, 'async function clearStaleScores');
+  assert.match(fn, /countNonSalesScores\(\)/);
+  assert.match(fn, /if \(DRY_RUN\)/, 'сухий прогін не має права писати');
+  assert.match(fn, /clearNonSalesScores\(\)/);
+  assert.ok(sliceFunction(src, 'async function main').indexOf('clearStaleScores()') > 0,
+    'чистка не викликається з main');
+});
+
+test('чистка бере перелік непродажних категорій із таксономії, а не з власного списку', () => {
+  const clear = sliceFunction(repo, 'async function clearNonSalesScores');
+  assert.match(clear, /STALE_SCORES/);
+  assert.match(repo, /const STALE_SCORES = `call_purpose = ANY\(\$1\)/);
+  assert.match(repo, /import \{ NON_SALES_PURPOSES \}/);
+  assert.ok(!/'info'/.test(clear) && !/'personal'/.test(clear), 'категорії продубльовані в репозиторії');
+});
+
+test('обнуляються саме оцінки, а не категорія — перекласифікація не скасовується', () => {
+  const clear = sliceFunction(repo, 'async function clearNonSalesScores');
+  assert.match(clear, /is_success = NULL, weakest_stage = NULL, communication_score = NULL/);
+  assert.ok(!/call_purpose = NULL/.test(clear));
+});

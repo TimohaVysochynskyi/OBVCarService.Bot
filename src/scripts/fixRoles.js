@@ -1,6 +1,11 @@
 import 'dotenv/config';
 import { existsSync } from 'node:fs';
-import { applyRoleFix, getCallsForRoleAudit } from '../features/analysis/repo.js';
+import {
+  applyRoleFix,
+  clearNonSalesScores,
+  countNonSalesScores,
+  getCallsForRoleAudit,
+} from '../features/analysis/repo.js';
 import { deleteReportSegmentsOverlapping } from '../features/reporting/repo.js';
 import { measureRoleChannels } from '../platform/audio/channelEnergy.js';
 import { storedAudioPath } from '../platform/audio/store.js';
@@ -89,8 +94,20 @@ async function purgeReportCache(touched) {
   }
 }
 
+async function clearStaleScores() {
+  const stale = await countNonSalesScores();
+  if (!stale) return;
+  if (DRY_RUN) {
+    console.log(`[fixRoles] непродажних дзвінків зі сміттєвою оцінкою: ${stale} (DRY-RUN, не чіпаю)`);
+    return;
+  }
+  const cleared = await clearNonSalesScores();
+  console.log(`[fixRoles] обнулено успіх/бал/етап у ${cleared} непродажних дзвінк(ах) — їх оцінили до перекласифікації`);
+}
+
 async function main() {
   await migrate();
+  await clearStaleScores();
 
   const calls = await getCallsForRoleAudit({
     limit: LIMIT,

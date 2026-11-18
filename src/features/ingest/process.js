@@ -173,6 +173,10 @@ async function processOneCall(call, roster) {
       console.error(`[processCalls]   aborting run - ElevenLabs is unavailable: ${err.message}`);
       throw err;
     }
+    if (err?.openaiLimited) {
+      console.error(`[processCalls]   aborting run - OpenAI limit hit: ${err.message}`);
+      throw err;
+    }
     console.error(`[processCalls]   FAILED ${call.generalCallId}: ${err.message}`);
     await upsertPending({ ...call, managerName: pendingLabel }, err.message);
   }
@@ -261,6 +265,10 @@ async function retryPendingCalls() {
       }
       if (err?.elevenlabsUnavailable) {
         console.error(`[processCalls]   aborting pending retries - ElevenLabs is unavailable: ${err.message}`);
+        throw err;
+      }
+      if (err?.openaiLimited) {
+        console.error(`[processCalls]   aborting pending retries - OpenAI limit hit: ${err.message}`);
         throw err;
       }
       const code = classify(err);

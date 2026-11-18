@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readSrc } from '../../helpers/repo.js';
+import { readSrc, sliceFunction } from '../../helpers/repo.js';
 
 const transcribe = readSrc('features/analysis/transcribe.js');
 const elevenlabs = readSrc('platform/elevenlabs/client.js');
@@ -79,4 +79,49 @@ test('скрипти переразшифровки кажуть, що прог�
   for (const script of ['scripts/backfillAnalysis.js', 'scripts/retranscribeRecent.js']) {
     assert.match(readSrc(script), /elevenlabsUnavailable/, `${script} мовчки завершиться успіхом`);
   }
+});
+
+test('ліміт OpenAI теж перериває прогін, а не спалює спробу дзвінка', () => {
+  const live = sliceFunction(process, 'async function processOneCall');
+  const failure = live.slice(live.indexOf('} catch (err) {'));
+  const abort = failure.indexOf('openaiLimited');
+  const queue = failure.indexOf('upsertPending');
+  assert.ok(abort > 0, 'ліміт не розпізнається у живому шляху');
+  assert.ok(abort < queue, '20 спроб згорять за 5 годин, як це вже сталось із пʼятьма дзвінками');
+  assert.match(failure.slice(abort, queue), /throw err/);
+});
+
+test('ретрай черги під час ліміту OpenAI теж не бампає attempts', () => {
+  const retry = sliceFunction(process, 'async function retryPendingCalls');
+  const abort = retry.indexOf('openaiLimited');
+  assert.ok(abort > 0);
+  assert.ok(abort < retry.indexOf('await upsertPending'));
+  assert.match(retry.slice(abort, abort + 220), /throw err/);
+});
+
+test('позначку ставить порт моделей, а не кожен викликач окремо', () => {
+  const client = readSrc('platform/openai/client.js');
+  assert.match(client, /const LIMIT_CODES = new Set/);
+  assert.match(client, /err\.openaiLimited = true/);
+  for (const file of ['features/analysis/classifyCall.js', 'features/analysis/analyzeCall.js', 'features/reporting/analyze.js']) {
+    assert.ok(!/openaiLimited/.test(readSrc(file)), `${file} ставить позначку сам`);
+  }
+});
+
+test('жоден код ліміту OpenAI не вважається безнадійним', () => {
+  const hopeless = readSrc('shared/errors.js').match(/const HOPELESS = new Set[^;]+;/)[0];
+  for (const code of ['OAI-RATE', 'OAI-QUOTA']) {
+    assert.ok(!hopeless.includes(code), `${code} зробив би дзвінок failed після поповнення`);
+  }
+});
+
+test('ліміт алертиться один раз, із нагадуванням і з долею дзвінків', () => {
+  assert.match(poll, /alertOnce\('openai_limit'/);
+  assert.match(poll, /reminderMin: config\.openai\.limitReminderMin/);
+  assert.match(poll, /data: NOTICES\.callsWaitingLimit/);
+  const texts = readSrc('shared/errorTexts.js');
+  assert.match(texts, /callsWaitingLimit:/);
+  assert.match(texts, /Спроби навмисно не витрачаються/);
+  assert.ok(poll.indexOf('noteOpenAiFree()') < poll.indexOf('catch (err)'),
+    'відновлення мусить відмічатись на успішному прогоні');
 });

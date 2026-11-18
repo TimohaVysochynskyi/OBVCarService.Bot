@@ -86,6 +86,29 @@ async function noteElevenLabsDown(err) {
   });
 }
 
+async function noteOpenAiLimited(err) {
+  return alertOnce('openai_limit', {
+    active: true,
+    reminderMin: config.openai.limitReminderMin,
+    message: ({ first, downFor, since }) =>
+      alertText(
+        describeError(err, {
+          action: 'ingest',
+          icon: '⚠️',
+          title: first ? NOTICES.openaiLimited : NOTICES.openaiStillLimited(downFor, since),
+          data: NOTICES.callsWaitingLimit,
+        })
+      ),
+  });
+}
+
+async function noteOpenAiFree() {
+  return alertOnce('openai_limit', {
+    active: false,
+    recovered: ({ downFor }) => NOTICES.openaiLimitGone(downFor),
+  });
+}
+
 async function noteElevenLabsUp() {
   return alertOnce('elevenlabs_outage', {
     active: false,
@@ -122,6 +145,7 @@ async function pollNewCalls() {
     await setCheckpoint(new Date(end.getTime() - checkpointOverlapMs()));
     await noteBinotelUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
     await noteElevenLabsUp().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
+    await noteOpenAiFree().catch((e) => console.error(`[poll] recovery notice failed: ${e.message}`));
     await clearIngestFailureAlerts().catch((e) => console.error(`[poll] alert reset failed: ${e.message}`));
   } catch (err) {
     if (err?.binotelUnavailable) {
@@ -139,6 +163,14 @@ async function pollNewCalls() {
       });
       err.alertSent = true;
       if (sent) console.log('[poll] ElevenLabs outage alert sent');
+    }
+    if (err?.openaiLimited) {
+      const sent = await noteOpenAiLimited(err).catch((e) => {
+        console.error(`[poll] outage alert failed: ${e.message}`);
+        return false;
+      });
+      err.alertSent = true;
+      if (sent) console.log('[poll] OpenAI limit alert sent');
     }
     throw err;
   }

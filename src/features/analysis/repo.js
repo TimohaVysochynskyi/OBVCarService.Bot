@@ -1,4 +1,5 @@
 import { BLOCKED_FILTER, HAS_TEXT, NOT_BLOCKED_FILTER, SALES_FILTER, jsonParam } from '../../platform/db/filters.js';
+import { NON_SALES_PURPOSES } from '../../domain/call/purpose.js';
 import { pool } from '../../platform/db/pool.js';
 
 async function updateCallAnalysis(generalCallId, { transcript, segments, behaviors, analysisVersion, callPurpose }) {
@@ -141,6 +142,23 @@ async function getCallsForRoleAudit({ limit = null, since = null } = {}) {
     [since]
   );
   return rows;
+}
+
+const STALE_SCORES = `call_purpose = ANY($1)
+   AND (is_success IS NOT NULL OR weakest_stage IS NOT NULL OR communication_score IS NOT NULL)`;
+
+async function countNonSalesScores() {
+  const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM calls WHERE ${STALE_SCORES}`, [NON_SALES_PURPOSES]);
+  return rows[0].n;
+}
+
+async function clearNonSalesScores() {
+  const { rowCount } = await pool.query(
+    `UPDATE calls SET is_success = NULL, weakest_stage = NULL, communication_score = NULL
+     WHERE ${STALE_SCORES}`,
+    [NON_SALES_PURPOSES]
+  );
+  return rowCount;
 }
 
 async function applyRoleFix(generalCallId, { transcript, segments }) {
@@ -342,6 +360,8 @@ export {
   getCallsWithSegments,
   getCallsForRoleAudit,
   applyRoleFix,
+  countNonSalesScores,
+  clearNonSalesScores,
   getCallsMissingSegments,
   getCallsMissingPurpose,
   getNonSalesCalls,

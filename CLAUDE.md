@@ -823,6 +823,8 @@ RAG по завантажених посібниках. Документ (PDF `u
 
 **Черга ретраю не палить спроби марно:** `isHopeless(code)` — ВУЖЧИЙ набір за «постійні помилки», лише те, що цей дзвінок не переживе ніколи (`OAI-CTXLEN`, `SYS-NOFILE`, формати файлів). ⚠️ `OAI-QUOTA` там навмисно НЕМА: після поповнення повтор саме що допоможе. `BIN-NODATA` теж лишили — 104 буває і поки запис ще вантажиться.
 
+⚠️ **Але «не безнадійний» ще не означає «не втрачений».** Заміряно: 5 дзвінків (`6982309027`, `6982361603`, `6982573999`, `6982648200`, `6982683437`) стали `failed` через ОДИН сплеск `HTTP 429` від OpenAI — 20 спроб по 15 хвилин це лише 5 годин, тож будь-який довший ліміт перетворював «борг» на втрату. Виправлено 18.11.2026 тим самим механізмом, що й для ElevenLabs: `platform/openai/client.js` позначає помилки `OAI-RATE`/`OAI-QUOTA` як `err.openaiLimited`, інжест **перериває прогін, не бампаючи `attempts`**, і алертить через `alertOnce('openai_limit')` із нагадуванням раз на `OPENAI_LIMIT_REMINDER_MIN`. ⚠️ Позначку ставить ПОРТ, а не кожен викликач — тест стежить, щоб `openaiLimited` не з'явився в аналізі чи звітах.
+
 **`reviveError(текст)`** відновлює `provider`/`status` із рядка, збереженого в `pending_calls.last_error`: `httpError` пише message у стабільній формі `<сервіс> <операція>: HTTP <код>`.
 
 **Взаємний нагляд процесів** (`features/ops/liveness.js`): бот відмічається в `app_state.heartbeat_bot` щохвилини, полер — у `heartbeat_poll` **на початку кожного прогону**; кожен перевіряє СУСІДА. Ловить те, після чого раніше не приходило нічого: вичерпаний `max_restarts`, обірваний `getUpdates` через другий примірник, OOM, знятий cron. ⚠️ **Чому heartbeat полера, а не чекпоінт:** під час аварії Binotel чекпоінт НЕ рухається навмисно, і нагляд по ньому кричав би «збір не запускався». **Відсутність відмітки — не аварія** (так виглядає перший прогін після деплою).
@@ -913,7 +915,7 @@ RAG по завантажених посібниках. Документ (PDF `u
 | `analyze_prompt`, `score_rubric`, `prompt_<key>` | правки промптів власником |
 | `analyze_prompt_v2` | маркер одноразового скидання легасі-промпту |
 | `heartbeat_bot`, `heartbeat_poll` | ISO-час відмітки «я живий» |
-| `binotel_outage`, `elevenlabs_balance_state`, `elevenlabs_permission`, `audio_space_state`, `bot_down`, `poll_stale` | **стани алертів**, усі однакової форми JSON `{since,lastAlertAt}`, живуть **поки проблема активна**; ключа немає = все гаразд |
+| `binotel_outage`, `openai_limit`, `elevenlabs_balance_state`, `elevenlabs_permission`, `audio_space_state`, `bot_down`, `poll_stale` | **стани алертів**, усі однакової форми JSON `{since,lastAlertAt}`, живуть **поки проблема активна**; ключа немає = все гаразд |
 
 ⚠️ Стани алертів історично тримали рядки `ok`/`low`. Такий рядок не парситься в об'єкт і читається як «активного алерта не було», тож одразу після деплою наявна проблема алертне **один раз** зайво, а далі дедуп точний.
 
@@ -941,7 +943,7 @@ RAG по завантажених посібниках. Документ (PDF `u
 
 **Механіка діалогу:** `LONG_PAUSE_SEC` (**6**, було 4 — при 4с 40.6% кандидатів сиділи в смузі 4-5с, де кілька секунд на обдумування після довгого монологу клієнта це нормальна робота), `HOLD_SUSPECT_SEC` (20 — вище цього пауза є переведенням дзвінка), `INTERRUPT_MIN_OVERLAP_SEC` (0.4 — мінімальне перекриття, щоб дотик країв двох реплік не рахувався перебиванням), `TURN_GAP_SEC` (0.8 — мовчання в межах каналу, за яким починається нова репліка в режимі `separate`).
 
-**Темп і таймаути:** `POLL_OVERLAP_MIN` (15; `0` повертає стару поведінку, за якої дзвінки на межі губились), `POLL_CHUNK_PAUSE_MS` (1500 — піднімати для ДОВГИХ беклогів: прогін на 101 чанк упав на `106 Requests are too frequent`), `BINOTEL_OUTAGE_REMINDER_MIN` (120), `HTTP_TIMEOUT_MS` (переважує дефолти; лишати порожнім), `FFMPEG_TIMEOUT_MS` (60000), `BACKFILL_BLOCKER_PAUSE_MS` (2600 — менша = 429), `BACKFILL_PERSONAL_PAUSE_MS` / `BACKFILL_DECLINE_PAUSE_MS` (400), `BACKFILL_AUDIO_PAUSE_MS` (1500), `RESCORE_INTRO_PAUSE_MS` (500).
+**Темп і таймаути:** `OPENAI_LIMIT_REMINDER_MIN` (60 — як часто повторювати алерт, поки ліміт OpenAI тримається), `POLL_OVERLAP_MIN` (15; `0` повертає стару поведінку, за якої дзвінки на межі губились), `POLL_CHUNK_PAUSE_MS` (1500 — піднімати для ДОВГИХ беклогів: прогін на 101 чанк упав на `106 Requests are too frequent`), `BINOTEL_OUTAGE_REMINDER_MIN` (120), `HTTP_TIMEOUT_MS` (переважує дефолти; лишати порожнім), `FFMPEG_TIMEOUT_MS` (60000), `BACKFILL_BLOCKER_PAUSE_MS` (2600 — менша = 429), `BACKFILL_PERSONAL_PAUSE_MS` / `BACKFILL_DECLINE_PAUSE_MS` (400), `BACKFILL_AUDIO_PAUSE_MS` (1500), `RESCORE_INTRO_PAUSE_MS` (500).
 
 **Аудіо і звіт:** `AUDIO_STORAGE_DIR` (деф. `<repo>/data/recordings`), `AUDIO_MIN_FREE_MB` (1024), `AUDIO_CLIP_PAD_SEC` (3), `FFMPEG_PATH`/`FFPROBE_PATH`, `REPORT_SITE_DIR` (деф. `<repo>/data/report-site`), `KB_CLIP_PAD_PAGES` (1), `SEGMENT_CONSISTENCY_PASSES` (3), `SEGMENT_GRACE_MIN` (10).
 

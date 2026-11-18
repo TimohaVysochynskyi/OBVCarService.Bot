@@ -60,6 +60,7 @@ const config = deepFreeze({
     reportModel: str('OPENAI_REPORT_MODEL', 'gpt-4o'),
     blockerModel: str('OPENAI_BLOCKER_MODEL', 'gpt-4o'),
     embedModel: str('OPENAI_EMBED_MODEL', 'text-embedding-3-small'),
+    limitReminderMin: number('OPENAI_LIMIT_REMINDER_MIN', 60, { min: 0, exclusive: true }),
   },
   elevenlabs: {
     apiKey: optional('ELEVENLABS_API_KEY'),
