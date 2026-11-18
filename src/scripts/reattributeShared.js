@@ -18,7 +18,7 @@ async function main() {
 
   let updated = 0;
   for (const c of calls) {
-    const name = await identifyManager(c.transcript, roster);
+    const name = await identifyManager({ transcript: c.transcript, segments: c.segments }, roster);
     if (name && name !== c.managerName) {
       await updateManagerName(c.generalCallId, name);
       updated += 1;

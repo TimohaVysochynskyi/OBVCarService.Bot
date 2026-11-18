@@ -43,11 +43,11 @@ function knownManagerName(call) {
   return call.employeeName || null;
 }
 
-async function resolveManagerName(call, transcript, roster) {
+async function resolveManagerName(call, dialogue, roster) {
   const known = knownManagerName(call);
   if (known) return known;
 
-  const identified = await identifyManager(transcript, roster);
+  const identified = await identifyManager(dialogue, roster);
   return identified || call.employeeName || String(call.internalNumber);
 }
 
@@ -63,7 +63,7 @@ async function transcribeClassifyAndSave(call, roster) {
     audioPath: audio.path,
     direction: call.direction ?? null,
   });
-  const managerName = await resolveManagerName(call, transcript, roster);
+  const managerName = await resolveManagerName(call, { transcript, segments }, roster);
 
   let behaviors = null;
   try {

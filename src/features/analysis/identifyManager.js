@@ -1,6 +1,9 @@
 import { definePrompt } from '../prompts/registry.js';
 import { chatJson } from '../../platform/openai/llm.js';
+import { MANAGER_ROLE } from '../../domain/call/roles.js';
 import { config } from '../../shared/config.js';
+
+const MAX_CHARS = 4000;
 
 const identifyPrompt = definePrompt({
   key: 'identify',
@@ -10,10 +13,19 @@ const identifyPrompt = definePrompt({
   title: '📞 *Хто взяв слухавку (901/902)*',
   about:
     'На спільних номерах Бінотел не знає, хто відповів, тож AI визначає це з розмови. ' +
-    '⚠️ Впливає на те, кому зараховані дзвінки зі спільних номерів.',
+    '⚠️ Моделі подаються ЛИШЕ репліки нашого працівника — сторону визначає код за каналом запису.',
 });
 
-async function identifyManager(transcript, roster = []) {
+function managerSide(transcript, segments) {
+  const lines = (Array.isArray(segments) ? segments : [])
+    .filter((s) => s?.role === MANAGER_ROLE)
+    .map((s) => String(s.text || '').trim())
+    .filter(Boolean);
+  if (!lines.length) return { body: String(transcript || '').slice(0, MAX_CHARS), whole: true };
+  return { body: lines.join('\n').slice(0, MAX_CHARS), whole: false };
+}
+
+async function identifyManager({ transcript, segments } = {}, roster = []) {
   const candidates = (roster || []).filter(Boolean);
   if (candidates.length === 0) return null;
 
@@ -34,12 +46,15 @@ async function identifyManager(transcript, roster = []) {
     },
   };
 
+  const side = managerSide(transcript, segments);
+  const header = side.whole ? 'Транскрипт розмови (сторони не розділені)' : 'Репліки НАШОГО працівника';
+
   const parsed = await chatJson({
     op: 'визначення менеджера з розмови',
     model: config.openai.analyzeModel,
     messages: [
       { role: 'system', content: await identifyPrompt() },
-      { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\nТранскрипт:\n${transcript}` },
+      { role: 'user', content: `Кандидати: ${candidates.join(', ')}\n\n${header}:\n${side.body}` },
     ],
     schema,
     attempts: 3,

@@ -38,7 +38,7 @@ async function getActiveOperatorsInRange(start, end) {
 async function getNumericManagerCalls() {
   const { rows } = await pool.query(
     `SELECT general_call_id AS "generalCallId", internal_number AS "internalNumber",
-            manager_name AS "managerName", transcript
+            manager_name AS "managerName", transcript, segments
      FROM calls
      WHERE manager_name ~ '^[0-9]+$' AND transcript IS NOT NULL AND transcript <> ''
      ORDER BY start_time`

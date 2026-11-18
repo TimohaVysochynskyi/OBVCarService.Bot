@@ -87,7 +87,7 @@ const RUNNERS = {
     applies: (call) => SHARED_EXTENSIONS.includes(String(call.internalNumber)),
     async run(call) {
       const roster = await getOperatorRoster();
-      const name = await identifyManager(call.transcript, roster);
+      const name = await identifyManager({ transcript: call.transcript, segments: call.segments }, roster);
       if (name) await updateManagerName(call.generalCallId, name);
     },
   },
