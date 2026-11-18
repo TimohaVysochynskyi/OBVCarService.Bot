@@ -125,6 +125,33 @@ const report = {
       '2026-06': [{ day: '2026-06-01', sales: 1, success: 0 }],
     },
   },
+  engine: {
+    total: 9,
+    repairTotal: 7,
+    months: [
+      { key: '2026-06', title: 'червень 2026', count: 3, total: 40, booked: 1 },
+      { key: '2026-07', title: 'липень 2026', count: 6, total: 50, booked: 2 },
+    ],
+    services: [
+      { key: 'overhaul', label: 'Капітальний ремонт', count: 4 },
+      { key: 'diagnostics', label: 'Діагностика двигуна', count: 3 },
+      { key: 'maintenance', label: 'Обслуговування двигуна', count: 2 },
+    ],
+    cars: [
+      { car: 'Passat 1.9 TDI', count: 3 },
+      { car: 'Спрінтер 2.2', count: 2 },
+    ],
+    examples: [
+      {
+        callId: '1',
+        at: '17.11',
+        manager: 'Роман',
+        service: 'Капітальний ремонт',
+        car: 'Passat 1.9 TDI',
+        quote: 'Мотор "стукає" & треба капіталка',
+      },
+    ],
+  },
   stages: [
     { stage: 'закриття угоди', count: 79 },
     { stage: 'допродаж', count: 9 },

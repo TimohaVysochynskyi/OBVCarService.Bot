@@ -11,6 +11,7 @@ import { managerCard } from '../../../src/features/reporting/html/manager.js';
 import { compareSection } from '../../../src/features/reporting/html/compare.js';
 import { declineSection } from '../../../src/features/reporting/html/declines.js';
 import { stagesSection } from '../../../src/features/reporting/html/stages.js';
+import { engineSection } from '../../../src/features/reporting/html/engine.js';
 import { methodSection } from '../../../src/features/reporting/html/method.js';
 import { esc } from '../../../src/features/reporting/html/format.js';
 
@@ -26,13 +27,14 @@ const SECTIONS = {
   'порівняння': () => compareSection(report),
   'відмови': () => declineSection(report.declines),
   'етапи': () => stagesSection(report.stages),
+  'двигуни': () => engineSection(report),
   'як це рахується': () => methodSection(report),
 };
 
 test('кожна секція — окремий модуль, і жоден не розрісся', () => {
   const files = fs.readdirSync(HTML_DIR).filter((f) => f.endsWith('.js')).sort();
-  assert.deepEqual(files, ['categories.js', 'compare.js', 'declines.js', 'format.js', 'intro.js',
-    'lines.js', 'manager.js', 'method.js', 'page.js', 'stages.js', 'tokens.js', 'widgets.js']);
+  assert.deepEqual(files, ['categories.js', 'compare.js', 'declines.js', 'engine.js', 'format.js',
+    'intro.js', 'lines.js', 'manager.js', 'method.js', 'page.js', 'stages.js', 'tokens.js', 'widgets.js']);
   for (const file of files) {
     const lines = fs.readFileSync(path.join(HTML_DIR, file), 'utf8').split('\n').length;
     assert.ok(lines < 200, `${file} розрісся до ${lines} рядків`);

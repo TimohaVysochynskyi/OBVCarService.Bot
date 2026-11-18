@@ -1,6 +1,7 @@
 import { categoryTable } from './categories.js';
 import { compareSection } from './compare.js';
 import { declineSection } from './declines.js';
+import { engineSection } from './engine.js';
 import { esc, formatDate, json, periodSpan, plural } from './format.js';
 import { introSection } from './intro.js';
 import { linesSection } from './lines.js';
@@ -73,6 +74,8 @@ function renderGlobalReport(report) {
   </section>
 
   ${introSection(report)}
+
+  ${engineSection(report)}
 
   <div class="mb-3 flex flex-wrap gap-2 no-print" role="tablist">${managerTabs}</div>
 

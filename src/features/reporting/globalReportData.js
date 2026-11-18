@@ -4,6 +4,10 @@ import {
   getAllBlockedCalls,
   getDeclineCoverage,
   getDeclineReasonCounts,
+  getEngineBreakdown,
+  getEngineCars,
+  getEngineExamples,
+  getEngineMonthlyTotals,
   getGlobalTotals,
   getIntroBreakdown,
   getLineBreakdown,
@@ -21,6 +25,7 @@ import { lineInfo, LINE_KINDS } from '../../domain/call/phoneLines.js';
 import { BLOCKER_LABELS, BLOCKER_COLUMNS, BLOCKER_TITLES, DEAL_BLOCKERS } from '../analysis/dealBlocker.js';
 import { reasonLabel, reasonSide } from '../../domain/decline/reasons.js';
 import { displayName, formatPhone } from '../operators/display.js';
+import { isRepairService, serviceLabel } from '../../domain/call/engine.js';
 import { collectRangeFindings } from './segments.js';
 import { mergeFindings } from './analyze.js';
 import { config } from '../../shared/config.js';
@@ -455,6 +460,48 @@ const REPORT_CONCURRENCY = config.report.concurrency;
 const REPORT_PAUSE_MS = config.report.pauseMs;
 const REPORT_BUDGET_MS = config.report.budgetMs;
 
+function buildEngine(monthlyRows, breakdownRows, carRows, examples, months) {
+  const byMonth = new Map(monthlyRows.map((r) => [r.month, r]));
+  const perMonth = months.map((m) => {
+    const row = byMonth.get(m) || {};
+    return {
+      key: m,
+      title: monthTitle(m),
+      count: row.engine || 0,
+      total: row.total || 0,
+      booked: row.engineBooked || 0,
+    };
+  });
+
+  const services = new Map();
+  for (const row of breakdownRows) {
+    services.set(row.service, (services.get(row.service) || 0) + row.count);
+  }
+
+  const total = perMonth.reduce((n, m) => n + m.count, 0);
+  const repairTotal = [...services.entries()]
+    .filter(([key]) => isRepairService(key))
+    .reduce((n, [, count]) => n + count, 0);
+
+  return {
+    total,
+    repairTotal,
+    months: perMonth,
+    services: [...services.entries()]
+      .map(([key, count]) => ({ key, label: serviceLabel(key) || key, count }))
+      .sort((a, b) => b.count - a.count),
+    cars: carRows.map((r) => ({ car: r.car, count: r.count })),
+    examples: examples.map((e) => ({
+      callId: e.generalCallId,
+      at: new Date(e.startTime).toISOString().slice(0, 10).split('-').reverse().slice(0, 2).join('.'),
+      manager: displayName(e.managerName) || e.managerName || '—',
+      service: serviceLabel(e.service) || e.service || '—',
+      car: e.car,
+      quote: e.quote,
+    })),
+  };
+}
+
 async function buildGlobalReport({
   analyze = true,
   concurrency = REPORT_CONCURRENCY,
@@ -462,7 +509,7 @@ async function buildGlobalReport({
   budgetMs = REPORT_BUDGET_MS,
 } = {}) {
   const deadline = budgetMs > 0 ? Date.now() + budgetMs : null;
-  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows, introRows, dailyRows] =
+  const [totals, purposeRows, salesRows, stageRows, blockedCalls, reasonRows, coverage, operators, lineRows, lineManagerRows, directionRows, introRows, dailyRows, engineMonthly, engineBreakdown, engineCars, engineExamples] =
     await Promise.all([
       getGlobalTotals(),
       getMonthlyPurposeBreakdown(),
@@ -477,6 +524,10 @@ async function buildGlobalReport({
       getPurposeDirectionSplit(),
       getIntroBreakdown(),
       getManagerDailyTrend(),
+      getEngineMonthlyTotals(),
+      getEngineBreakdown(),
+      getEngineCars(),
+      getEngineExamples(),
     ]);
 
   const months = [...new Set(purposeRows.map((r) => r.month))].sort();
@@ -529,6 +580,7 @@ async function buildGlobalReport({
     lines: buildLines(lineRows, lineManagerRows, months),
     directions: buildDirections(directionRows),
     intro: buildIntro(introRows, months),
+    engine: buildEngine(engineMonthly, engineBreakdown, engineCars, engineExamples, months),
     series: buildSeries(dailyRows, months),
     managers,
     stages: [...stages.entries()].map(([stage, count]) => ({ stage, count })).sort((a, b) => b.count - a.count),
@@ -536,4 +588,4 @@ async function buildGlobalReport({
   };
 }
 
-export { buildGlobalReport, buildLines, buildIntro, monthTitle, ALL };
+export { buildGlobalReport, buildLines, buildIntro, buildEngine, monthTitle, ALL };

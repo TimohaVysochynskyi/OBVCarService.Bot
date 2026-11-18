@@ -47,7 +47,7 @@ function quoteIsReal(transcript, evidence) {
 function cleanCar(car) {
   const text = String(car || '').replace(/\s+/g, ' ').trim();
   if (!text || text.length > MAX_CAR_CHARS) return null;
-  if (/^(не|немає|невідом|unknown|null|—|-)$/i.test(text)) return null;
+  if (/^(не\s|немає|невідом|неизвест|не вказ|не назв|unknown|null|n\/a|[—-]$)/i.test(text)) return null;
   return text;
 }
 

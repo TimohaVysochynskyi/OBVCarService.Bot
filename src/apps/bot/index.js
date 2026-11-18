@@ -13,6 +13,7 @@ import { registerRoles, openRolesMenu, addByPhoneText } from '../../features/acc
 import { registerSettings, openSettings, addRecipientByIdText } from '../../features/ops/settings.js';
 import { registerIncidents, openIncidents } from '../../features/ops/incidents.js';
 import { registerHealth, openHealth } from '../../features/ops/health.js';
+import { openEngineStats } from '../../features/reporting/engineScreen.js';
 import { registerGlobalReport } from '../../features/reporting/globalReport.js';
 import { formatPhone } from '../../features/operators/display.js';
 import {
@@ -120,11 +121,12 @@ const CMD = {
   log: { command: 'log', description: '🩺 Журнал інцидентів' },
   health: { command: 'health', description: '🩺 Перевірка стану' },
   globalReport: { command: 'globalreport', description: '📊 Звіт за весь період' },
+  engines: { command: 'engines', description: '🔧 Звернення по двигуну' },
 };
 
 function commandsForRole(role) {
   if (isAdmin(role))
-    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health, CMD.globalReport];
+    return [CMD.menu, CMD.stats, CMD.archive, CMD.ask, CMD.files, CMD.report, CMD.prompt, CMD.roles, CMD.settings, CMD.log, CMD.health, CMD.globalReport, CMD.engines];
   if (role === ROLES.MANAGER) return [CMD.menu, CMD.myreport, CMD.ask];
   return [CMD.menu, CMD.ask];
 }
@@ -191,6 +193,7 @@ bot.command('settings', openSettings);
 bot.command('log', openIncidents);
 bot.command('health', (ctx) => openHealth(ctx, kbState));
 bot.command('myreport', openMyReport);
+bot.command('engines', openEngineStats);
 
 bot.callbackQuery('menu', async (ctx) => {
   ctx.session.awaiting = null;
